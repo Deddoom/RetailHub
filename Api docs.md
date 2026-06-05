@@ -1,89 +1,114 @@
-📖 مستندات فنی API سامانه RetailHub
+# 📖 مستندات فنی API سامانه RetailHub
 
 این سند برای راهنمایی برنامه‌نویسان فرانت‌اند (React, Vue, Flutter, iOS, Android) جهت اتصال به APIهای سامانه RetailHub تهیه شده است.
 
-🔑 مکانیزم احراز هویت (Authentication Flow)
+---
 
-احراز هویت در این سیستم به صورت بدون وضعیت (Stateless) و از طریق توکن‌های رمزنگاری شده دوگانه انجام می‌شود:
+# 🌐 Base URL
 
-Access Token (طول عمر: ۱۵ دقیقه): برای هر درخواست به عنوان هدر احراز هویت ارسال می‌شود.
+تمام درخواست‌ها باید با آدرس پایه زیر ارسال شوند:
 
-Refresh Token (طول عمر: ۷ روز): برای دریافت توکن اکسس جدید بدون نیاز به ورود مجدد کاربر استفاده می‌شود. این توکن هم در HTTPOnly Cookie و هم در پاسخ وب‌سرویس ارسال می‌شود.
+```text
+http://185.213.164.106:8000/api/
+```
 
-ارسال توکن در درخواست‌ها (هدر وب):
+---
 
-برای تمام درخواست‌ها به جز لاگین و رفرش توکن، باید هدر زیر ارسال گردد:
+# 🔑 مکانیزم احراز هویت (Authentication Flow)
 
+احراز هویت در این سیستم به صورت Stateless و مبتنی بر JWT انجام می‌شود.
+
+* Access Token (مدت اعتبار: 15 دقیقه)
+* Refresh Token (مدت اعتبار: 7 روز)
+
+برای تمامی درخواست‌ها به جز Login و Refresh Token باید هدر زیر ارسال شود:
+
+```http
 Authorization: Bearer <Your_Access_Token>
+```
 
+---
 
-🛣️ مسیرهای احراز هویت (Auth Endpoints)
+# 🛣️ مسیرهای احراز هویت (Auth Endpoints)
 
-۱. ورود به سیستم (Login)
+## 1. ورود به سیستم (Login)
 
-آدرس: /api/auth/token/
+**URL**
 
-متد: POST
+```http
+POST http://185.213.164.106:8000/api/auth/token/
+```
 
-دسترسی: عمومی (AllowAny)
+**دسترسی:** عمومی (AllowAny)
 
-درخواست (Body JSON):
+### Request
 
+```json
 {
   "username": "admin",
   "password": "admin1234"
 }
+```
 
+### Response
 
-پاسخ موفق (Status 200 OK):
-
+```json
 {
   "access_token": "ey...[Base64_Encoded_Sign]",
   "role": "ADMIN",
   "branch": "دفتر مرکزی"
 }
+```
 
+> یک کوکی HttpOnly به نام refresh_token نیز روی مرورگر ذخیره می‌شود.
 
-(یک کوکی امن به نام refresh_token نیز به صورت HttpOnly روی مرورگر ست می‌شود)
+---
 
-۲. تمدید توکن منقضی شده (Refresh Token)
+## 2. تمدید توکن (Refresh Token)
 
-آدرس: /api/auth/token/refresh/
+**URL**
 
-متد: POST
+```http
+POST http://185.213.164.106:8000/api/auth/token/refresh/
+```
 
-دسترسی: عمومی (AllowAny)
+**دسترسی:** عمومی (AllowAny)
 
-توضیح: اگر کوکی HttpOnly ارسال نشود، می‌توانید رفرش توکن را به صورت مستقیم در بدنه بفرستید.
+### Request
 
-درخواست (Body JSON - اختیاری در صورت نبود کوکی):
-
+```json
 {
   "refresh_token": "ey...[Base64_Encoded_Sign]"
 }
+```
 
+### Response
 
-پاسخ موفق (Status 200 OK):
-
+```json
 {
   "access_token": "ey...[New_Access_Token]"
 }
+```
 
+---
 
-💼 فاکتورهای فروش و پرداخت‌ها (Sales & Payments)
+# 💼 فاکتورهای فروش و پرداخت‌ها (Sales)
 
-ثبت فاکتور فروش در این سیستم کاملاً اتمیک است؛ یعنی کالاها، پرداخت‌ها، اقلام بیعانه و چک‌ها همگی باید در بدنه یک درخواست واحد فرستاده شوند.
+## لیست فاکتورها
 
-ثبت فاکتور جدید (ثبت فاکتور با چک و اقلام بیعانه)
+```http
+GET http://185.213.164.106:8000/api/sales/
+```
 
-آدرس: /api/sales/
+## ثبت فاکتور جدید
 
-متد: POST
+```http
+POST http://185.213.164.106:8000/api/sales/
+```
 
-دسترسی: ADMIN یا CASHIER
+### نمونه درخواست
 
-درخواست (Body JSON):
-
+```json
 {
   "total_amount": "5500000.00",
   "branch": "شعبه پاسداران",
@@ -120,32 +145,93 @@ Authorization: Bearer <Your_Access_Token>
     }
   ]
 }
+```
 
+### مدیریت یک فاکتور خاص
 
-پاسخ موفق (Status 210 Created):
-بک‌اند به صورت خودکار مانده فاکتور (remaining_balance) را محاسبه می‌کند، فاکتور و زیرمجموعه‌ها را با یک تراکنش ذخیره کرده و مبالغ خرید مشتری را به‌روزرسانی می‌کند.
+```http
+GET    http://185.213.164.106:8000/api/sales/<sale_uuid_id>/
+PUT    http://185.213.164.106:8000/api/sales/<sale_uuid_id>/
+PATCH  http://185.213.164.106:8000/api/sales/<sale_uuid_id>/
+DELETE http://185.213.164.106:8000/api/sales/<sale_uuid_id>/
+```
 
-🧾 ثبت هزینه‌ها و خرج کردن چک (Expenses & Cheques)
+---
 
-صندوق‌دار یا ادمین می‌توانند هزینه‌های روزانه را ثبت کنند. اگر بابت هزینه، چکی به تامین‌کننده تحویل داده شود که متعلق به خود مشتریان قبلی بوده (خرج کردن چک)، سیستم آن را پشتیبانی می‌کند.
+# 👥 مشتریان (Customers)
 
-ثبت هزینه جدید (با خرج کردن چک موجود)
+## لیست مشتریان
 
-آدرس: /api/expenses/
+```http
+GET http://185.213.164.106:8000/api/customers/
+```
 
-متد: POST
+## ثبت مشتری
 
-دسترسی: ADMIN یا CASHIER
+```http
+POST http://185.213.164.106:8000/api/customers/
+```
 
-درخواست (Body JSON):
+## مدیریت مشتری
 
+```http
+GET    http://185.213.164.106:8000/api/customers/<customer_uuid_id>/
+PUT    http://185.213.164.106:8000/api/customers/<customer_uuid_id>/
+PATCH  http://185.213.164.106:8000/api/customers/<customer_uuid_id>/
+DELETE http://185.213.164.106:8000/api/customers/<customer_uuid_id>/
+```
+
+---
+
+# 👨‍💼 فروشندگان (Sellers)
+
+## لیست فروشندگان
+
+```http
+GET http://185.213.164.106:8000/api/sellers/
+```
+
+## ثبت فروشنده
+
+```http
+POST http://185.213.164.106:8000/api/sellers/
+```
+
+## مدیریت فروشنده
+
+```http
+GET    http://185.213.164.106:8000/api/sellers/<seller_uuid_id>/
+PUT    http://185.213.164.106:8000/api/sellers/<seller_uuid_id>/
+PATCH  http://185.213.164.106:8000/api/sellers/<seller_uuid_id>/
+DELETE http://185.213.164.106:8000/api/sellers/<seller_uuid_id>/
+```
+
+---
+
+# 🧾 هزینه‌ها (Expenses)
+
+## لیست هزینه‌ها
+
+```http
+GET http://185.213.164.106:8000/api/expenses/
+```
+
+## ثبت هزینه
+
+```http
+POST http://185.213.164.106:8000/api/expenses/
+```
+
+### نمونه درخواست
+
+```json
 {
   "amount": "1500000.00",
   "payment_method": "CHEQUE",
   "date": "2026-06-05",
   "category": "خرید سموم کشاورزی",
   "branch": "شعبه پاسداران",
-  "invoice_image_url": "[https://storage.retailhub.com/invoices/inv-908.png](https://storage.retailhub.com/invoices/inv-908.png)",
+  "invoice_image_url": "https://storage.retailhub.com/invoices/inv-908.png",
   "description": "خرید کود مایع و سم قارچ‌کش",
   "cheques": [
     {
@@ -156,102 +242,121 @@ Authorization: Bearer <Your_Access_Token>
     }
   ]
 }
+```
 
+## مدیریت هزینه
 
-توضیح: در صورتی که is_endorsed برابر true فرستاده شود، چک با شماره داده شده در دیتابیس جستجو شده و وضعیت آن به "خرج شده بابت فاکتور هزینه" تغییر می‌کند تا تاریخچه زنجیره چک قطع نشود.
+```http
+GET    http://185.213.164.106:8000/api/expenses/<expense_uuid_id>/
+PUT    http://185.213.164.106:8000/api/expenses/<expense_uuid_id>/
+PATCH  http://185.213.164.106:8000/api/expenses/<expense_uuid_id>/
+DELETE http://185.213.164.106:8000/api/expenses/<expense_uuid_id>/
+```
 
-✅ چک‌لیست‌ها و کارهای روزانه (Checklists & Tasks)
+---
 
-پرسنل عادی فروشگاه فقط می‌توانند تسک‌های محول شده در چک‌لیست را تیک بزنند یا توضیحات بنویسند.
+# 📉 گزارش خرابی (Damage Reports)
 
-بروزرسانی وضعیت تسک (مخصوص پرسنل عادی و مدیران)
+```http
+GET  http://185.213.164.106:8000/api/damage-reports/
+POST http://185.213.164.106:8000/api/damage-reports/
+```
 
-آدرس: /api/tasks/<task_uuid_id>/
+```http
+GET    http://185.213.164.106:8000/api/damage-reports/<report_uuid_id>/
+PUT    http://185.213.164.106:8000/api/damage-reports/<report_uuid_id>/
+PATCH  http://185.213.164.106:8000/api/damage-reports/<report_uuid_id>/
+DELETE http://185.213.164.106:8000/api/damage-reports/<report_uuid_id>/
+```
 
-متد: PATCH / PUT
+---
 
-دسترسی: تمام کاربران احراز هویت شده
+# 📦 خروج کالا (Item Exits)
 
-درخواست (Body JSON):
+```http
+GET  http://185.213.164.106:8000/api/item-exits/
+POST http://185.213.164.106:8000/api/item-exits/
+```
 
+```http
+GET    http://185.213.164.106:8000/api/item-exits/<exit_uuid_id>/
+PUT    http://185.213.164.106:8000/api/item-exits/<exit_uuid_id>/
+PATCH  http://185.213.164.106:8000/api/item-exits/<exit_uuid_id>/
+DELETE http://185.213.164.106:8000/api/item-exits/<exit_uuid_id>/
+```
+
+---
+
+# ✅ چک‌لیست‌ها (Checklists)
+
+```http
+GET  http://185.213.164.106:8000/api/checklists/
+POST http://185.213.164.106:8000/api/checklists/
+```
+
+```http
+GET    http://185.213.164.106:8000/api/checklists/<checklist_uuid_id>/
+PUT    http://185.213.164.106:8000/api/checklists/<checklist_uuid_id>/
+PATCH  http://185.213.164.106:8000/api/checklists/<checklist_uuid_id>/
+DELETE http://185.213.164.106:8000/api/checklists/<checklist_uuid_id>/
+```
+
+---
+
+# 📋 کارهای روزانه (Tasks)
+
+```http
+PUT   http://185.213.164.106:8000/api/tasks/<task_uuid_id>/
+PATCH http://185.213.164.106:8000/api/tasks/<task_uuid_id>/
+```
+
+### نمونه درخواست
+
+```json
 {
   "is_completed": true,
   "description": "آبیاری نهال‌های گلخانه شماره ۲ به طور کامل انجام شد."
 }
+```
 
+---
 
-توضیح: سیستم به صورت خودکار شناسه کاربر تیک‌زننده (completed_by) و زمان دقیق اتمام کار (completed_at) را با زمان سرور ثبت می‌کند و کاربر عادی نمی‌تواند این داده‌های سیستمی را دستکاری کند.
+# 👤 کاربران سیستم (Users)
 
-📋 جدول خلاصه سایر مسیرهای API (REST Router)
+> فقط ADMIN
 
-تمامی این مسیرها از متدهای استاندارد GET (لیست و تکی)، POST (ایجاد)، PUT/PATCH (ویرایش) و DELETE (حذف) پشتیبانی می‌کنند:
+```http
+GET  http://185.213.164.106:8000/api/users/
+POST http://185.213.164.106:8000/api/users/
+```
 
-عنوان ماژول
+```http
+GET    http://185.213.164.106:8000/api/users/<user_uuid_id>/
+PUT    http://185.213.164.106:8000/api/users/<user_uuid_id>/
+PATCH  http://185.213.164.106:8000/api/users/<user_uuid_id>/
+DELETE http://185.213.164.106:8000/api/users/<user_uuid_id>/
+```
 
-آدرس پایه API
+---
 
-دسترسی‌ها (Permissions)
+# ⚠️ کدهای وضعیت متداول
 
-توضیحات فنی
+| Status Code               | Description                      |
+| ------------------------- | -------------------------------- |
+| 200 OK                    | درخواست با موفقیت انجام شد       |
+| 201 Created               | رکورد جدید ایجاد شد              |
+| 400 Bad Request           | داده‌های ارسالی نامعتبر هستند    |
+| 401 Unauthorized          | توکن ارسال نشده یا منقضی شده است |
+| 403 Forbidden             | دسترسی کافی وجود ندارد           |
+| 500 Internal Server Error | خطای داخلی سرور                  |
 
-کاربران سیستم
+---
 
-/api/users/
+# 💡 نکات مهم برای فرانت‌اند
 
-فقط ADMIN
-
-مدیریت، ویرایش و تعریف نقش کاربران
-
-فروشندگان
-
-/api/sellers/
-
-خواندن: همه | نوشتن: ADMIN
-
-تعریف پرسنل فروش جهت محاسبه پورسانت
-
-مشتریان
-
-/api/customers/
-
-همه نقش‌های فعال
-
-لیست مشتریان، مبالغ خرید و آدرس‌ها
-
-گزارش خرابی
-
-/api/damage-reports/
-
-ثبت‌کننده یا ادمین
-
-ثبت ضایعات و گل‌های آسیب‌دیده با تخمین ضرر
-
-خروج کالا
-
-/api/item-exits/
-
-ثبت‌کننده یا ادمین
-
-مرجوعی به تامین‌کننده یا خروج مصرف داخلی
-
-چک‌لیست‌ها
-
-/api/checklists/
-
-خواندن: همه | نوشتن: ADMIN
-
-تعریف چک‌لیست‌های دوره‌ای یا روزانه
-
-⚠️ کدهای وضعیت متداول (Error & Status Codes)
-
-200 OK: درخواست با موفقیت انجام شد.
-
-201 Created: رکورد جدید با موفقیت ایجاد شد.
-
-400 Bad Request: داده‌های ارسالی ناقص یا دارای تداخل منطقی هستند (مثال: مبلغ کل پرداخت‌ها بیشتر از فاکتور باشد یا شماره چک تکراری باشد).
-
-401 Unauthorized: توکن منقضی شده است یا در هدر ارسال نشده است.
-
-403 Forbidden: نقش کاربر شما دسترسی به انجام این عملیات را ندارد.
-
-500 Internal Server Error: خطای سرور؛ در صورت بروز، به تیم بک‌اند اطلاع دهید.
+* قبل از ثبت فاکتور فروش، شناسه مشتری (Customer UUID) را از API مشتریان دریافت کنید.
+* قبل از ثبت فاکتور فروش، شناسه فروشنده (Seller UUID) را از API فروشندگان دریافت کنید.
+* تمامی شناسه‌ها از نوع UUID هستند.
+* Access Token را در هدر Authorization ارسال کنید.
+* Refresh Token برای تمدید نشست کاربر استفاده می‌شود.
+* تمام Endpointهای فوق نیازمند احراز هویت هستند، به جز Login و Refresh Token.
