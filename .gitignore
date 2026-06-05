@@ -1,0 +1,15 @@
+# Django Cache & Compiled Files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environments & Database
+.env
+db.sqlite3
+*.log
+
+# IDEs & System Files
+.vscode/
+.idea/
+.DS_Store

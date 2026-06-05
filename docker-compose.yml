@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  # سرویس دیتابیس پروژه‌
+  db:
+    image: postgres:15-alpine
+    container_name: retail_postgres_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_DB=${DB_NAME}
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+    ports:
+      - "5432:5432"
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # سرویس بک‌اند جنگو (Gunicorn)
+  web:
+    build: .
+    container_name: retail_django_web
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=False
+      - SECRET_KEY=${SECRET_KEY}
+      - DATABASE_URL=postgres://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
+    # صبر می‌کند تا دیتابیس کاملاً آماده سرویس‌دهی شود، سپس برنامه را بالا می‌آورد
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
