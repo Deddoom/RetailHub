@@ -11,18 +11,21 @@ DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 ALLOWED_HOSTS = ['*']
 
 INSTALLED_APPS = [
+    'django.contrib.admin', # اضافه شدن ادمین پیش‌فرض جنگو در صورت نیاز به مدیریت دستی
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
+    'corsheaders', # اضافه شدن پشتیبانی از CORS جهت دسترسی فرانت‌اند
     'core',
 ]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
+    'corsheaders.middleware.CorsMiddleware', # باید بالای CommonMiddleware قرار بگیرد
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -50,8 +53,14 @@ REST_FRAMEWORK = {
     ],
 }
 
+# تنظیمات CORS برای دسترسی امن فرانت‌اند در زمان توسعه و پروداکشن
+CORS_ALLOW_ALL_ORIGINS = True # در پروداکشن واقعی باید به دامنه‌های مشخص محدود شود
+CORS_ALLOW_CREDENTIALS = True
+
 TIME_ZONE = 'Asia/Tehran'
 USE_TZ = True
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
