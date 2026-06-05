@@ -91,7 +91,8 @@ class Expense(models.Model):
     date = models.DateField()
     category = models.CharField(max_length=100)
     branch = models.CharField(max_length=100)
-    invoice_image_url = models.URLField(max_digits=500, blank=True, null=True)
+    # اصلاح باگ فنی: استفاده از max_length به جای max_digits برای URLField
+    invoice_image_url = models.URLField(max_length=500, blank=True, null=True)
     created_by = models.ForeignKey(CustomUser, on_delete=models.PROTECT, related_name='expenses_created')
     description = models.TextField(blank=True, null=True)
 
