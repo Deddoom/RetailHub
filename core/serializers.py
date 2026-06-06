@@ -98,12 +98,17 @@ class SaleSerializer(serializers.ModelSerializer):
 
             if payment_item.get('payment_method') in ['CHEQUE', 'COMBINED']:
                 for cheque_item in cheques_for_this_payment:
+                    # رفع باگ بحرانی: استخراج customer_phone و customer_name قبل از **cheque_item
+                    # تا از TypeError: duplicate keyword argument جلوگیری شود
+                    customer_phone = cheque_item.pop('customer_phone', sale.customer.phone)
+                    customer_name = cheque_item.pop('customer_name', sale.customer.name)
+
                     if Cheque.objects.filter(cheque_number=cheque_item.get('cheque_number')).exists():
                         raise serializers.ValidationError("شماره چک قبلاً در سیستم ثبت شده است.")
                     Cheque.objects.create(
                         payment=payment_obj,
-                        customer_phone=cheque_item.get('customer_phone', sale.customer.phone),
-                        customer_name=cheque_item.get('customer_name', sale.customer.name),
+                        customer_phone=customer_phone,
+                        customer_name=customer_name,
                         **cheque_item
                     )
 
@@ -138,7 +143,9 @@ class ExpenseSerializer(serializers.ModelSerializer):
 
         for ch_data in cheques_data:
             cheque_number = ch_data.get('cheque_number')
-            is_endorsed = ch_data.get('is_endorsed', False)
+            # رفع باگ بحرانی: استخراج is_endorsed از ch_data قبل از **ch_data
+            # تا از TypeError: duplicate keyword argument جلوگیری شود
+            is_endorsed = ch_data.pop('is_endorsed', False)
 
             if is_endorsed:
                 # رفع باگ ۳ منطق انتقال دیتابیس: آپدیت و حفظ تاریخچه چک بجای نادیده گرفتن فیلد درآمدی قبلی

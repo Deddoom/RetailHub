@@ -35,6 +35,23 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = 'project.urls'
 
+# رفع باگ: اضافه کردن TEMPLATES که برای django.contrib.admin و MessageMiddleware الزامی است
+TEMPLATES = [
+    {
+        'BACKEND': 'django.template.backends.django.DjangoTemplates',
+        'DIRS': [],
+        'APP_DIRS': True,
+        'OPTIONS': {
+            'context_processors': [
+                'django.template.context_processors.debug',
+                'django.template.context_processors.request',
+                'django.contrib.auth.context_processors.auth',
+                'django.contrib.messages.context_processors.messages',
+            ],
+        },
+    },
+]
+
 DATABASES = {
     'default': dj_database_url.config(
         default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}",
@@ -57,7 +74,9 @@ REST_FRAMEWORK = {
 CORS_ALLOW_ALL_ORIGINS = True # در پروداکشن واقعی باید به دامنه‌های مشخص محدود شود
 CORS_ALLOW_CREDENTIALS = True
 
+LANGUAGE_CODE = 'fa-ir'
 TIME_ZONE = 'Asia/Tehran'
+USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = 'static/'

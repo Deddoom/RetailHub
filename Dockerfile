@@ -27,5 +27,5 @@ COPY . /app/
 # پورت پیش‌فرض برای وب‌سرور Gunicorn
 EXPOSE 8000
 
-# دستور نهایی برای بالا آمدن کانتینر (اجرای خودکار مایگریشن‌ها و روشن شدن Gunicorn)
-CMD ["sh", "-c", "python manage.py migrate --run-syncdb --interactive && gunicorn project.wsgi:application --bind 0.0.0.0:8000 --workers 3"]
+# رفع باگ: جایگزینی --interactive با --noinput تا در محیط Docker بدون input کاربر اجرا شود
+CMD ["sh", "-c", "python manage.py migrate --run-syncdb --noinput && gunicorn project.wsgi:application --bind 0.0.0.0:8000 --workers 3"]
