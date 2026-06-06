@@ -17,15 +17,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # کپی کردن فایل نیازمندی‌ها و نصب آن‌ها
+# استفاده از میرور آروان برای دسترسی بدون محدودیت به PyPI
 COPY requirements.txt /app/
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip \
+        --index-url https://mirror.arvancloud.ir/pypi/simple/ \
+        --trusted-host mirror.arvancloud.ir && \
+    pip install --no-cache-dir -r requirements.txt \
+        --index-url https://mirror.arvancloud.ir/pypi/simple/ \
+        --trusted-host mirror.arvancloud.ir
 
 # کپی کردن کل کدهای پروژه به درون کانتینر
 COPY . /app/
 
+# جمع‌آوری فایل‌های استاتیک برای سرویس‌دهی توسط Nginx
+RUN python manage.py collectstatic --noinput
+
 # پورت پیش‌فرض برای وب‌سرور Gunicorn
 EXPOSE 8000
 
-# رفع باگ: جایگزینی --interactive با --noinput تا در محیط Docker بدون input کاربر اجرا شود
+# اجرای migration و سپس راه‌اندازی Gunicorn
 CMD ["sh", "-c", "python manage.py migrate --run-syncdb --noinput && gunicorn project.wsgi:application --bind 0.0.0.0:8000 --workers 3"]
