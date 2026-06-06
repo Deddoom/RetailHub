@@ -5,6 +5,7 @@ RetailHub/
 ├── .env                <-- جدید
 ├── manage.py
 ├── requirements.txt
+├── nginx.conf
 │
 ├── project/             <-- پوشه تنظیمات اصلی ساختار جنگو
 │   ├── __init__.py
