@@ -1,6 +1,6 @@
 # 📖 مستندات کامل API — RetailHub
 > ویژه برنامه‌نویسان فرانت‌اند (React / Vue / Flutter / iOS / Android)
-> مجموع Endpointها: **56 endpoint**
+> مجموع Endpointها: **54 endpoint**
 
 ---
 
@@ -16,14 +16,15 @@ http://185.213.164.106/api/
 
 ### مکانیزم کلی
 
-سیستم از **Stateless Token** مبتنی بر امضای دیجیتال استفاده می‌کند (نه JWT استاندارد):
+سیستم از **Stateless Token** مبتنی بر امضای دیجیتال استفاده می‌کند:
 
 | توکن | مدت اعتبار | محل ذخیره |
 |---|---|---|
-| Access Token | ۱۵ دقیقه | حافظه جاوااسکریپت (نه localStorage) |
-| Refresh Token | ۷ روز | کوکی HttpOnly (خودکار توسط مرورگر مدیریت می‌شود) |
+| Access Token | ۵ سال | `localStorage` یا حافظه جاوااسکریپت |
 
-### هدر الزامی برای تمام درخواست‌ها (به جز Login و Refresh)
+> چون توکن long-lived است، دیگه نیازی به refresh flow نیست. کاربر تا وقتی حسابش فعال باشه، لاگین می‌مونه.
+
+### هدر الزامی برای تمام درخواست‌ها (به جز Login)
 
 ```
 Authorization: Bearer <access_token>
@@ -93,11 +94,9 @@ POST /api/auth/token/
 
 | فیلد | توضیح |
 |---|---|
-| `access_token` | توکن دسترسی — در هدر Authorization استفاده کنید |
+| `access_token` | توکن دسترسی ۵ ساله — در هدر Authorization استفاده کنید |
 | `role` | نقش کاربر: `ADMIN` / `CASHIER` / `USER` |
 | `branch` | شعبه کاربر — برای نمایش در UI |
-
-> یک کوکی **HttpOnly** با نام `refresh_token` نیز خودکار روی مرورگر ست می‌شود.
 
 ### Response — خطاها
 
@@ -119,97 +118,40 @@ const login = async (username, password) => {
   const res = await fetch('http://185.213.164.106/api/auth/token/', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    credentials: 'include', // الزامی برای دریافت کوکی refresh_token
     body: JSON.stringify({ username, password })
   });
   const data = await res.json();
-  // access_token را در حافظه نگه دارید (نه localStorage)
-  // refresh_token به صورت خودکار در کوکی ذخیره می‌شود
+  // توکن رو ذخیره کن — چون ۵ ساله است، کاربر دیگه logout نمی‌شه
+  localStorage.setItem('access_token', data.access_token);
+  localStorage.setItem('role', data.role);
+  localStorage.setItem('branch', data.branch);
   return data; // { access_token, role, branch }
 };
-```
 
----
-
-## 1.2 تمدید توکن — Refresh Token
-
-```
-POST /api/auth/token/refresh/
-```
-
-**دسترسی:** 🔓 عمومی
-
-### روش اول — از کوکی (پیشنهادی)
-
-وقتی `credentials: 'include'` باشد، مرورگر کوکی `refresh_token` را خودکار ارسال می‌کند.
-
-```json
-{}
-```
-
-### روش دوم — از Body
-
-```json
-{
-  "refresh_token": "eyJ...[Base64_Encoded_Signed_Token]"
-}
-```
-
-### Response — 200 OK
-
-```json
-{
-  "access_token": "eyJ...[New_Access_Token]"
-}
-```
-
-> کوکی refresh_token نیز با مقدار جدید به‌روز می‌شود.
-
-### Response — خطاها
-
-```json
-// 400 — توکن ارسال نشده
-{ "error": "توکن یافت نشد." }
-
-// 401 — توکن نامعتبر یا منقضی
-{ "error": "توکن نامعتبر است." }
-```
-
-### نمونه کد — مدیریت خودکار تمدید توکن
-
-```javascript
-let accessToken = null;
-
+// استفاده در درخواست‌های بعدی — بدون نیاز به هیچ refresh logic
 const apiCall = async (url, options = {}) => {
+  const token = localStorage.getItem('access_token');
   const res = await fetch(url, {
     ...options,
-    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${accessToken}`,
+      'Authorization': `Bearer ${token}`,
       ...options.headers
     }
   });
-
-  if (res.status === 401) {
-    // توکن منقضی شده — تمدید کن
-    const refreshRes = await fetch('http://185.213.164.106/api/auth/token/refresh/', {
-      method: 'POST',
-      credentials: 'include'
-    });
-    if (!refreshRes.ok) {
-      // Refresh token هم منقضی شده — باید دوباره لاگین کند
-      window.location.href = '/login';
-      return;
-    }
-    const { access_token } = await refreshRes.json();
-    accessToken = access_token;
-    // درخواست اصلی را تکرار کن
-    return apiCall(url, options);
-  }
   return res.json();
 };
+
+// logout — فقط کافیه توکن رو پاک کنی
+const logout = () => {
+  localStorage.removeItem('access_token');
+  localStorage.removeItem('role');
+  localStorage.removeItem('branch');
+  window.location.href = '/login';
+};
 ```
+
+> **نکته:** دیگه نیازی به interceptor، refresh loop یا مدیریت کوکی نیست.
 
 ---
 
@@ -317,6 +259,8 @@ PATCH /api/users/{user_uuid}/
 }
 ```
 
+> ⚠️ چون توکن long-lived است، **تنها راه قطع دسترسی یک کاربر، غیرفعال کردن حساب او از طریق همین endpoint است.** سیستم در هر درخواست وضعیت `is_active` را مستقیماً از دیتابیس چک می‌کند، بنابراین توکن قدیمی کاربر دیگر کار نخواهد کرد.
+
 ---
 
 ## 2.6 حذف کاربر
@@ -397,7 +341,7 @@ GET /api/sellers/{seller_uuid}/
 ## 3.4 ویرایش فروشنده
 
 ```
-PUT  /api/sellers/{seller_uuid}/
+PUT   /api/sellers/{seller_uuid}/
 PATCH /api/sellers/{seller_uuid}/
 ```
 
@@ -544,11 +488,11 @@ GET /api/sales/
     "date_time": "2026-06-07T10:30:00+03:30",
     "branch": "شعبه پاسداران",
     "seller": { "id": "uuid", "name": "امیر قاسمی", "phone": "...", "branch": "..." },
-    "customer": { "id": "uuid", "name": "علیرضا فتاحی", ... },
+    "customer": { "id": "uuid", "name": "علیرضا فتاحی", "phone": "..." },
     "created_by": "admin (مدیر سیستم)",
     "description": "فروش نهال",
-    "payments": [ ... ],
-    "deposit_items": [ ... ]
+    "payments": [ "..." ],
+    "deposit_items": [ "..." ]
   }
 ]
 ```
@@ -665,7 +609,7 @@ POST /api/sales/
 | `item_name` | string | ✴️ | نام کالا |
 | `quantity` | integer | ✴️ | تعداد |
 | `unit_price` | decimal | ✴️ | قیمت واحد |
-| `total_price` | decimal | ⚙️ | خودکار = quantity × unit_price |
+| `total_price` | decimal | ⚙️ | خودکار = quantity x unit_price |
 
 ### قوانین اعتبارسنجی فاکتور
 
@@ -736,7 +680,7 @@ GET /api/expenses/
     "invoice_image_url": "https://storage.example.com/inv.png",
     "created_by": "cashier (صندوق‌دار)",
     "description": "خرید کود مایع",
-    "cheques": [ ... ]
+    "cheques": [ "..." ]
   }
 ]
 ```
@@ -806,7 +750,7 @@ POST /api/expenses/
 }
 ```
 
-> وقتی `is_endorsed: true` باشد، سیستم چک را در بانک اطلاعاتی پیدا کرده و وضعیتش را به "خرج‌شده" تغییر می‌دهد. اگر چک وجود نداشت، رکورد جدید می‌سازد.
+> وقتی `is_endorsed: true` باشد، سیستم چک را در دیتابیس پیدا کرده و وضعیتش را به «خرج‌شده» تغییر می‌دهد. اگر چک وجود نداشت، رکورد جدید می‌سازد.
 
 ### فیلدهای Expense
 
@@ -1248,20 +1192,23 @@ DELETE /api/tasks/{task_uuid}/
 
 # 💡 نکات مهم فرانت‌اند
 
+**مدیریت توکن ساده شد:**
+توکن ۵ ساله است — دیگه نیازی به interceptor، refresh loop یا مدیریت کوکی نیست. بعد از Login توکن رو در `localStorage` ذخیره کنید و در هر درخواست در هدر بفرستید.
+
 **جریان صحیح ثبت فاکتور فروش:**
 ابتدا از `/api/customers/` مشتری را پیدا یا بسازید — سپس از `/api/sellers/` فروشنده را بگیرید — بعد فاکتور را با UUID هر دو ثبت کنید.
 
-**مدیریت توکن:**
-`access_token` را در متغیر JavaScript نگه دارید (نه `localStorage`) چون توکن دارای امضا است و فقط ۱۵ دقیقه معتبر است. از interceptor برای تمدید خودکار استفاده کنید.
+**تنها راه logout:**
+توکن رو از `localStorage` پاک کنید. هیچ endpoint ای برای logout لازم نیست.
+
+**تنها راه قطع دسترسی کاربر:**
+از `PATCH /api/users/{uuid}/` با `{"is_active": false}` حساب را غیرفعال کنید. سیستم در هر درخواست `is_active` را مستقیماً از دیتابیس چک می‌کند — توکن قدیمی کاربر دیگر کار نخواهد کرد.
 
 **همه IDها UUID هستند:**
 تمام `id`ها از نوع `UUID v4` (string) هستند.
 
 **فیلدهای ⚙️ خودکار:**
 هرگز `created_by`، `date_time`، `remaining_balance`، `total_price`، `completed_by`، `completed_at` را در Request ارسال نکنید — سرور آن‌ها را خودش محاسبه می‌کند.
-
-**credentials در fetch:**
-برای کار کردن صحیح کوکی `refresh_token`، همیشه `credentials: 'include'` را در تمام درخواست‌ها بگذارید.
 
 **شماره چک یکتا:**
 `cheque_number` در کل سیستم (هم فاکتور فروش، هم هزینه) یکتا است. تکرار آن `400 Bad Request` می‌دهد، مگر برای چک ظهرنویسی‌شده (`is_endorsed: true`).
