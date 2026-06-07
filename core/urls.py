@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from core.views import AuthTokenView, AuthTokenRefreshView, UserViewSet, SellerViewSet, CustomerViewSet, SaleViewSet, ExpenseViewSet, DamageReportViewSet, ItemExitViewSet, ChecklistViewSet, TaskViewSet
+from core.views import AuthTokenView, UserViewSet, SellerViewSet, CustomerViewSet, SaleViewSet, ExpenseViewSet, DamageReportViewSet, ItemExitViewSet, ChecklistViewSet, TaskViewSet
 
 router = DefaultRouter()
 router.register(r'users', UserViewSet, basename='user')
@@ -16,6 +16,5 @@ router.register(r'tasks', TaskViewSet, basename='task')
 
 urlpatterns = [
     path('auth/token/', AuthTokenView.as_view(), name='auth_token_login'),
-    path('auth/token/refresh/', AuthTokenRefreshView.as_view(), name='auth_token_refresh'),
     path('', include(router.urls)),
 ]

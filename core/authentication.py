@@ -8,23 +8,24 @@ from rest_framework.exceptions import AuthenticationFailed
 
 User = get_user_model()
 
+# مدت اعتبار توکن: ۵ سال (به ثانیه)
+TOKEN_MAX_AGE = 60 * 60 * 24 * 365 * 5  # 157,680,000 seconds
+
+
 class StatelessTokenService:
     signer = TimestampSigner()
 
     @classmethod
-    def generate_tokens(cls, user):
-        access_payload = {'user_id': str(user.id), 'type': 'access'}
-        refresh_payload = {'user_id': str(user.id), 'type': 'refresh'}
-        
-        access_str = base64.b64encode(cls.signer.sign(json.dumps(access_payload)).encode()).decode()
-        refresh_str = base64.b64encode(cls.signer.sign(json.dumps(refresh_payload)).encode()).decode()
-        return access_str, refresh_str
+    def generate_token(cls, user):
+        payload = {'user_id': str(user.id), 'type': 'access'}
+        token_str = base64.b64encode(cls.signer.sign(json.dumps(payload)).encode()).decode()
+        return token_str
 
     @classmethod
-    def verify_token(cls, token_b64, max_age):
+    def verify_token(cls, token_b64):
         try:
             raw_token = base64.b64decode(token_b64.encode()).decode()
-            payload_json = cls.signer.unsign(raw_token, max_age=max_age)
+            payload_json = cls.signer.unsign(raw_token, max_age=TOKEN_MAX_AGE)
             return json.loads(payload_json)
         except (SignatureExpired, BadSignature, Exception):
             return None
@@ -43,12 +44,11 @@ class CustomStatelessAuthentication(BaseAuthentication):
         except ValueError:
             return None
 
-        payload = StatelessTokenService.verify_token(token, max_age=900)
+        payload = StatelessTokenService.verify_token(token)
         if not payload or payload.get('type') != 'access':
             raise AuthenticationFailed('توکن معتبر نمی‌باشد یا منقضی شده است.')
 
         try:
-            # رفع باگ امنیتی شماره ۵: استعلام مجدد وضعیت و نقش زنده کاربر از دیتابیس
             user = User.objects.get(id=payload['user_id'])
         except User.DoesNotExist:
             raise AuthenticationFailed('کاربر یافت نشد.')
