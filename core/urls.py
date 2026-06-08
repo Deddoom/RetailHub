@@ -1,7 +1,11 @@
 # -*- coding: utf-8 -*-
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from core.views import AuthTokenView, UserViewSet, SellerViewSet, CustomerViewSet, SaleViewSet, ExpenseViewSet, DamageReportViewSet, ItemExitViewSet, ChecklistViewSet, TaskViewSet
+from core.views import (
+    AuthTokenView, UserViewSet, SellerViewSet, CustomerViewSet,
+    SaleViewSet, ExpenseViewSet, DamageReportViewSet,
+    ItemExitViewSet, ChecklistViewSet, TaskViewSet
+)
 
 router = DefaultRouter()
 router.register(r'users', UserViewSet, basename='user')

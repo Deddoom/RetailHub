@@ -45,7 +45,7 @@ class Customer(models.Model):
     address = models.TextField(blank=True, null=True)
     primary_goods = models.CharField(max_length=50, choices=PRIMARY_GOODS_CHOICES, default='OTHER')
     buying_for = models.CharField(max_length=50, choices=BUYING_FOR_CHOICES, default='OTHER')
-    
+
     last_purchase_date = models.DateField(blank=True, null=True)
     total_purchase_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
     last_purchase_type = models.CharField(max_length=30, blank=True, null=True)
@@ -62,7 +62,11 @@ class Sale(models.Model):
     date_time = models.DateTimeField(auto_now_add=True)
     branch = models.CharField(max_length=100)
     seller = models.ForeignKey(Seller, on_delete=models.PROTECT, related_name='sales')
-    customer = models.ForeignKey(Customer, on_delete=models.PROTECT, related_name='sales')
+    # تغییر ۲: customer اختیاری شد — می‌توان فاکتور بدون مشتری ثبت کرد
+    customer = models.ForeignKey(
+        Customer, on_delete=models.PROTECT, related_name='sales',
+        blank=True, null=True
+    )
     created_by = models.ForeignKey(CustomUser, on_delete=models.PROTECT, related_name='sales_created')
     description = models.TextField(blank=True, null=True)
 
@@ -91,7 +95,6 @@ class Expense(models.Model):
     date = models.DateField()
     category = models.CharField(max_length=100)
     branch = models.CharField(max_length=100)
-    # اصلاح باگ فنی: استفاده از max_length به جای max_digits برای URLField
     invoice_image_url = models.URLField(max_length=500, blank=True, null=True)
     created_by = models.ForeignKey(CustomUser, on_delete=models.PROTECT, related_name='expenses_created')
     description = models.TextField(blank=True, null=True)
@@ -107,6 +110,8 @@ class Cheque(models.Model):
     customer_phone = models.CharField(max_length=15, blank=True, null=True)
     customer_name = models.CharField(max_length=150, blank=True, null=True)
     is_endorsed = models.BooleanField(default=False)
+    # تغییر ۴: فیلد جدید برای ذخیره عکس چک — اختیاری
+    cheque_image_url = models.URLField(max_length=500, blank=True, null=True)
     description = models.TextField(blank=True, null=True)
 
 

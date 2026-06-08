@@ -1,6 +1,7 @@
 # 📖 مستندات کامل API — RetailHub
 > ویژه برنامه‌نویسان فرانت‌اند (React / Vue / Flutter / iOS / Android)
-> مجموع Endpointها: **54 endpoint**
+> مجموع Endpointها: **56 endpoint**
+> آخرین به‌روزرسانی: نسخه ۲
 
 ---
 
@@ -51,6 +52,7 @@ Authorization: Bearer <access_token>
 | 📝 | فقط رکوردهای خودت (CASHIER) یا همه (ADMIN) |
 | ⚙️ | فیلد خودکار — نباید ارسال شود |
 | ✴️ | فیلد اجباری |
+| ◻️ | فیلد اختیاری |
 
 ---
 
@@ -121,14 +123,12 @@ const login = async (username, password) => {
     body: JSON.stringify({ username, password })
   });
   const data = await res.json();
-  // توکن رو ذخیره کن — چون ۵ ساله است، کاربر دیگه logout نمی‌شه
   localStorage.setItem('access_token', data.access_token);
   localStorage.setItem('role', data.role);
   localStorage.setItem('branch', data.branch);
-  return data; // { access_token, role, branch }
+  return data;
 };
 
-// استفاده در درخواست‌های بعدی — بدون نیاز به هیچ refresh logic
 const apiCall = async (url, options = {}) => {
   const token = localStorage.getItem('access_token');
   const res = await fetch(url, {
@@ -142,7 +142,6 @@ const apiCall = async (url, options = {}) => {
   return res.json();
 };
 
-// logout — فقط کافیه توکن رو پاک کنی
 const logout = () => {
   localStorage.removeItem('access_token');
   localStorage.removeItem('role');
@@ -150,8 +149,6 @@ const logout = () => {
   window.location.href = '/login';
 };
 ```
-
-> **نکته:** دیگه نیازی به interceptor، refresh loop یا مدیریت کوکی نیست.
 
 ---
 
@@ -208,8 +205,8 @@ POST /api/users/
 | `username` | string | ✴️ | — |
 | `password` | string | ✴️ | — (write-only) |
 | `role` | string | ✴️ | `ADMIN` / `CASHIER` / `USER` |
-| `branch` | string | — | نام شعبه |
-| `is_active` | boolean | — | پیش‌فرض: `true` |
+| `branch` | string | ◻️ | نام شعبه |
+| `is_active` | boolean | ◻️ | پیش‌فرض: `true` |
 
 ### Response — 201 Created
 
@@ -241,8 +238,6 @@ GET /api/users/{user_uuid}/
 PUT /api/users/{user_uuid}/
 ```
 
-همه فیلدهای 2.2 لازم است.
-
 ---
 
 ## 2.5 ویرایش جزئی کاربر
@@ -259,7 +254,7 @@ PATCH /api/users/{user_uuid}/
 }
 ```
 
-> ⚠️ چون توکن long-lived است، **تنها راه قطع دسترسی یک کاربر، غیرفعال کردن حساب او از طریق همین endpoint است.** سیستم در هر درخواست وضعیت `is_active` را مستقیماً از دیتابیس چک می‌کند، بنابراین توکن قدیمی کاربر دیگر کار نخواهد کرد.
+> ⚠️ **تنها راه قطع دسترسی یک کاربر، غیرفعال کردن حساب او از طریق همین endpoint است.** سیستم در هر درخواست وضعیت `is_active` را مستقیماً از دیتابیس چک می‌کند.
 
 ---
 
@@ -279,7 +274,7 @@ DELETE /api/users/{user_uuid}/
 
 ---
 
-## 3.1 لیست فروشندگان
+## 3.1 لیست فروشندگان (کامل)
 
 ```
 GET /api/sellers/
@@ -292,7 +287,7 @@ GET /api/sellers/
 ```json
 [
   {
-    "id": "uuid",
+    "id": "a1b2c3d4-...",
     "name": "امیر قاسمی",
     "phone": "09120001122",
     "branch": "شعبه پاسداران"
@@ -302,7 +297,51 @@ GET /api/sellers/
 
 ---
 
-## 3.2 ثبت فروشنده جدید
+## 3.2 لیست ساده فروشندگان برای Dropdown — **[جدید]**
+
+```
+GET /api/sellers/lookup/
+```
+
+**دسترسی:** 🔐 همه کاربران احراز هویت‌شده
+
+> این endpoint ویژه پر کردن **dropdown** در فرم ثبت فاکتور طراحی شده است.
+> فقط فیلدهای ضروری (UUID، نام، شماره، شعبه) برمی‌گرداند.
+
+### Response — 200 OK
+
+```json
+[
+  {
+    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "name": "امیر قاسمی",
+    "phone": "09120001122",
+    "branch": "شعبه پاسداران"
+  },
+  {
+    "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+    "name": "سارا احمدی",
+    "phone": "09131112233",
+    "branch": "شعبه ولیعصر"
+  }
+]
+```
+
+### نمونه استفاده در فرانت‌اند
+
+```javascript
+// پر کردن dropdown فروشندگان قبل از ثبت فاکتور
+const loadSellers = async () => {
+  const sellers = await apiCall('http://185.213.164.106/api/sellers/lookup/');
+  // sellers[0].id → UUID برای ارسال در فاکتور
+  // sellers[0].name → نمایش در dropdown
+  return sellers;
+};
+```
+
+---
+
+## 3.3 ثبت فروشنده جدید
 
 ```
 POST /api/sellers/
@@ -323,12 +362,12 @@ POST /api/sellers/
 | فیلد | نوع | اجباری | توضیح |
 |---|---|---|---|
 | `name` | string | ✴️ | نام کامل فروشنده |
-| `phone` | string | — | شماره موبایل (یکتا) |
+| `phone` | string | ◻️ | شماره موبایل (یکتا) |
 | `branch` | string | ✴️ | نام شعبه |
 
 ---
 
-## 3.3 مشاهده فروشنده خاص
+## 3.4 مشاهده فروشنده خاص
 
 ```
 GET /api/sellers/{seller_uuid}/
@@ -338,7 +377,7 @@ GET /api/sellers/{seller_uuid}/
 
 ---
 
-## 3.4 ویرایش فروشنده
+## 3.5 ویرایش فروشنده
 
 ```
 PUT   /api/sellers/{seller_uuid}/
@@ -349,7 +388,7 @@ PATCH /api/sellers/{seller_uuid}/
 
 ---
 
-## 3.5 حذف فروشنده
+## 3.6 حذف فروشنده
 
 ```
 DELETE /api/sellers/{seller_uuid}/
@@ -419,12 +458,12 @@ POST /api/customers/
 |---|---|---|---|
 | `name` | string | ✴️ | — |
 | `phone` | string | ✴️ | یکتا در کل سیستم |
-| `address` | string | — | — |
-| `primary_goods` | string | — | `APARTMENT` / `OUTDOOR` / `FERTILIZER` / `NEHAL` / `POT` / `OTHER` |
-| `buying_for` | string | — | `GARDEN` / `HOUSE` / `SHOP` / `OTHER` |
-| `description` | string | — | — |
+| `address` | string | ◻️ | — |
+| `primary_goods` | string | ◻️ | `APARTMENT` / `OUTDOOR` / `FERTILIZER` / `NEHAL` / `POT` / `OTHER` |
+| `buying_for` | string | ◻️ | `GARDEN` / `HOUSE` / `SHOP` / `OTHER` |
+| `description` | string | ◻️ | — |
 
-> فیلدهای `last_purchase_date`، `total_purchase_amount`، `last_purchase_type` **خودکار** هنگام ثبت فاکتور فروش به‌روز می‌شوند و نباید ارسال شوند.
+> فیلدهای `last_purchase_date`، `total_purchase_amount`، `last_purchase_type` **خودکار** هنگام ثبت فاکتور فروش به‌روز می‌شوند.
 
 ---
 
@@ -441,14 +480,6 @@ GET /api/customers/{customer_uuid}/
 ```
 PUT   /api/customers/{customer_uuid}/
 PATCH /api/customers/{customer_uuid}/
-```
-
-مثال — ویرایش آدرس:
-
-```json
-{
-  "address": "تهران، ولنجک"
-}
 ```
 
 ---
@@ -471,10 +502,30 @@ DELETE /api/customers/{customer_uuid}/
 
 ---
 
-## 5.1 لیست فاکتورها
+## 5.1 لیست فروش‌ها — **[بهبود یافته]**
 
 ```
 GET /api/sales/
+```
+
+این endpoint لیست کامل فروش‌های ثبت‌شده را به صورت مختصر برمی‌گرداند.
+ADMIN همه فاکتورها را می‌بیند، سایر نقش‌ها فقط فاکتورهای خودشان را.
+
+### Query Parameters — فیلتر اختیاری
+
+| پارامتر | نوع | مثال | توضیح |
+|---|---|---|---|
+| `branch` | string | `شعبه پاسداران` | فیلتر بر اساس شعبه |
+| `seller` | uuid | `a1b2c3...` | فیلتر بر اساس UUID فروشنده |
+| `customer` | uuid | `d4e5f6...` | فیلتر بر اساس UUID مشتری |
+| `from_date` | date | `2026-06-01` | از تاریخ (YYYY-MM-DD) |
+| `to_date` | date | `2026-06-30` | تا تاریخ (YYYY-MM-DD) |
+
+### مثال با فیلتر
+
+```
+GET /api/sales/?branch=شعبه پاسداران&from_date=2026-06-01&to_date=2026-06-30
+GET /api/sales/?seller=a1b2c3d4-e5f6-7890-abcd-ef1234567890
 ```
 
 ### Response — 200 OK
@@ -482,20 +533,37 @@ GET /api/sales/
 ```json
 [
   {
-    "id": "uuid",
+    "id": "f1e2d3c4-b5a6-7890-abcd-ef1234567890",
+    "date_time": "2026-06-07T10:30:00+03:30",
     "total_amount": "5500000.00",
     "remaining_balance": "0.00",
-    "date_time": "2026-06-07T10:30:00+03:30",
     "branch": "شعبه پاسداران",
-    "seller": { "id": "uuid", "name": "امیر قاسمی", "phone": "...", "branch": "..." },
-    "customer": { "id": "uuid", "name": "علیرضا فتاحی", "phone": "..." },
-    "created_by": "admin (مدیر سیستم)",
     "description": "فروش نهال",
-    "payments": [ "..." ],
-    "deposit_items": [ "..." ]
+    "seller": "a1b2c3d4-...",
+    "seller_name": "امیر قاسمی",
+    "customer": "d4e5f6a7-...",
+    "customer_name": "علیرضا فتاحی",
+    "customer_phone": "09154445566",
+    "created_by": "cashier (صندوق‌دار)"
+  },
+  {
+    "id": "c1b2a3f4-...",
+    "date_time": "2026-06-08T09:00:00+03:30",
+    "total_amount": "1200000.00",
+    "remaining_balance": "200000.00",
+    "branch": "شعبه پاسداران",
+    "description": "فروش گلدان — بدون مشتری",
+    "seller": "a1b2c3d4-...",
+    "seller_name": "امیر قاسمی",
+    "customer": null,
+    "customer_name": null,
+    "customer_phone": null,
+    "created_by": "cashier (صندوق‌دار)"
   }
 ]
 ```
+
+> نتایج به صورت **نزولی بر اساس تاریخ** (`-date_time`) مرتب‌سازی می‌شوند.
 
 ---
 
@@ -505,9 +573,28 @@ GET /api/sales/
 POST /api/sales/
 ```
 
-**مهم:** قبل از ثبت فاکتور باید UUID مشتری و فروشنده را از APIهای مربوطه دریافت کنید.
+> **تغییر مهم:** فیلد `customer` حالا **اختیاری** است.
+> می‌توانید فاکتور را بدون مشتری ثبت کنید — مثلاً برای فروش‌های نقدی سریع.
 
-### Request Body — ساده‌ترین حالت (پرداخت نقدی)
+### Request Body — ساده‌ترین حالت بدون مشتری **[جدید]**
+
+```json
+{
+  "total_amount": "2000000.00",
+  "branch": "شعبه پاسداران",
+  "seller": "uuid-فروشنده",
+  "description": "فروش گلدان — مشتری ناشناس",
+  "payments": [
+    {
+      "payment_method": "CASH",
+      "amount": "2000000.00",
+      "description": "پرداخت نقدی کامل"
+    }
+  ]
+}
+```
+
+### Request Body — با مشتری و پرداخت نقدی
 
 ```json
 {
@@ -547,6 +634,7 @@ POST /api/sales/
           "amount": "3000000.00",
           "customer_phone": "09154445566",
           "customer_name": "علیرضا فتاحی",
+          "cheque_image_url": "https://storage.retailhub.com/cheques/chq-001.jpg",
           "description": "چک ثبت شده در سامانه صیاد"
         }
       ]
@@ -574,10 +662,10 @@ POST /api/sales/
 | `total_amount` | decimal | ✴️ | مبلغ کل فاکتور |
 | `branch` | string | ✴️ | نام شعبه |
 | `seller` | uuid | ✴️ | شناسه فروشنده |
-| `customer` | uuid | ✴️ | شناسه مشتری |
-| `description` | string | — | توضیح فاکتور |
-| `payments` | array | — | لیست پرداخت‌ها |
-| `deposit_items` | array | — | اقلام بیعانه (اجباری اگر payment_method=DEPOSIT) |
+| `customer` | uuid | ◻️ | شناسه مشتری — **اختیاری** |
+| `description` | string | ◻️ | توضیح فاکتور |
+| `payments` | array | ◻️ | لیست پرداخت‌ها |
+| `deposit_items` | array | ◻️ | اقلام بیعانه (اجباری اگر payment_method=DEPOSIT) |
 | `remaining_balance` | decimal | ⚙️ | خودکار = total_amount - sum(payments) |
 | `date_time` | datetime | ⚙️ | خودکار |
 | `created_by` | string | ⚙️ | خودکار از توکن |
@@ -588,19 +676,20 @@ POST /api/sales/
 |---|---|---|---|
 | `payment_method` | string | ✴️ | `CASH` / `CARD_TO_CARD` / `SHEBA` / `POS` / `COMBINED` / `REMAINING` / `DEPOSIT` / `CHEQUE` |
 | `amount` | decimal | ✴️ | مبلغ این پرداخت |
-| `description` | string | — | توضیح |
-| `cheques` | array | — | فقط برای `CHEQUE` و `COMBINED` |
+| `description` | string | ◻️ | توضیح |
+| `cheques` | array | ◻️ | فقط برای `CHEQUE` و `COMBINED` |
 
-### فیلدهای Cheque (داخل payments[].cheques[])
+### فیلدهای Cheque (داخل payments[].cheques[]) — **[به‌روز شده]**
 
 | فیلد | نوع | اجباری | توضیح |
 |---|---|---|---|
 | `cheque_number` | string | ✴️ | شماره چک (یکتا در کل سیستم) |
 | `due_date` | date | ✴️ | تاریخ سررسید (YYYY-MM-DD) |
 | `amount` | decimal | ✴️ | مبلغ چک |
-| `customer_phone` | string | — | پیش‌فرض: شماره مشتری فاکتور |
-| `customer_name` | string | — | پیش‌فرض: نام مشتری فاکتور |
-| `description` | string | — | — |
+| `customer_phone` | string | ◻️ | پیش‌فرض: شماره مشتری فاکتور |
+| `customer_name` | string | ◻️ | پیش‌فرض: نام مشتری فاکتور |
+| `cheque_image_url` | string | ◻️ | لینک عکس چک — **اختیاری** |
+| `description` | string | ◻️ | — |
 
 ### فیلدهای DepositItem (داخل deposit_items[])
 
@@ -609,13 +698,14 @@ POST /api/sales/
 | `item_name` | string | ✴️ | نام کالا |
 | `quantity` | integer | ✴️ | تعداد |
 | `unit_price` | decimal | ✴️ | قیمت واحد |
-| `total_price` | decimal | ⚙️ | خودکار = quantity x unit_price |
+| `total_price` | decimal | ⚙️ | خودکار = quantity × unit_price |
 
 ### قوانین اعتبارسنجی فاکتور
 
 - مجموع `amount` در payments نمی‌تواند از `total_amount` بیشتر باشد
 - اگر `payment_method == DEPOSIT` باشد، حتماً باید `deposit_items` هم ارسال شود
 - `cheque_number` باید در کل سیستم یکتا باشد
+- اگر `customer` ارسال نشود یا `null` باشد، به‌روزرسانی آمار مشتری انجام نمی‌شود
 
 ### Response — 201 Created
 
@@ -623,10 +713,56 @@ POST /api/sales/
 
 ---
 
-## 5.3 مشاهده فاکتور خاص
+## 5.3 مشاهده فاکتور خاص (کامل با جزئیات)
 
 ```
 GET /api/sales/{sale_uuid}/
+```
+
+### Response — 200 OK
+
+```json
+{
+  "id": "uuid",
+  "total_amount": "5500000.00",
+  "remaining_balance": "0.00",
+  "date_time": "2026-06-07T10:30:00+03:30",
+  "branch": "شعبه پاسداران",
+  "seller": { "id": "uuid", "name": "امیر قاسمی", "phone": "...", "branch": "..." },
+  "customer": { "id": "uuid", "name": "علیرضا فتاحی", "phone": "..." },
+  "created_by": "admin (مدیر سیستم)",
+  "description": "فروش نهال",
+  "payments": [
+    {
+      "id": "uuid",
+      "payment_method": "CHEQUE",
+      "amount": "3000000.00",
+      "description": "چک صیادی بانک ملی",
+      "cheques": [
+        {
+          "id": "uuid",
+          "cheque_number": "1234/5678-Melli",
+          "due_date": "2026-08-20",
+          "amount": "3000000.00",
+          "customer_name": "علیرضا فتاحی",
+          "customer_phone": "09154445566",
+          "cheque_image_url": "https://storage.retailhub.com/cheques/chq-001.jpg",
+          "is_endorsed": false,
+          "description": "چک ثبت شده در سامانه صیاد"
+        }
+      ]
+    }
+  ],
+  "deposit_items": [
+    {
+      "id": "uuid",
+      "item_name": "گلدان سفالی بزرگ درجه ۱",
+      "quantity": 10,
+      "unit_price": "250000.00",
+      "total_price": "2500000.00"
+    }
+  ]
+}
 ```
 
 ---
@@ -680,7 +816,17 @@ GET /api/expenses/
     "invoice_image_url": "https://storage.example.com/inv.png",
     "created_by": "cashier (صندوق‌دار)",
     "description": "خرید کود مایع",
-    "cheques": [ "..." ]
+    "cheques": [
+      {
+        "id": "uuid",
+        "cheque_number": "9999/1111-Saderat",
+        "due_date": "2026-09-01",
+        "amount": "1500000.00",
+        "is_endorsed": false,
+        "cheque_image_url": "https://storage.retailhub.com/cheques/chq-002.jpg",
+        "description": "چک بابت خرید کود"
+      }
+    ]
   }
 ]
 ```
@@ -706,7 +852,7 @@ POST /api/expenses/
 }
 ```
 
-### Request Body — هزینه با چک جدید
+### Request Body — هزینه با چک جدید + عکس چک
 
 ```json
 {
@@ -723,13 +869,14 @@ POST /api/expenses/
       "is_endorsed": false,
       "due_date": "2026-09-01",
       "amount": "3000000.00",
+      "cheque_image_url": "https://storage.retailhub.com/cheques/chq-003.jpg",
       "description": "چک جدید بابت خرید"
     }
   ]
 }
 ```
 
-### Request Body — خرج کردن چک دریافتی از مشتری (ظهرنویسی)
+### Request Body — خرج کردن چک دریافتی (ظهرنویسی) + عکس اختیاری
 
 ```json
 {
@@ -744,13 +891,15 @@ POST /api/expenses/
       "is_endorsed": true,
       "due_date": "2026-08-20",
       "amount": "3000000.00",
+      "cheque_image_url": "https://storage.retailhub.com/cheques/chq-001-endorsed.jpg",
       "description": "چک دریافتی از فتاحی — ظهرنویسی شده"
     }
   ]
 }
 ```
 
-> وقتی `is_endorsed: true` باشد، سیستم چک را در دیتابیس پیدا کرده و وضعیتش را به «خرج‌شده» تغییر می‌دهد. اگر چک وجود نداشت، رکورد جدید می‌سازد.
+> وقتی `is_endorsed: true` باشد، سیستم چک را در دیتابیس پیدا کرده و وضعیتش را به «خرج‌شده» تغییر می‌دهد.
+> اگر `cheque_image_url` همراه چک endorsed ارسال شود، عکس هم آپدیت می‌شود.
 
 ### فیلدهای Expense
 
@@ -761,10 +910,21 @@ POST /api/expenses/
 | `date` | date | ✴️ | YYYY-MM-DD |
 | `category` | string | ✴️ | دسته‌بندی هزینه |
 | `branch` | string | ✴️ | نام شعبه |
-| `invoice_image_url` | string | — | لینک عکس فاکتور |
-| `description` | string | — | توضیح |
-| `cheques` | array | — | فقط برای `CHEQUE` و `COMBINED` |
+| `invoice_image_url` | string | ◻️ | لینک عکس فاکتور |
+| `description` | string | ◻️ | توضیح |
+| `cheques` | array | ◻️ | فقط برای `CHEQUE` و `COMBINED` |
 | `created_by` | string | ⚙️ | خودکار از توکن |
+
+### فیلدهای Cheque در هزینه — **[به‌روز شده]**
+
+| فیلد | نوع | اجباری | توضیح |
+|---|---|---|---|
+| `cheque_number` | string | ✴️ | شماره چک |
+| `due_date` | date | ✴️ | تاریخ سررسید |
+| `amount` | decimal | ✴️ | مبلغ چک |
+| `is_endorsed` | boolean | ✴️ | `false` = چک جدید / `true` = ظهرنویسی چک قبلی |
+| `cheque_image_url` | string | ◻️ | لینک عکس چک — **اختیاری** |
+| `description` | string | ◻️ | توضیح |
 
 ---
 
@@ -852,7 +1012,7 @@ POST /api/damage-reports/
 | `estimated_loss` | decimal | ✴️ | تخمین خسارت (ریال) |
 | `date` | date | ✴️ | YYYY-MM-DD |
 | `branch` | string | ✴️ | نام شعبه |
-| `description` | string | — | توضیح |
+| `description` | string | ◻️ | توضیح |
 | `created_by` | — | ⚙️ | خودکار از توکن |
 
 ---
@@ -1029,8 +1189,6 @@ POST /api/checklists/
 | `created_by` | — | ⚙️ | خودکار از توکن |
 | `created_at` | — | ⚙️ | خودکار |
 
-> تسک‌ها به صورت جداگانه از طریق API Tasks اضافه می‌شوند.
-
 ---
 
 ## 9.3 مشاهده چک‌لیست خاص
@@ -1112,7 +1270,7 @@ GET /api/tasks/{task_uuid}/
 
 ---
 
-## 10.4 به‌روزرسانی وضعیت تسک — ✅ مهم‌ترین endpoint برای کاربر عادی
+## 10.4 به‌روزرسانی وضعیت تسک
 
 ```
 PUT   /api/tasks/{task_uuid}/
@@ -1129,7 +1287,7 @@ PATCH /api/tasks/{task_uuid}/
 | `CASHIER` | همه فیلدها |
 | `USER` | فقط `is_completed` و `description` |
 
-### Request Body — برای USER (کارمند عادی)
+### Request Body — برای USER
 
 ```json
 {
@@ -1140,26 +1298,10 @@ PATCH /api/tasks/{task_uuid}/
 
 | فیلد | نوع | اجباری | توضیح |
 |---|---|---|---|
-| `is_completed` | boolean | — | `true` = انجام شد / `false` = برگشت به ناتمام |
-| `description` | string | — | گزارش انجام کار |
+| `is_completed` | boolean | ◻️ | `true` = انجام شد |
+| `description` | string | ◻️ | گزارش انجام کار |
 | `completed_by` | — | ⚙️ | خودکار — کاربری که `is_completed=true` زده |
 | `completed_at` | — | ⚙️ | خودکار — زمان تکمیل |
-
-> اگر `is_completed: false` ارسال شود، مقادیر `completed_by` و `completed_at` به `null` ریست می‌شوند.
-
-### Response — 200 OK
-
-```json
-{
-  "id": "uuid",
-  "checklist": "uuid-checklist",
-  "title": "آبیاری نهال‌های گلخانه شماره ۲",
-  "is_completed": true,
-  "completed_by": "uuid-کاربر",
-  "completed_at": "2026-06-07T09:30:00+03:30",
-  "description": "آبیاری کامل انجام شد."
-}
-```
 
 ---
 
@@ -1192,23 +1334,28 @@ DELETE /api/tasks/{task_uuid}/
 
 # 💡 نکات مهم فرانت‌اند
 
-**مدیریت توکن ساده شد:**
-توکن ۵ ساله است — دیگه نیازی به interceptor، refresh loop یا مدیریت کوکی نیست. بعد از Login توکن رو در `localStorage` ذخیره کنید و در هر درخواست در هدر بفرستید.
+**مدیریت توکن:**
+توکن ۵ ساله است — نیازی به interceptor، refresh loop یا مدیریت کوکی نیست. بعد از Login توکن رو در `localStorage` ذخیره کنید.
 
 **جریان صحیح ثبت فاکتور فروش:**
-ابتدا از `/api/customers/` مشتری را پیدا یا بسازید — سپس از `/api/sellers/` فروشنده را بگیرید — بعد فاکتور را با UUID هر دو ثبت کنید.
+ابتدا از `GET /api/sellers/lookup/` لیست فروشندگان را بگیرید — در صورت نیاز از `/api/customers/` مشتری را پیدا یا بسازید — سپس فاکتور را ثبت کنید. `customer` اختیاری است.
+
+**آپلود عکس چک:**
+سیستم فقط **URL** عکس چک را ذخیره می‌کند. عکس را ابتدا روی سرویس ذخیره‌سازی خودتان آپلود کنید، سپس URL برگشتی را در فیلد `cheque_image_url` ارسال کنید.
+
+**لیست فروش‌ها:**
+از `GET /api/sales/` برای مشاهده همه فروش‌ها استفاده کنید. از query parameterها برای فیلتر کردن بر اساس شعبه، فروشنده، مشتری یا بازه تاریخی استفاده کنید.
 
 **تنها راه logout:**
 توکن رو از `localStorage` پاک کنید. هیچ endpoint ای برای logout لازم نیست.
 
 **تنها راه قطع دسترسی کاربر:**
-از `PATCH /api/users/{uuid}/` با `{"is_active": false}` حساب را غیرفعال کنید. سیستم در هر درخواست `is_active` را مستقیماً از دیتابیس چک می‌کند — توکن قدیمی کاربر دیگر کار نخواهد کرد.
+از `PATCH /api/users/{uuid}/` با `{"is_active": false}` حساب را غیرفعال کنید.
 
-**همه IDها UUID هستند:**
-تمام `id`ها از نوع `UUID v4` (string) هستند.
+**همه IDها UUID هستند.**
 
 **فیلدهای ⚙️ خودکار:**
-هرگز `created_by`، `date_time`، `remaining_balance`، `total_price`، `completed_by`، `completed_at` را در Request ارسال نکنید — سرور آن‌ها را خودش محاسبه می‌کند.
+هرگز `created_by`، `date_time`، `remaining_balance`، `total_price`، `completed_by`، `completed_at` را در Request ارسال نکنید.
 
 **شماره چک یکتا:**
-`cheque_number` در کل سیستم (هم فاکتور فروش، هم هزینه) یکتا است. تکرار آن `400 Bad Request` می‌دهد، مگر برای چک ظهرنویسی‌شده (`is_endorsed: true`).
+`cheque_number` در کل سیستم یکتا است — مگر برای ظهرنویسی (`is_endorsed: true`).
