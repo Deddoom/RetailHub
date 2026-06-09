@@ -241,3 +241,101 @@ class SaleListSerializer(serializers.ModelSerializer):
             'customer', 'customer_name', 'customer_phone',
             'created_by',
         ]
+
+from core.models import DepositOrder, DepositOrderItem
+ 
+ 
+class DepositOrderItemSerializer(serializers.ModelSerializer):
+    total_price = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+ 
+    class Meta:
+        model  = DepositOrderItem
+        fields = ['id', 'item_name', 'quantity', 'unit_price', 'total_price']
+ 
+ 
+class DepositOrderSerializer(serializers.ModelSerializer):
+    items           = DepositOrderItemSerializer(many=True)
+    created_by      = serializers.StringRelatedField(read_only=True)
+    # فیلدهای خوانا از مشتری — نمایش یکجا
+    customer_name   = serializers.CharField(source='customer.name',  read_only=True)
+    customer_phone  = serializers.CharField(source='customer.phone', read_only=True)
+    seller_name     = serializers.CharField(source='seller.name',    read_only=True)
+    # لینک فاکتور نهایی (فقط خواندن)
+    sale            = serializers.PrimaryKeyRelatedField(read_only=True)
+ 
+    class Meta:
+        model  = DepositOrder
+        fields = [
+            'id', 'created_at', 'branch',
+            'created_by',
+            'seller', 'seller_name',
+            'customer', 'customer_name', 'customer_phone',
+            'delivery_date',
+            'total_amount', 'discount_amount',
+            'deposit_paid', 'remaining_debt',
+            'deposit_payment_method', 'debt_payment_method',
+            'status',
+            'sale',
+            'description',
+            'items',
+        ]
+        read_only_fields = ['created_at', 'created_by', 'remaining_debt', 'sale']
+ 
+    def validate(self, attrs):
+        total   = Decimal(str(attrs.get('total_amount', 0)))
+        discount = Decimal(str(attrs.get('discount_amount', 0)))
+        paid    = Decimal(str(attrs.get('deposit_paid', 0)))
+ 
+        if discount > total:
+            raise serializers.ValidationError("تخفیف نمی‌تواند از مبلغ کل بیشتر باشد.")
+        if paid > (total - discount):
+            raise serializers.ValidationError("مبلغ بیعانه از مبلغ خالص سفارش (پس از تخفیف) بیشتر است.")
+        if not attrs.get('items'):
+            raise serializers.ValidationError("سفارش باید حداقل یک قلم کالا داشته باشد.")
+        return attrs
+ 
+    @transaction.atomic
+    def create(self, validated_data):
+        items_data = validated_data.pop('items', [])
+        validated_data['created_by'] = self.context['request'].user
+        order = DepositOrder.objects.create(**validated_data)   # save() خودکار remaining_debt رو حساب می‌کنه
+        for item in items_data:
+            DepositOrderItem.objects.create(order=order, **item)
+        return order
+ 
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        items_data = validated_data.pop('items', None)
+        # به‌روزرسانی فیلدهای اصلی
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()   # save() خودکار remaining_debt رو حساب می‌کنه
+        # اگر لیست اقلام ارسال شده، جایگزین می‌شه
+        if items_data is not None:
+            instance.items.all().delete()
+            for item in items_data:
+                DepositOrderItem.objects.create(order=instance, **item)
+        return instance
+ 
+ 
+class DepositOrderListSerializer(serializers.ModelSerializer):
+    """سریالایزر سبک برای لیست — بدون nested items"""
+    customer_name  = serializers.CharField(source='customer.name',  read_only=True)
+    customer_phone = serializers.CharField(source='customer.phone', read_only=True)
+    seller_name    = serializers.CharField(source='seller.name',    read_only=True)
+    created_by     = serializers.StringRelatedField(read_only=True)
+ 
+    class Meta:
+        model  = DepositOrder
+        fields = [
+            'id', 'created_at', 'branch',
+            'created_by',
+            'seller', 'seller_name',
+            'customer', 'customer_name', 'customer_phone',
+            'delivery_date',
+            'total_amount', 'discount_amount',
+            'deposit_paid', 'remaining_debt',
+            'status',
+            'sale',
+            'description',
+        ]

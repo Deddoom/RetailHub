@@ -4,12 +4,12 @@ from rest_framework.decorators import action
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.utils import timezone
-from core.models import CustomUser, Seller, Customer, Sale, Expense, DamageReport, ItemExit, Checklist, Task
+from core.models import CustomUser, Seller, Customer, Sale, Expense, DamageReport, ItemExit, Checklist, Task , DepositOrder, DepositOrderItem
 from core.serializers import (
     UserSerializer, SellerSerializer, SellerLookupSerializer,
     CustomerSerializer, SaleSerializer, SaleListSerializer,
     ExpenseSerializer, DamageReportSerializer, ItemExitSerializer,
-    ChecklistSerializer, TaskSerializer
+    ChecklistSerializer, TaskSerializer, DepositOrderSerializer, DepositOrderListSerializer
 )
 from core.authentication import StatelessTokenService
 from core.permissions import IsAdminUser, IsOwnerOrAdminOnly
@@ -179,3 +179,149 @@ class TaskViewSet(viewsets.ModelViewSet):
             instance.save()
             return Response(self.get_serializer(instance).data)
         return super().update(request, *args, **kwargs)
+    
+class DepositOrderViewSet(viewsets.ModelViewSet):
+    """
+    CRUD کامل سفارش‌های بیعانه
+ 
+    GET    /api/deposit-orders/                  → لیست (با فیلتر اختیاری)
+    POST   /api/deposit-orders/                  → ثبت سفارش جدید
+    GET    /api/deposit-orders/{uuid}/           → جزئیات کامل + اقلام
+    PUT    /api/deposit-orders/{uuid}/           → ویرایش کامل
+    PATCH  /api/deposit-orders/{uuid}/           → ویرایش جزئی
+    DELETE /api/deposit-orders/{uuid}/           → حذف
+    PATCH  /api/deposit-orders/{uuid}/settle/    → تسویه نهایی (ثبت فاکتور Sale)
+    """
+    permission_classes = [IsOwnerOrAdminOnly]
+ 
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return DepositOrderListSerializer
+        return DepositOrderSerializer
+ 
+    def get_queryset(self):
+        qs = DepositOrder.objects.select_related(
+            'customer', 'seller', 'created_by', 'sale'
+        ).prefetch_related('items')
+ 
+        user = self.request.user
+        if user.role != 'ADMIN':
+            qs = qs.filter(created_by=user)
+ 
+        # ── فیلترهای اختیاری ──
+        branch      = self.request.query_params.get('branch')
+        status      = self.request.query_params.get('status')
+        seller_id   = self.request.query_params.get('seller')
+        customer_id = self.request.query_params.get('customer')
+        from_date   = self.request.query_params.get('from_date')
+        to_date     = self.request.query_params.get('to_date')
+ 
+        if branch:
+            qs = qs.filter(branch=branch)
+        if status:
+            qs = qs.filter(status=status)
+        if seller_id:
+            qs = qs.filter(seller__id=seller_id)
+        if customer_id:
+            qs = qs.filter(customer__id=customer_id)
+        if from_date:
+            qs = qs.filter(created_at__date__gte=from_date)
+        if to_date:
+            qs = qs.filter(created_at__date__lte=to_date)
+ 
+        return qs.order_by('-created_at')
+ 
+    # ── action اختصاصی: تسویه نهایی ──
+    @action(detail=True, methods=['patch'], url_path='settle')
+    @transaction.atomic
+    def settle(self, request, pk=None):
+        """
+        PATCH /api/deposit-orders/{uuid}/settle/
+ 
+        وقتی مشتری بدهی رو کامل پرداخت کرد:
+        ۱. یه Sale جدید می‌سازه و به این بیعانه لینک می‌کنه
+        ۲. وضعیت بیعانه رو DELIVERED می‌کنه
+        ۳. remaining_debt رو صفر می‌کنه
+ 
+        Request Body:
+        {
+            "seller": "uuid",              (اختیاری — پیش‌فرض: فروشنده بیعانه)
+            "debt_payment_method": "CASH", (اجباری)
+            "description": "..."           (اختیاری)
+        }
+        """
+        order = self.get_object()
+ 
+        if order.status == 'DELIVERED':
+            return Response(
+                {"error": "این سفارش قبلاً تسویه شده است."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if order.status == 'CANCELLED':
+            return Response(
+                {"error": "سفارش لغو شده قابل تسویه نیست."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+ 
+        debt_payment_method = request.data.get('debt_payment_method')
+        if not debt_payment_method:
+            return Response(
+                {"error": "نحوه پرداخت بدهی (debt_payment_method) الزامی است."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+ 
+        from decimal import Decimal as D
+        from django.utils import timezone as tz
+ 
+        # ── ساخت فاکتور Sale ──
+        sale = Sale.objects.create(
+            branch       = order.branch,
+            seller       = order.seller,
+            customer     = order.customer,
+            created_by   = request.user,
+            total_amount = order.total_amount - order.discount_amount,
+            remaining_balance = D('0.00'),
+            description  = request.data.get('description', f"تسویه سفارش بیعانه {order.id}"),
+        )
+ 
+        # پرداخت بیعانه قبلی
+        if order.deposit_paid > 0:
+            Payment.objects.create(
+                sale           = sale,
+                payment_method = order.deposit_payment_method or 'OTHER',
+                amount         = order.deposit_paid,
+                description    = "بیعانه پرداخت‌شده قبلی",
+            )
+ 
+        # پرداخت بدهی
+        if order.remaining_debt > 0:
+            Payment.objects.create(
+                sale           = sale,
+                payment_method = debt_payment_method,
+                amount         = order.remaining_debt,
+                description    = "پرداخت بدهی هنگام تحویل",
+            )
+ 
+        # ── به‌روزرسانی بیعانه ──
+        order.sale                = sale
+        order.status              = 'DELIVERED'
+        order.debt_payment_method = debt_payment_method
+        order.deposit_paid        = order.total_amount - order.discount_amount  # کل مبلغ پرداخت شده
+        order.save()   # remaining_debt خودکار صفر میشه
+ 
+        # ── به‌روزرسانی آمار مشتری ──
+        from datetime import date
+        customer = Customer.objects.select_for_update().get(pk=order.customer_id)
+        customer.last_purchase_date   = date.today()
+        customer.total_purchase_amount += (order.total_amount - order.discount_amount)
+        customer.last_purchase_type   = debt_payment_method
+        customer.save()
+ 
+        return Response(
+            {
+                "message": "سفارش با موفقیت تسویه شد.",
+                "sale_id": str(sale.id),
+                "deposit_order_id": str(order.id),
+            },
+            status=status.HTTP_200_OK
+        )
