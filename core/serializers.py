@@ -3,12 +3,22 @@ from rest_framework import serializers
 from django.db import transaction
 from decimal import Decimal
 from datetime import date
-from core.models import CustomUser, Seller, Customer, Sale, Payment, Expense, Cheque, DepositItem, DamageReport, ItemExit, Task, Checklist
 
+from core.models import (
+    CustomUser, Seller, Customer,
+    Sale, Payment, Cheque, DepositItem,
+    Expense, DamageReport, ItemExit,
+    Checklist, Task,
+    DepositOrder, DepositOrderItem,
+    BRANCH_CHOICES,
+)
+
+
+# ── Auth / User ───────────────────────────────────────────────────────────────
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
-        model = CustomUser
+        model  = CustomUser
         fields = ['id', 'username', 'role', 'branch', 'is_active', 'password']
         extra_kwargs = {'password': {'write_only': True}}
 
@@ -16,73 +26,83 @@ class UserSerializer(serializers.ModelSerializer):
         return CustomUser.objects.create_user(**validated_data)
 
 
+# ── Seller ────────────────────────────────────────────────────────────────────
+
 class SellerSerializer(serializers.ModelSerializer):
     class Meta:
-        model = Seller
+        model  = Seller
         fields = '__all__'
 
 
-# تغییر ۱: سریالایزر مختصر فروشنده فقط برای نمایش UUID + نام (مناسب برای dropdown)
 class SellerLookupSerializer(serializers.ModelSerializer):
+    """فقط برای dropdown فرانت‌اند"""
     class Meta:
-        model = Seller
+        model  = Seller
         fields = ['id', 'name', 'phone', 'branch']
 
 
+# ── Customer ──────────────────────────────────────────────────────────────────
+
 class CustomerSerializer(serializers.ModelSerializer):
     class Meta:
-        model = Customer
-        fields = '__all__'
+        model       = Customer
+        fields      = '__all__'
         read_only_fields = ['last_purchase_date', 'total_purchase_amount', 'last_purchase_type']
 
 
+# ── Cheque ────────────────────────────────────────────────────────────────────
+
 class ChequeSerializer(serializers.ModelSerializer):
     class Meta:
-        model = Cheque
+        model  = Cheque
         fields = '__all__'
         extra_kwargs = {
-            'payment': {'required': False},
-            'expense': {'required': False},
-            # تغییر ۴: cheque_image_url اختیاری است
+            'payment':          {'required': False},
+            'expense':          {'required': False},
             'cheque_image_url': {'required': False, 'allow_null': True},
         }
 
+
+# ── Payment ───────────────────────────────────────────────────────────────────
 
 class PaymentSerializer(serializers.ModelSerializer):
     cheques = ChequeSerializer(many=True, required=False)
 
     class Meta:
-        model = Payment
+        model  = Payment
         fields = '__all__'
         extra_kwargs = {'sale': {'required': False}}
 
+
+# ── DepositItem (داخل فاکتور Sale) ───────────────────────────────────────────
 
 class DepositItemSerializer(serializers.ModelSerializer):
     total_price = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
 
     class Meta:
-        model = DepositItem
+        model  = DepositItem
         fields = '__all__'
         extra_kwargs = {'sale': {'required': False}}
 
 
+# ── Sale (فاکتور فروش) ────────────────────────────────────────────────────────
+
 class SaleSerializer(serializers.ModelSerializer):
-    payments = PaymentSerializer(many=True, required=False)
+    payments      = PaymentSerializer(many=True, required=False)
     deposit_items = DepositItemSerializer(many=True, required=False)
-    created_by = serializers.StringRelatedField(read_only=True)
-    # تغییر ۲: customer اختیاری — allow_null=True
-    customer = serializers.PrimaryKeyRelatedField(
+    created_by    = serializers.StringRelatedField(read_only=True)
+    customer      = serializers.PrimaryKeyRelatedField(
         queryset=Customer.objects.all(), required=False, allow_null=True
     )
 
     class Meta:
-        model = Sale
+        model  = Sale
         fields = '__all__'
 
     def validate(self, attrs):
-        payments_data = attrs.get('payments', [])
+        payments_data     = attrs.get('payments', [])
         deposit_items_data = attrs.get('deposit_items', [])
-        total_amount = attrs.get('total_amount', Decimal('0.00'))
+        total_amount      = attrs.get('total_amount', Decimal('0.00'))
 
         total_paid = sum(Decimal(str(p.get('amount', 0))) for p in payments_data)
         if total_paid > total_amount:
@@ -90,18 +110,20 @@ class SaleSerializer(serializers.ModelSerializer):
 
         for payment in payments_data:
             if payment.get('payment_method') == 'DEPOSIT' and not deposit_items_data:
-                raise serializers.ValidationError("در نوع پرداخت بیعانه، ثبت اقلام بیعانه اجباری است.")
+                raise serializers.ValidationError(
+                    "در نوع پرداخت بیعانه، ثبت اقلام بیعانه اجباری است."
+                )
         return attrs
 
     @transaction.atomic
     def create(self, validated_data):
         request = self.context.get('request')
-        user = request.user
+        user    = request.user
 
-        payments_data = validated_data.pop('payments', [])
+        payments_data      = validated_data.pop('payments', [])
         deposit_items_data = validated_data.pop('deposit_items', [])
 
-        total_paid = sum(Decimal(str(p.get('amount', 0))) for p in payments_data)
+        total_paid   = sum(Decimal(str(p.get('amount', 0))) for p in payments_data)
         total_amount = Decimal(str(validated_data.get('total_amount', 0)))
         validated_data['remaining_balance'] = max(Decimal('0.00'), total_amount - total_paid)
         validated_data['created_by'] = user
@@ -114,11 +136,10 @@ class SaleSerializer(serializers.ModelSerializer):
 
             if payment_item.get('payment_method') in ['CHEQUE', 'COMBINED']:
                 for cheque_item in cheques_for_this_payment:
-                    customer_phone = cheque_item.pop('customer_phone',
+                    customer_phone   = cheque_item.pop('customer_phone',
                         sale.customer.phone if sale.customer else None)
-                    customer_name = cheque_item.pop('customer_name',
+                    customer_name    = cheque_item.pop('customer_name',
                         sale.customer.name if sale.customer else None)
-                    # تغییر ۴: cheque_image_url اختیاری — pop با پیش‌فرض None
                     cheque_image_url = cheque_item.pop('cheque_image_url', None)
 
                     if Cheque.objects.filter(cheque_number=cheque_item.get('cheque_number')).exists():
@@ -134,12 +155,12 @@ class SaleSerializer(serializers.ModelSerializer):
         for item_data in deposit_items_data:
             DepositItem.objects.create(sale=sale, **item_data)
 
-        # به‌روزرسانی اطلاعات مشتری — فقط اگر مشتری تعیین شده باشد
+        # به‌روزرسانی آمار مشتری فقط اگر مشتری تعیین شده باشد
         if sale.customer_id:
             customer = Customer.objects.select_for_update().get(pk=sale.customer_id)
-            customer.last_purchase_date = date.today()
+            customer.last_purchase_date    = date.today()
             customer.total_purchase_amount += total_amount
-            customer.last_purchase_type = (
+            customer.last_purchase_type    = (
                 'COMBINED' if len(payments_data) > 1
                 else (payments_data[0].get('payment_method') if payments_data else 'REMAINING')
             )
@@ -148,39 +169,59 @@ class SaleSerializer(serializers.ModelSerializer):
         return sale
 
 
+class SaleListSerializer(serializers.ModelSerializer):
+    """سریالایزر سبک برای لیست فروش‌ها"""
+    seller_name    = serializers.CharField(source='seller.name',  read_only=True)
+    customer_name  = serializers.CharField(source='customer.name',  read_only=True, default=None)
+    customer_phone = serializers.CharField(source='customer.phone', read_only=True, default=None)
+    created_by     = serializers.StringRelatedField(read_only=True)
+
+    class Meta:
+        model  = Sale
+        fields = [
+            'id', 'date_time', 'total_amount', 'remaining_balance',
+            'branch', 'description',
+            'seller', 'seller_name',
+            'customer', 'customer_name', 'customer_phone',
+            'created_by',
+        ]
+
+
+# ── Expense ───────────────────────────────────────────────────────────────────
+
 class ExpenseSerializer(serializers.ModelSerializer):
-    cheques = ChequeSerializer(many=True, required=False)
+    cheques    = ChequeSerializer(many=True, required=False)
     created_by = serializers.StringRelatedField(read_only=True)
 
     class Meta:
-        model = Expense
+        model  = Expense
         fields = '__all__'
 
     @transaction.atomic
     def create(self, validated_data):
-        request = self.context.get('request')
+        request     = self.context.get('request')
         validated_data['created_by'] = request.user
         cheques_data = validated_data.pop('cheques', [])
 
         expense = Expense.objects.create(**validated_data)
 
         for ch_data in cheques_data:
-            cheque_number = ch_data.get('cheque_number')
-            is_endorsed = ch_data.pop('is_endorsed', False)
-            # تغییر ۴: cheque_image_url اختیاری
+            cheque_number    = ch_data.get('cheque_number')
+            is_endorsed      = ch_data.pop('is_endorsed', False)
             cheque_image_url = ch_data.pop('cheque_image_url', None)
 
             if is_endorsed:
-                existing_cheque = Cheque.objects.filter(cheque_number=cheque_number).first()
-                if existing_cheque:
-                    existing_cheque.is_endorsed = True
-                    existing_cheque.expense = expense
+                existing = Cheque.objects.filter(cheque_number=cheque_number).first()
+                if existing:
+                    existing.is_endorsed = True
+                    existing.expense     = expense
                     if cheque_image_url:
-                        existing_cheque.cheque_image_url = cheque_image_url
-                    existing_cheque.description = (
-                        f"{existing_cheque.description or ''} | خرج شده بابت فاکتور هزینه {expense.id}"
+                        existing.cheque_image_url = cheque_image_url
+                    existing.description = (
+                        f"{existing.description or ''} | "
+                        f"خرج شده بابت فاکتور هزینه {expense.id}"
                     )
-                    existing_cheque.save()
+                    existing.save()
                 else:
                     Cheque.objects.create(
                         expense=expense, is_endorsed=True,
@@ -196,73 +237,60 @@ class ExpenseSerializer(serializers.ModelSerializer):
         return expense
 
 
+# ── DamageReport / ItemExit ───────────────────────────────────────────────────
+
 class DamageReportSerializer(serializers.ModelSerializer):
     created_by = serializers.StringRelatedField(read_only=True)
+
     class Meta:
-        model = DamageReport
+        model  = DamageReport
         fields = '__all__'
 
 
 class ItemExitSerializer(serializers.ModelSerializer):
     created_by = serializers.StringRelatedField(read_only=True)
+
     class Meta:
-        model = ItemExit
+        model  = ItemExit
         fields = '__all__'
 
+
+# ── Checklist / Task ──────────────────────────────────────────────────────────
 
 class TaskSerializer(serializers.ModelSerializer):
     class Meta:
-        model = Task
-        fields = '__all__'
+        model        = Task
+        fields       = '__all__'
         read_only_fields = ['checklist']
 
 
 class ChecklistSerializer(serializers.ModelSerializer):
-    tasks = TaskSerializer(many=True, read_only=True)
+    tasks      = TaskSerializer(many=True, read_only=True)
     created_by = serializers.StringRelatedField(read_only=True)
+
     class Meta:
-        model = Checklist
+        model  = Checklist
         fields = '__all__'
 
 
-# تغییر ۳: سریالایزر مختصر برای لیست فروش‌ها (سبک‌تر از SaleSerializer کامل)
-class SaleListSerializer(serializers.ModelSerializer):
-    seller_name = serializers.CharField(source='seller.name', read_only=True)
-    customer_name = serializers.CharField(source='customer.name', read_only=True, default=None)
-    customer_phone = serializers.CharField(source='customer.phone', read_only=True, default=None)
-    created_by = serializers.StringRelatedField(read_only=True)
+# ── DepositOrder ──────────────────────────────────────────────────────────────
 
-    class Meta:
-        model = Sale
-        fields = [
-            'id', 'date_time', 'total_amount', 'remaining_balance',
-            'branch', 'description',
-            'seller', 'seller_name',
-            'customer', 'customer_name', 'customer_phone',
-            'created_by',
-        ]
-
-from core.models import DepositOrder, DepositOrderItem
- 
- 
 class DepositOrderItemSerializer(serializers.ModelSerializer):
     total_price = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
- 
+
     class Meta:
         model  = DepositOrderItem
         fields = ['id', 'item_name', 'quantity', 'unit_price', 'total_price']
- 
- 
+
+
 class DepositOrderSerializer(serializers.ModelSerializer):
-    items           = DepositOrderItemSerializer(many=True)
-    created_by      = serializers.StringRelatedField(read_only=True)
-    # فیلدهای خوانا از مشتری — نمایش یکجا
-    customer_name   = serializers.CharField(source='customer.name',  read_only=True)
-    customer_phone  = serializers.CharField(source='customer.phone', read_only=True)
-    seller_name     = serializers.CharField(source='seller.name',    read_only=True)
-    # لینک فاکتور نهایی (فقط خواندن)
-    sale            = serializers.PrimaryKeyRelatedField(read_only=True)
- 
+    items          = DepositOrderItemSerializer(many=True)
+    created_by     = serializers.StringRelatedField(read_only=True)
+    customer_name  = serializers.CharField(source='customer.name',  read_only=True)
+    customer_phone = serializers.CharField(source='customer.phone', read_only=True)
+    seller_name    = serializers.CharField(source='seller.name',    read_only=True)
+    sale           = serializers.PrimaryKeyRelatedField(read_only=True)
+
     class Meta:
         model  = DepositOrder
         fields = [
@@ -280,51 +308,51 @@ class DepositOrderSerializer(serializers.ModelSerializer):
             'items',
         ]
         read_only_fields = ['created_at', 'created_by', 'remaining_debt', 'sale']
- 
+
     def validate(self, attrs):
-        total   = Decimal(str(attrs.get('total_amount', 0)))
+        total    = Decimal(str(attrs.get('total_amount', 0)))
         discount = Decimal(str(attrs.get('discount_amount', 0)))
-        paid    = Decimal(str(attrs.get('deposit_paid', 0)))
- 
+        paid     = Decimal(str(attrs.get('deposit_paid', 0)))
+
         if discount > total:
             raise serializers.ValidationError("تخفیف نمی‌تواند از مبلغ کل بیشتر باشد.")
         if paid > (total - discount):
-            raise serializers.ValidationError("مبلغ بیعانه از مبلغ خالص سفارش (پس از تخفیف) بیشتر است.")
+            raise serializers.ValidationError(
+                "مبلغ بیعانه از مبلغ خالص سفارش (پس از تخفیف) بیشتر است."
+            )
         if not attrs.get('items'):
             raise serializers.ValidationError("سفارش باید حداقل یک قلم کالا داشته باشد.")
         return attrs
- 
+
     @transaction.atomic
     def create(self, validated_data):
         items_data = validated_data.pop('items', [])
         validated_data['created_by'] = self.context['request'].user
-        order = DepositOrder.objects.create(**validated_data)   # save() خودکار remaining_debt رو حساب می‌کنه
+        order = DepositOrder.objects.create(**validated_data)
         for item in items_data:
             DepositOrderItem.objects.create(order=order, **item)
         return order
- 
+
     @transaction.atomic
     def update(self, instance, validated_data):
         items_data = validated_data.pop('items', None)
-        # به‌روزرسانی فیلدهای اصلی
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
-        instance.save()   # save() خودکار remaining_debt رو حساب می‌کنه
-        # اگر لیست اقلام ارسال شده، جایگزین می‌شه
+        instance.save()
         if items_data is not None:
             instance.items.all().delete()
             for item in items_data:
                 DepositOrderItem.objects.create(order=instance, **item)
         return instance
- 
- 
+
+
 class DepositOrderListSerializer(serializers.ModelSerializer):
-    """سریالایزر سبک برای لیست — بدون nested items"""
+    """سریالایزر سبک برای لیست بیعانه‌ها — بدون nested items"""
     customer_name  = serializers.CharField(source='customer.name',  read_only=True)
     customer_phone = serializers.CharField(source='customer.phone', read_only=True)
     seller_name    = serializers.CharField(source='seller.name',    read_only=True)
     created_by     = serializers.StringRelatedField(read_only=True)
- 
+
     class Meta:
         model  = DepositOrder
         fields = [
@@ -339,3 +367,11 @@ class DepositOrderListSerializer(serializers.ModelSerializer):
             'sale',
             'description',
         ]
+
+
+# ── Endpoint اطلاعات شعب ─────────────────────────────────────────────────────
+
+class BranchChoicesSerializer(serializers.Serializer):
+    """برمی‌گرداند لیست شعب برای نمایش در فرانت‌اند"""
+    value = serializers.CharField()
+    label = serializers.CharField()
