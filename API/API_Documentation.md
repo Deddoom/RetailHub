@@ -1332,6 +1332,528 @@ DELETE /api/tasks/{task_uuid}/
 
 ---
 
+# ۱۱. شعب سیستم (Branches)
+
+> جدید در نسخه ۳
+> سیستم اکنون از ۴ شعبه ثابت پشتیبانی می‌کند و فرانت‌اند نباید لیست شعب را HardCode کند.
+
+---
+
+## 11.1 دریافت لیست شعب
+
+```http
+GET /api/branches/
+```
+
+**دسترسی:** 🔐 همه کاربران احراز هویت‌شده
+
+### Header
+
+```http
+Authorization: Bearer <access_token>
+```
+
+### Response — 200 OK
+
+```json
+[
+  {
+    "value": "HEAD_OFFICE",
+    "label": "دفتر مرکزی"
+  },
+  {
+    "value": "BRANCH_1",
+    "label": "شعبه ۱"
+  },
+  {
+    "value": "BRANCH_2",
+    "label": "شعبه ۲"
+  },
+  {
+    "value": "BRANCH_3",
+    "label": "شعبه ۳"
+  }
+]
+```
+
+### فیلدها
+
+| فیلد  | نوع    | توضیح                         |
+| ----- | ------ | ----------------------------- |
+| value | string | مقدار ذخیره‌شده در دیتابیس    |
+| label | string | متن قابل نمایش در رابط کاربری |
+
+### کاربرد در فرانت‌اند
+
+* فرم ثبت فاکتور فروش
+* فرم ثبت سفارش بیعانه
+* فرم ثبت هزینه
+* فرم ثبت خرابی
+* فرم خروج کالا
+* فیلتر گزارش‌ها
+* نمایش شعبه کاربر
+
+---
+
+# ۱۲. سفارش‌های بیعانه (Deposit Orders)
+
+> جدید در نسخه ۳
+
+**دسترسی:** 📝 ADMIN همه سفارش‌ها را مشاهده می‌کند. سایر کاربران فقط سفارش‌های ثبت‌شده توسط خودشان را مشاهده می‌کنند.
+
+---
+
+## ساختار کلی
+
+```
+DepositOrder
+ ├── Customer
+ ├── Seller
+ ├── Branch
+ ├── DepositOrderItems[]
+ └── Sale (پس از تسویه)
+```
+
+---
+
+## وضعیت‌های سفارش
+
+| مقدار     | توضیح           |
+| --------- | --------------- |
+| PENDING   | در انتظار تحویل |
+| DELIVERED | تحویل شده       |
+| CANCELLED | لغو شده         |
+
+---
+
+## فرمول محاسبه بدهی
+
+```
+remaining_debt =
+total_amount
+-
+discount_amount
+-
+deposit_paid
+```
+
+این مقدار توسط سرور محاسبه می‌شود.
+
+---
+
+## 12.1 لیست سفارش‌های بیعانه
+
+```http
+GET /api/deposit-orders/
+```
+
+### Query Parameters
+
+| پارامتر   | نوع        | توضیح         |
+| --------- | ---------- | ------------- |
+| branch    | string     | فیلتر شعبه    |
+| status    | string     | فیلتر وضعیت   |
+| seller    | uuid       | فیلتر فروشنده |
+| customer  | uuid       | فیلتر مشتری   |
+| from_date | YYYY-MM-DD | از تاریخ      |
+| to_date   | YYYY-MM-DD | تا تاریخ      |
+
+### مثال
+
+```http
+GET /api/deposit-orders/?status=PENDING
+```
+
+```http
+GET /api/deposit-orders/?branch=HEAD_OFFICE
+```
+
+```http
+GET /api/deposit-orders/?status=PENDING&branch=HEAD_OFFICE
+```
+
+### Response
+
+```json
+[
+  {
+    "id": "uuid",
+    "created_at": "2026-06-10T10:00:00Z",
+
+    "branch": "HEAD_OFFICE",
+
+    "seller": "uuid",
+    "seller_name": "امیر قاسمی",
+
+    "customer": "uuid",
+    "customer_name": "علیرضا فتاحی",
+    "customer_phone": "09121234567",
+
+    "delivery_date": "2026-07-15",
+
+    "total_amount": "8000000.00",
+    "discount_amount": "500000.00",
+
+    "deposit_paid": "2000000.00",
+    "remaining_debt": "5500000.00",
+
+    "status": "PENDING",
+
+    "sale": null,
+
+    "description": "سفارش نهال"
+  }
+]
+```
+
+---
+
+## 12.2 ثبت سفارش بیعانه جدید
+
+```http
+POST /api/deposit-orders/
+```
+
+### Request Body
+
+```json
+{
+  "branch": "HEAD_OFFICE",
+
+  "seller": "seller_uuid",
+
+  "customer": "customer_uuid",
+
+  "delivery_date": "2026-07-15",
+
+  "total_amount": "8000000.00",
+
+  "discount_amount": "500000.00",
+
+  "deposit_paid": "2000000.00",
+
+  "deposit_payment_method": "CASH",
+
+  "description": "سفارش نهال",
+
+  "items": [
+    {
+      "item_name": "نهال گردو",
+      "quantity": 10,
+      "unit_price": "600000.00"
+    },
+    {
+      "item_name": "نهال کاج",
+      "quantity": 5,
+      "unit_price": "400000.00"
+    }
+  ]
+}
+```
+
+### فیلدهای اصلی
+
+| فیلد                   | نوع     | اجباری |
+| ---------------------- | ------- | ------ |
+| branch                 | string  | ✅      |
+| seller                 | uuid    | ✅      |
+| customer               | uuid    | ✅      |
+| delivery_date          | date    | ✅      |
+| total_amount           | decimal | ✅      |
+| discount_amount        | decimal | ❌      |
+| deposit_paid           | decimal | ❌      |
+| deposit_payment_method | string  | ❌      |
+| description            | string  | ❌      |
+| items                  | array   | ✅      |
+
+---
+
+## مقادیر مجاز deposit_payment_method
+
+```text
+CASH
+CARD_TO_CARD
+CHEQUE
+POS
+OTHER
+```
+
+---
+
+## فیلدهای items
+
+| فیلد       | نوع     | اجباری |
+| ---------- | ------- | ------ |
+| item_name  | string  | ✅      |
+| quantity   | integer | ✅      |
+| unit_price | decimal | ✅      |
+
+---
+
+## 12.3 مشاهده سفارش خاص
+
+```http
+GET /api/deposit-orders/{uuid}/
+```
+
+### Response
+
+```json
+{
+  "id": "uuid",
+
+  "created_at": "2026-06-10T10:00:00Z",
+
+  "branch": "HEAD_OFFICE",
+
+  "seller": "seller_uuid",
+  "seller_name": "امیر قاسمی",
+
+  "customer": "customer_uuid",
+  "customer_name": "علیرضا فتاحی",
+  "customer_phone": "09121234567",
+
+  "delivery_date": "2026-07-15",
+
+  "total_amount": "8000000.00",
+
+  "discount_amount": "500000.00",
+
+  "deposit_paid": "2000000.00",
+
+  "remaining_debt": "5500000.00",
+
+  "deposit_payment_method": "CASH",
+
+  "debt_payment_method": null,
+
+  "status": "PENDING",
+
+  "sale": null,
+
+  "description": "سفارش نهال",
+
+  "items": [
+    {
+      "id": "uuid",
+      "item_name": "نهال گردو",
+      "quantity": 10,
+      "unit_price": "600000.00",
+      "total_price": "6000000.00"
+    }
+  ]
+}
+```
+
+---
+
+## 12.4 ویرایش سفارش
+
+```http
+PUT /api/deposit-orders/{uuid}/
+```
+
+یا
+
+```http
+PATCH /api/deposit-orders/{uuid}/
+```
+
+### تغییر تاریخ تحویل
+
+```json
+{
+  "delivery_date": "2026-07-20"
+}
+```
+
+### لغو سفارش
+
+```json
+{
+  "status": "CANCELLED"
+}
+```
+
+### نکته مهم
+
+اگر فیلد items در PATCH ارسال شود:
+
+```json
+{
+  "items": [...]
+}
+```
+
+کل لیست قبلی حذف و با لیست جدید جایگزین خواهد شد.
+
+---
+
+## 12.5 حذف سفارش
+
+```http
+DELETE /api/deposit-orders/{uuid}/
+```
+
+### Response
+
+```http
+204 No Content
+```
+
+---
+
+## 12.6 تسویه نهایی سفارش
+
+```http
+PATCH /api/deposit-orders/{uuid}/settle/
+```
+
+### Request Body
+
+```json
+{
+  "debt_payment_method": "CASH",
+  "description": "تحویل کالا انجام شد"
+}
+```
+
+### payment methods
+
+```text
+CASH
+CARD_TO_CARD
+CHEQUE
+POS
+COMBINED
+OTHER
+```
+
+### Response
+
+```json
+{
+  "message": "سفارش با موفقیت تسویه شد.",
+  "sale_id": "sale_uuid",
+  "deposit_order_id": "deposit_uuid"
+}
+```
+
+### خطاها
+
+```json
+{
+  "error": "این سفارش قبلاً تسویه شده است."
+}
+```
+
+```json
+{
+  "error": "سفارش لغو شده قابل تسویه نیست."
+}
+```
+
+```json
+{
+  "error": "نحوه پرداخت بدهی (debt_payment_method) الزامی است."
+}
+```
+
+---
+
+# راهنمای پیاده‌سازی فرانت‌اند
+
+## صفحه ثبت بیعانه
+
+ابتدا:
+
+```http
+GET /api/branches/
+GET /api/sellers/lookup/
+GET /api/customers/
+```
+
+سپس:
+
+```http
+POST /api/deposit-orders/
+```
+
+---
+
+## صفحه لیست بیعانه‌ها
+
+فیلترها:
+
+* شعبه
+* فروشنده
+* مشتری
+* وضعیت
+* از تاریخ
+* تا تاریخ
+
+Endpoint:
+
+```http
+GET /api/deposit-orders/
+```
+
+---
+
+## صفحه جزئیات
+
+```http
+GET /api/deposit-orders/{id}/
+```
+
+نمایش:
+
+* اطلاعات مشتری
+* اطلاعات فروشنده
+* شعبه
+* اقلام سفارش
+* بیعانه پرداختی
+* بدهی باقی‌مانده
+* وضعیت سفارش
+
+---
+
+## صفحه تسویه
+
+```http
+PATCH /api/deposit-orders/{id}/settle/
+```
+
+بعد از موفقیت:
+
+* بروزرسانی وضعیت به DELIVERED
+* ذخیره sale_id
+* هدایت به صفحه فاکتور فروش
+* رفرش اطلاعات سفارش
+
+---
+
+# تغییرات نسخه ۳
+
+✅ اضافه شدن API شعب
+
+✅ اضافه شدن Deposit Orders
+
+✅ پشتیبانی کامل از ۴ شعبه
+
+✅ امکان فیلتر بر اساس شعبه
+
+✅ امکان تسویه خودکار و تولید Sale
+
+✅ پشتیبانی از وضعیت‌های PENDING / DELIVERED / CANCELLED
+
+✅ پشتیبانی از اقلام سفارش (items)
+
+✅ محاسبه خودکار remaining_debt
+
+✅ بروزرسانی آمار مشتری هنگام تسویه
+
+
 # 💡 نکات مهم فرانت‌اند
 
 **مدیریت توکن:**
