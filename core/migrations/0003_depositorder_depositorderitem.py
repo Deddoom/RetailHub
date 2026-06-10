@@ -9,6 +9,7 @@ class Migration(migrations.Migration):
     dependencies = [
         # نام migration قبلی خودتون رو اینجا بذارید
         ('core', '0001_initial'),
+        ('core', '0002_cheque_cheque_image_url_alter_sale_customer'),
     ]
  
     operations = [

@@ -23,4 +23,4 @@ RetailHub/
     ├── views.py
     └── urls.py          
     └── migrations/
-    	└── depositorder_depositorderitem.py
+    	└── 0002_depositorder_depositorderitem.py
