@@ -1,19 +1,19 @@
 RetailHub/
 │
-├── Dockerfile          <-- جدید
-├── docker-compose.yml  <-- جدید
-├── .env                <-- جدید
+├── Dockerfile         
+├── docker-compose.yml  
+├── .env                
 ├── manage.py
 ├── requirements.txt
 ├── nginx.conf
 │
-├── project/             <-- پوشه تنظیمات اصلی ساختار جنگو
+├── project/            
 │   ├── __init__.py
 │   ├── settings.py
-│   ├── urls.py          <-- ۱. فایل روتینگ اصلی پروژه
-│   └── wsgi.py          <-- ۲. فایل اتصال به وب‌سرور (جدید)
+│   ├── urls.py          
+│   └── wsgi.py          
 │
-└── core/                <-- پوشه ماژول یا اپلیکیشن هسته سیستم
+└── core/                
     ├── __init__.py
     ├── apps.py
     ├── models.py
@@ -21,4 +21,6 @@ RetailHub/
     ├── authentication.py
     ├── permissions.py
     ├── views.py
-    └── urls.py          <-- ۳. فایل روتینگ داخلی اپلیکیشن هسته
+    └── urls.py          
+    └── migrations/
+    	└── depositorder_depositorderitem.py

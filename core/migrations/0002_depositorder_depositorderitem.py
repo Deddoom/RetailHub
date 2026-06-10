@@ -17,7 +17,7 @@ class Migration(migrations.Migration):
             fields=[
                 ('id',                     models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
                 ('created_at',             models.DateTimeField(auto_now_add=True)),
-                ('branch',                 models.CharField(max_length=100)),
+                ('branch',                 models.CharField(max_length=50)),
                 ('delivery_date',          models.DateField()),
                 ('total_amount',           models.DecimalField(decimal_places=2, max_digits=12)),
                 ('discount_amount',        models.DecimalField(decimal_places=2, default='0.00', max_digits=12)),
