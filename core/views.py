@@ -4,6 +4,7 @@ from rest_framework.decorators import action
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.db import transaction
+from django.db.models import ProtectedError
 from django.utils import timezone
 from decimal import Decimal
 from datetime import date
@@ -28,6 +29,23 @@ from core.serializers import (
 )
 from core.authentication import StatelessTokenService
 from core.permissions import IsAdminUser, IsOwnerOrAdminOnly
+
+
+# ── Safe Destroy Mixin ────────────────────────────────────────────────────────
+
+class SafeDestroyMixin:
+    """
+    جلوگیری از خطای ۵۰۰ هنگام حذف رکوردهایی که رکورد وابسته دارند.
+    خطای ProtectedError را به یک پاسخ ۴۰۰ واضح تبدیل می‌کند.
+    """
+    def destroy(self, request, *args, **kwargs):
+        try:
+            return super().destroy(request, *args, **kwargs)
+        except ProtectedError:
+            return Response(
+                {"error": "این رکورد دارای اطلاعات وابسته است و قابل حذف نمی‌باشد."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
@@ -89,7 +107,7 @@ class BranchListView(APIView):
 
 # ── Users ─────────────────────────────────────────────────────────────────────
 
-class UserViewSet(viewsets.ModelViewSet):
+class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     queryset         = CustomUser.objects.all().order_by('-date_joined')
     serializer_class = UserSerializer
     permission_classes = [IsAdminUser]
@@ -97,7 +115,7 @@ class UserViewSet(viewsets.ModelViewSet):
 
 # ── Sellers ───────────────────────────────────────────────────────────────────
 
-class SellerViewSet(viewsets.ModelViewSet):
+class SellerViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     queryset         = Seller.objects.all()
     serializer_class = SellerSerializer
 
@@ -119,7 +137,7 @@ class SellerViewSet(viewsets.ModelViewSet):
 
 # ── Customers ─────────────────────────────────────────────────────────────────
 
-class CustomerViewSet(viewsets.ModelViewSet):
+class CustomerViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     queryset           = Customer.objects.all()
     serializer_class   = CustomerSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -127,7 +145,7 @@ class CustomerViewSet(viewsets.ModelViewSet):
 
 # ── Sales ─────────────────────────────────────────────────────────────────────
 
-class SaleViewSet(viewsets.ModelViewSet):
+class SaleViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     permission_classes = [IsOwnerOrAdminOnly]
 
     def get_serializer_class(self):
@@ -167,7 +185,7 @@ class SaleViewSet(viewsets.ModelViewSet):
 
 # ── Expenses ──────────────────────────────────────────────────────────────────
 
-class ExpenseViewSet(viewsets.ModelViewSet):
+class ExpenseViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     serializer_class   = ExpenseSerializer
     permission_classes = [IsOwnerOrAdminOnly]
 
@@ -178,7 +196,7 @@ class ExpenseViewSet(viewsets.ModelViewSet):
 
 # ── DamageReport ──────────────────────────────────────────────────────────────
 
-class DamageReportViewSet(viewsets.ModelViewSet):
+class DamageReportViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     queryset           = DamageReport.objects.all()
     serializer_class   = DamageReportSerializer
     permission_classes = [IsOwnerOrAdminOnly]
@@ -189,7 +207,7 @@ class DamageReportViewSet(viewsets.ModelViewSet):
 
 # ── ItemExit ──────────────────────────────────────────────────────────────────
 
-class ItemExitViewSet(viewsets.ModelViewSet):
+class ItemExitViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     queryset           = ItemExit.objects.all()
     serializer_class   = ItemExitSerializer
     permission_classes = [IsOwnerOrAdminOnly]
@@ -200,7 +218,7 @@ class ItemExitViewSet(viewsets.ModelViewSet):
 
 # ── Checklists ────────────────────────────────────────────────────────────────
 
-class ChecklistViewSet(viewsets.ModelViewSet):
+class ChecklistViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     queryset         = Checklist.objects.all().prefetch_related('tasks')
     serializer_class = ChecklistSerializer
 
@@ -215,7 +233,7 @@ class ChecklistViewSet(viewsets.ModelViewSet):
 
 # ── Tasks ─────────────────────────────────────────────────────────────────────
 
-class TaskViewSet(viewsets.ModelViewSet):
+class TaskViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     queryset           = Task.objects.all()
     serializer_class   = TaskSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -244,7 +262,7 @@ class TaskViewSet(viewsets.ModelViewSet):
 
 # ── DepositOrders ─────────────────────────────────────────────────────────────
 
-class DepositOrderViewSet(viewsets.ModelViewSet):
+class DepositOrderViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     """
     CRUD کامل سفارش‌های بیعانه
 
