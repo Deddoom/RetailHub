@@ -1867,8 +1867,57 @@ Future<List<dynamic>> fetchBranches(String accessToken) async {
 
 ```
 
+## حذف فروشنده
+## متد: DELETE
 
+## آدرس: DELETE /api/sellers/{id}/
 
+## کد Flutter
+```
+dartFuture<void> deleteSeller(String sellerId) async {
+  final response = await dio.delete(
+    '/api/sellers/$sellerId/',
+  );
+
+  // موفق: 204 No Content
+  // خطا: 400 اگر فروشنده فاکتور داشته باشه
+}
+```
+## هندل کردن جواب‌ها
+## Status Codeمعنیکار فرانت‌اند204حذف موفقنمایش پیام موفقیت + رفرش لیست400رکورد وابسته داردنمایش پیام خطا به کاربر403دسترسی ندارد (غیر ادمین)نمایش پیام دسترسی404فروشنده پیدا نشدنمایش پیام خطا
+
+## مثال کامل با مدیریت خطا
+```
+dartFuture<void> deleteSeller(String sellerId) async {
+  try {
+    await dio.delete('/api/sellers/$sellerId/');
+
+    // ✅ حذف موفق
+    showSnackBar('فروشنده با موفقیت حذف شد');
+    fetchSellers(); // رفرش لیست
+
+  } on DioException catch (e) {
+    if (e.response?.statusCode == 400) {
+      // ❌ رکورد وابسته دارد
+      final message = e.response?.data['error'] ?? 'خطا در حذف فروشنده';
+      showSnackBar(message); // "این رکورد دارای اطلاعات وابسته است و قابل حذف نمی‌باشد."
+
+    } else if (e.response?.statusCode == 403) {
+      showSnackBar('شما دسترسی حذف ندارید');
+
+    } else if (e.response?.statusCode == 404) {
+      showSnackBar('فروشنده یافت نشد');
+
+    } else {
+      showSnackBar('خطای سرور، لطفاً دوباره تلاش کنید');
+    }
+  }
+}
+```
+## نکته مهم: چون در get_permissions فقط ادمین می‌تونه حذف کنه، مطمئن بشید توکن کاربر ادمین در هدر ارسال میشه:
+```
+dartdio.options.headers['Authorization'] = 'Bearer $token';
+```
 
 
 
