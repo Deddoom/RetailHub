@@ -1833,6 +1833,50 @@ PATCH /api/deposit-orders/{id}/settle/
 
 ---
 
+## متد get برای شعب
+
+```
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+
+Future<List<dynamic>> fetchBranches(String accessToken) async {
+  final url = Uri.parse('http://185.213.164.106/api/branches/');
+  
+  try {
+    final response = await http.get(
+      url,
+      headers: {
+        'Content-Type': 'application/json; charset=UTF-8',
+        'Authorization': 'Bearer $accessToken', // توکن دریافتی از لاگین
+      },
+    );
+
+    if (response.statusCode == 200) {
+      // رمزگشایی صحیح متون فارسی با utf8.decode
+      List<dynamic> branches = jsonDecode(utf8.decode(response.bodyBytes));
+      return branches;
+    } else {
+      print('خطا در دریافت شعب. کد وضعیت: ${response.statusCode}');
+      throw Exception('Failed to load branches');
+    }
+  } catch (e) {
+    print('خطا در ارتباط با سرور: $e');
+    rethrow;
+  }
+}
+
+```
+
+
+
+
+
+
+
+
+
+---
+
 # تغییرات نسخه ۳
 
 ✅ اضافه شدن API شعب

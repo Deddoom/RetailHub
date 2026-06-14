@@ -4,7 +4,8 @@ from rest_framework.routers import DefaultRouter
 from core.views import (
     AuthTokenView, UserViewSet, SellerViewSet, CustomerViewSet,
     SaleViewSet, ExpenseViewSet, DamageReportViewSet,
-    ItemExitViewSet, ChecklistViewSet, TaskViewSet, DepositOrderViewSet
+    ItemExitViewSet, ChecklistViewSet, TaskViewSet, DepositOrderViewSet,
+    BranchListView
 )
 
 router = DefaultRouter()
@@ -21,5 +22,6 @@ router.register(r'deposit-orders', DepositOrderViewSet, basename='deposit-order'
 
 urlpatterns = [
     path('auth/token/', AuthTokenView.as_view(), name='auth_token_login'),
+    path('branches/', BranchListView.as_view(), name='branch_list'), # <--- ۲. این خط را حتماً اضافه کنید
     path('', include(router.urls)),
 ]
