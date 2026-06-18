@@ -17,7 +17,7 @@ from core.models import (
     DamageReport, ItemExit,
     Checklist, Task,
     DepositOrder, DepositOrderItem,
-    BRANCH_CHOICES, Mission,
+    BRANCH_CHOICES, Mission, Role,
 )
 from core.serializers import (
     UserSerializer,
@@ -28,7 +28,7 @@ from core.serializers import (
     DamageReportSerializer, ItemExitSerializer,
     ChecklistSerializer, TaskSerializer,
     DepositOrderSerializer, DepositOrderListSerializer,
-    MissionSerializer, 
+    MissionSerializer, RoleSerializer,
 )
 from core.authentication import StatelessTokenService
 from core.permissions import IsAdminUser, IsOwnerOrAdminOnly, IsSuperiorUser
@@ -461,3 +461,13 @@ class TaskViewSet(viewsets.ModelViewSet):
             else:
                 from rest_framework.exceptions import PermissionDenied
                 raise PermissionDenied("تغییرات ساختاری تسک‌ها فقط توسط بالادستی مجاز است.")
+            
+
+class RoleViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    فقط ADMIN می‌تواند لیست نقش‌ها را ببیند
+    نقش‌ها ثابت هستند و از طریق API ساخته نمی‌شوند
+    """
+    queryset = Role.objects.all()
+    serializer_class = RoleSerializer
+    permission_classes = [IsAdminUser]
