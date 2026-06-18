@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
-from rest_framework import viewsets, status, permissions
+from rest_framework import viewsets, status, permissions, filters
 from rest_framework.decorators import action
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.db import transaction
-from django.db.models import ProtectedError
+from django.db.models import ProtectedError, Q
 from django.utils import timezone
 from decimal import Decimal
 from datetime import date
+from rest_framework.permissions import IsAuthenticated
 
 from core.models import (
     CustomUser, Seller, Customer,
@@ -15,7 +16,7 @@ from core.models import (
     DamageReport, ItemExit,
     Checklist, Task,
     DepositOrder, DepositOrderItem,
-    BRANCH_CHOICES,
+    BRANCH_CHOICES, Mission,
 )
 from core.serializers import (
     UserSerializer,
@@ -26,9 +27,10 @@ from core.serializers import (
     DamageReportSerializer, ItemExitSerializer,
     ChecklistSerializer, TaskSerializer,
     DepositOrderSerializer, DepositOrderListSerializer,
+    MissionSerializer, 
 )
 from core.authentication import StatelessTokenService
-from core.permissions import IsAdminUser, IsOwnerOrAdminOnly
+from core.permissions import IsAdminUser, IsOwnerOrAdminOnly, IsSuperiorUser
 
 
 # ── Safe Destroy Mixin ────────────────────────────────────────────────────────
@@ -398,3 +400,104 @@ class DepositOrderViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
             },
             status=status.HTTP_200_OK
         )
+    
+# ── ویوسِت مأموریت‌ها ──────────────────────────────────
+class MissionViewSet(viewsets.ModelViewSet):
+    serializer_class = MissionSerializer
+    permission_classes = [IsAuthenticated, IsSuperiorUser]
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['title', 'description']
+
+    def get_queryset(self):
+        user = self.request.user
+        
+        # اگر کاربر ادمین یا مدیریت کل باشد، همه مأموریت‌ها را می‌بیند
+        if user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all()):
+            return Mission.objects.all()
+
+        # در غیر این صورت: مأموریت‌هایی که به خودش تخصیص داده شده
+        # یا خودش ساخته است، یا به کسانی تخصیص داده شده که این کاربر بالادستِ آنهاست.
+        # برای بهینه‌سازی، ابتدا مأموریت‌های مربوط به خودش و مأموریت‌های ساخته شده توسط خودش را می‌گیریم.
+        queryset = Mission.objects.filter(Q(assigned_to=user) | Q(created_by=user))
+        
+        # پیدا کردن تمام مأموریت‌هایی که شخصِ تخصیص‌یافته‌ی آن، زیردستِ این کاربر است
+        all_missions = Mission.objects.all()
+        subordinate_mission_ids = []
+        for mission in all_missions:
+            if user.is_superior_to(mission.assigned_to):
+                subordinate_mission_ids.append(mission.id)
+                
+        return Mission.objects.filter(id__in=list(queryset.values_list('id', flat=True)) + subordinate_mission_ids).distinct()
+
+    def perform_create(self, serializer):
+        # ذخیره خودکار سازنده مأموریت
+        serializer.save(created_by=self.request.user)
+
+
+# ── ویوسِت چک‌لیست‌ها ──────────────────────────────────
+class ChecklistViewSet(viewsets.ModelViewSet):
+    serializer_class = ChecklistSerializer
+    permission_classes = [IsAuthenticated, IsSuperiorUser]
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all()):
+            return Checklist.objects.all()
+
+        queryset = Checklist.objects.filter(Q(assigned_to=user) | Q(created_by=user))
+        
+        all_checklists = Checklist.objects.all()
+        subordinate_checklist_ids = []
+        for checklist in all_checklists:
+            if user.is_superior_to(checklist.assigned_to):
+                subordinate_checklist_ids.append(checklist.id)
+                
+        return Checklist.objects.filter(id__in=list(queryset.values_list('id', flat=True)) + subordinate_checklist_ids).distinct()
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
+
+# ── ویوسِت تکالیف داخل چک‌لیست (Tasks) ─────────────────
+class TaskViewSet(viewsets.ModelViewSet):
+    """
+    برای تغییر وضعیت یک آیتمِ چک‌لیست (تیک زدن انجام شد/نشد) توسط خودِ کاربر
+    یا ویرایش متنِ تسک توسط بالادستی‌ها.
+    """
+    serializer_class = TaskSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        # کاربر تسک‌هایی را می‌بیند که یا چک‌لیستش مال خودش است یا بالادستِ صاحب چک‌لیست است
+        if user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all()):
+            return Task.objects.all()
+            
+        return Task.objects.filter(
+            Q(checklist__assigned_to=user) | 
+            Q(checklist__created_by=user)
+        )
+
+    def perform_update(self, serializer):
+        instance = self.get_object()
+        user = self.request.user
+        
+        # اگر کاربر عادی (صاحب چک‌لیست) در حال ثبت انجامِ کار است:
+        if 'is_completed' in serializer.validated_data and not user.is_superior_to(instance.checklist.assigned_to):
+            # کاربر فقط مجاز است وضعیت تیکِ مأموریت خودش را تغییر دهد و حق تغییر عنوان/توضیحات را ندارد
+            if instance.checklist.assigned_to == user:
+                is_completed = serializer.validated_data.get('is_completed')
+                if is_completed:
+                    serializer.save(completed_by=user, completed_at=datetime.datetime.now())
+                else:
+                    serializer.save(completed_by=None, completed_at=None)
+            else:
+                from rest_framework.exceptions import PermissionDenied
+                raise PermissionDenied("شما دسترسی به تغییر این تسک را ندارید.")
+        else:
+            # اگر بالادستی است، می‌تواند همه‌چیز (عنوان، وضعیت و...) را ویرایش کند.
+            if user.is_superior_to(instance.checklist.assigned_to) or instance.checklist.created_by == user:
+                serializer.save()
+            else:
+                from rest_framework.exceptions import PermissionDenied
+                raise PermissionDenied("تغییرات ساختاری تسک‌ها فقط توسط بالادستی مجاز است.")
