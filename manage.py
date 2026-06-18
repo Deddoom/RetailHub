@@ -15,25 +15,50 @@ def main():
         import django
         django.setup()
         from django.core.management import call_command
-        from core.models import CustomUser, Seller, Customer, Checklist, Task
+        from core.models import CustomUser, Seller, Customer, Role
 
         print("[!] Preparing database tables (Migrating)...")
         call_command('migrate', run_syncdb=True, interactive=False)
-        
+
         print("[!] Seeding initial data rows into database...")
+    
+        # ساخت نقش‌ها
+        admin_role, _ = Role.objects.get_or_create(code='ADMIN')
+        cashier_role, _ = Role.objects.get_or_create(code='CASHIER')
+        Role.objects.get_or_create(code='FINANCIAL_MANAGER')
+        Role.objects.get_or_create(code='EXECUTIVE_MANAGER')
+        Role.objects.get_or_create(code='SUPERVISOR')
+        Role.objects.get_or_create(code='ACCOUNTANT')
+        Role.objects.get_or_create(code='STATISTICIAN')
+        Role.objects.get_or_create(code='USER')
+
         admin_user, created = CustomUser.objects.get_or_create(
-            username='admin', defaults={'role': 'ADMIN', 'branch': 'دفتر مرکزی', 'is_staff': True, 'is_superuser': True}
+            username='admin',
+            defaults={'branch': 'شعبه بهشتی', 'is_staff': True, 'is_superuser': True}
         )
-        if created: admin_user.set_password('admin1234'); admin_user.save()
+        if created:
+            admin_user.set_password('admin1234')
+            admin_user.save()
+        admin_user.roles.add(admin_role)
 
         cashier_user, created = CustomUser.objects.get_or_create(
-            username='cashier', defaults={'role': 'CASHIER', 'branch': 'شعبه پاسداران'}
+            username='cashier',
+            defaults={'branch': 'شعبه مدرس'}
         )
-        if created: cashier_user.set_password('cashier1234'); cashier_user.save()
+        if created:
+            cashier_user.set_password('cashier1234')
+            cashier_user.save()
+        cashier_user.roles.add(cashier_role)
 
-        seller, _ = Seller.objects.get_or_create(name='امیر قاسمی', defaults={'phone': '09120001122', 'branch': 'شعبه پاسداران'})
-        customer, _ = Customer.objects.get_or_create(phone='09154445566', defaults={'name': 'علیرضا فتاحی', 'primary_goods': 'NEHAL'})
-        
+        Seller.objects.get_or_create(
+            name='امیر قاسمی',
+            defaults={'phone': '09120001122', 'branch': 'شعبه مدرس'}
+        )
+        Customer.objects.get_or_create(
+            phone='09154445566',
+            defaults={'name': 'علیرضا فتاحی', 'primary_goods': 'NEHAL'}
+        )
+
         print("[+] Seeding process finished successfully!")
         return
 

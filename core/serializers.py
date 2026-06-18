@@ -18,13 +18,35 @@ from core.models import (
 # ── Auth / User ───────────────────────────────────────────────────────────────
 
 class UserSerializer(serializers.ModelSerializer):
+    roles    = RoleSerializer(many=True, read_only=True)
+    role_ids = serializers.PrimaryKeyRelatedField(
+        many=True, queryset=Role.objects.all(),
+        source='roles', write_only=True, required=False
+    )
+
     class Meta:
         model  = CustomUser
-        fields = ['id', 'username', 'role', 'branch', 'is_active', 'password']
+        fields = ['id', 'username', 'roles', 'role_ids', 'branch', 'is_active', 'password']
         extra_kwargs = {'password': {'write_only': True}}
 
     def create(self, validated_data):
-        return CustomUser.objects.create_user(**validated_data)
+        roles = validated_data.pop('roles', [])
+        user  = CustomUser.objects.create_user(**validated_data)
+        if roles:
+            user.roles.set(roles)
+        return user
+
+    def update(self, instance, validated_data):
+        roles    = validated_data.pop('roles', None)
+        password = validated_data.pop('password', None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        if password:
+            instance.set_password(password)
+        instance.save()
+        if roles is not None:
+            instance.roles.set(roles)
+        return instance
 
 
 # ── Seller ────────────────────────────────────────────────────────────────────
@@ -256,24 +278,6 @@ class ItemExitSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
-# ── Checklist / Task ──────────────────────────────────────────────────────────
-
-class TaskSerializer(serializers.ModelSerializer):
-    class Meta:
-        model        = Task
-        fields       = '__all__'
-        read_only_fields = ['checklist']
-
-
-class ChecklistSerializer(serializers.ModelSerializer):
-    tasks      = TaskSerializer(many=True, read_only=True)
-    created_by = serializers.StringRelatedField(read_only=True)
-
-    class Meta:
-        model  = Checklist
-        fields = '__all__'
-
-
 # ── DepositOrder ──────────────────────────────────────────────────────────────
 
 class DepositOrderItemSerializer(serializers.ModelSerializer):
@@ -379,9 +383,10 @@ class BranchChoicesSerializer(serializers.Serializer):
 
 # ── سریالایزر نقش‌ها ───────────────────────────────────
 class RoleSerializer(serializers.ModelSerializer):
+    display = serializers.CharField(source='get_code_display', read_only=True)
     class Meta:
-        model = Role
-        fields = ['id', 'code', 'get_code_display']
+        model  = Role
+        fields = ['id', 'code', 'display']
 
 
 # ── سریالایزر مأموریت‌ها ─────────────────────────────────

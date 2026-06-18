@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import datetime
 from rest_framework import viewsets, status, permissions, filters
 from rest_framework.decorators import action
 from rest_framework.views import APIView
@@ -86,8 +87,9 @@ class AuthTokenView(APIView):
             )
 
         access_token = StatelessTokenService.generate_token(user)
+        roles = list(user.roles.values_list('code', flat=True))
         return Response(
-            {"access_token": access_token, "role": user.role, "branch": user.branch},
+            {"access_token": access_token, "roles": roles, "branch": user.branch},
             status=status.HTTP_200_OK
         )
 
@@ -162,7 +164,7 @@ class SaleViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
             'payments', 'payments__cheques', 'deposit_items'
         )
         user = self.request.user
-        if user.role != 'ADMIN':
+        if not (user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())):
             qs = qs.filter(created_by=user)
 
         branch      = self.request.query_params.get('branch')
@@ -193,7 +195,9 @@ class ExpenseViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = Expense.objects.select_related('created_by').prefetch_related('cheques')
-        return qs if self.request.user.role == 'ADMIN' else qs.filter(created_by=self.request.user)
+        user = self.request.user
+        is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
+        return qs if is_admin else qs.filter(created_by=user)
 
 
 # ── DamageReport ──────────────────────────────────────────────────────────────
@@ -216,50 +220,6 @@ class ItemExitViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
-
-
-# ── Checklists ────────────────────────────────────────────────────────────────
-
-class ChecklistViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
-    queryset         = Checklist.objects.all().prefetch_related('tasks')
-    serializer_class = ChecklistSerializer
-
-    def get_permissions(self):
-        if self.action in ['list', 'retrieve']:
-            return [permissions.IsAuthenticated()]
-        return [IsAdminUser()]
-
-    def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user)
-
-
-# ── Tasks ─────────────────────────────────────────────────────────────────────
-
-class TaskViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
-    queryset           = Task.objects.all()
-    serializer_class   = TaskSerializer
-    permission_classes = [permissions.IsAuthenticated]
-
-    def update(self, request, *args, **kwargs):
-        instance = self.get_object()
-        if request.user.role == 'USER':
-            is_completed_val = request.data.get('is_completed', instance.is_completed)
-            if isinstance(is_completed_val, str):
-                is_completed_val = is_completed_val.lower() in ['true', '1', 'yes']
-
-            instance.is_completed = bool(is_completed_val)
-            instance.description  = request.data.get('description', instance.description)
-
-            if instance.is_completed:
-                instance.completed_by = request.user
-                instance.completed_at = timezone.now()
-            else:
-                instance.completed_by = None
-                instance.completed_at = None
-
-            instance.save()
-            return Response(self.get_serializer(instance).data)
-        return super().update(request, *args, **kwargs)
 
 
 # ── DepositOrders ─────────────────────────────────────────────────────────────
@@ -289,7 +249,7 @@ class DepositOrderViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         ).prefetch_related('items')
 
         user = self.request.user
-        if user.role != 'ADMIN':
+        if not (user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())):
             qs = qs.filter(created_by=user)
 
         branch      = self.request.query_params.get('branch')
@@ -488,7 +448,7 @@ class TaskViewSet(viewsets.ModelViewSet):
             if instance.checklist.assigned_to == user:
                 is_completed = serializer.validated_data.get('is_completed')
                 if is_completed:
-                    serializer.save(completed_by=user, completed_at=datetime.datetime.now())
+                    serializer.save(completed_by=user, completed_at=timezone.now())
                 else:
                     serializer.save(completed_by=None, completed_at=None)
             else:
