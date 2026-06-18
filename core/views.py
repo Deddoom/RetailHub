@@ -299,21 +299,17 @@ class MissionViewSet(viewsets.ModelViewSet):
         if user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all()):
             return Mission.objects.all()
 
-        # مأموریت‌هایی که مستقیماً مرتبط با این کاربر هستند
-        mine_ids = set(
-            Mission.objects.filter(Q(assigned_to=user) | Q(created_by=user))
-            .values_list('id', flat=True)
-        )
+        # ۱. یک‌بار همه کاربران را با نقش‌هایشان بارگذاری می‌کنیم (یک query)
+        #    و لیست ID زیردستان را در پایتون محاسبه می‌کنیم
+        all_users = CustomUser.objects.prefetch_related('roles').exclude(pk=user.pk)
+        subordinate_ids = [u.id for u in all_users if user.is_superior_to(u)]
 
-        # مأموریت‌هایی که زیردستان این کاربر بر عهده دارند
-        # از prefetch برای جلوگیری از N+1 query استفاده می‌کنیم
-        sub_ids = set(
-            m.id for m in Mission.objects.select_related('assigned_to')
-                                         .prefetch_related('assigned_to__roles')
-            if user.is_superior_to(m.assigned_to)
-        )
-
-        return Mission.objects.filter(id__in=mine_ids | sub_ids).distinct()
+        # ۲. فیلتر نهایی مستقیماً در دیتابیس — بدون لود کردن کل مأموریت‌ها
+        return Mission.objects.filter(
+            Q(assigned_to=user) |
+            Q(created_by=user)  |
+            Q(assigned_to_id__in=subordinate_ids)
+        ).distinct().order_by('-created_at')
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
@@ -331,18 +327,16 @@ class ChecklistViewSet(viewsets.ModelViewSet):
         if user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all()):
             return Checklist.objects.all()
 
-        mine_ids = set(
-            Checklist.objects.filter(Q(assigned_to=user) | Q(created_by=user))
-            .values_list('id', flat=True)
-        )
+        # ۱. یک‌بار همه کاربران را با نقش‌هایشان بارگذاری می‌کنیم (یک query)
+        all_users = CustomUser.objects.prefetch_related('roles').exclude(pk=user.pk)
+        subordinate_ids = [u.id for u in all_users if user.is_superior_to(u)]
 
-        sub_ids = set(
-            cl.id for cl in Checklist.objects.select_related('assigned_to')
-                                              .prefetch_related('assigned_to__roles')
-            if user.is_superior_to(cl.assigned_to)
-        )
-
-        return Checklist.objects.filter(id__in=mine_ids | sub_ids).distinct()
+        # ۲. فیلتر نهایی مستقیماً در دیتابیس
+        return Checklist.objects.filter(
+            Q(assigned_to=user) |
+            Q(created_by=user)  |
+            Q(assigned_to_id__in=subordinate_ids)
+        ).distinct().order_by('-created_at')
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
@@ -381,57 +375,56 @@ class TaskViewSet(viewsets.ModelViewSet):
                 'checklist', 'checklist__assigned_to', 'checklist__created_by'
             ).all()
 
-        # تسک‌هایی که این کاربر صاحب چک‌لیستشان است
-        mine_ids = set(
-            Task.objects.filter(
-                Q(checklist__assigned_to=user) | Q(checklist__created_by=user)
-            ).values_list('id', flat=True)
-        )
+        # ۱. یک query برای پیدا کردن ID زیردستان
+        all_users = CustomUser.objects.prefetch_related('roles').exclude(pk=user.pk)
+        subordinate_ids = [u.id for u in all_users if user.is_superior_to(u)]
 
-        # تسک‌های زیردستان این کاربر
-        sub_ids = set(
-            t.id for t in Task.objects.select_related('checklist__assigned_to')
-                                       .prefetch_related('checklist__assigned_to__roles')
-            if user.is_superior_to(t.checklist.assigned_to)
-        )
-
-        return Task.objects.filter(id__in=mine_ids | sub_ids).distinct()
+        # ۲. فیلتر در دیتابیس
+        return Task.objects.filter(
+            Q(checklist__assigned_to=user) |
+            Q(checklist__created_by=user)  |
+            Q(checklist__assigned_to_id__in=subordinate_ids)
+        ).distinct()
 
     def perform_update(self, serializer):
         instance = self.get_object()
         user     = self.request.user
         data     = serializer.validated_data
 
-        is_owner    = instance.checklist.assigned_to == user
-        can_manage  = self._can_manage_task(user, instance)
+        is_owner   = instance.checklist.assigned_to == user
+        can_manage = self._can_manage_task(user, instance)
 
-        if can_manage:
-            # بالادستی می‌تواند همه فیلدها را تغییر دهد، از جمله تیک زدن
-            is_completed = data.get('is_completed')
-            if is_completed is True:
-                serializer.save(completed_by=user, completed_at=timezone.now())
-            elif is_completed is False:
-                serializer.save(completed_by=None, completed_at=None)
+        # ── تابع کمکی: اعمال تغییر وضعیت تیک ────────────────────────────
+        def _save_with_completion():
+            """
+            فقط زمانی completed_by/completed_at را تغییر می‌دهد که فیلد
+            is_completed صریحاً در بدنه درخواست ارسال شده باشد.
+            استفاده از 'in data' به جای data.get() تضمین می‌کند که
+            مقدار False با عدم ارسال فیلد اشتباه گرفته نشود.
+            """
+            if 'is_completed' in data:
+                if data['is_completed'] is True:
+                    serializer.save(completed_by=user, completed_at=timezone.now())
+                else:
+                    # False یا هر مقدار falsy دیگر → ریست کردن تیک
+                    serializer.save(completed_by=None, completed_at=None)
             else:
+                # is_completed ارسال نشده، فقط فیلدهای دیگر ذخیره می‌شوند
                 serializer.save()
 
+        if can_manage:
+            # بالادستی / سازنده / ادمین: همه فیلدها مجاز است
+            _save_with_completion()
+
         elif is_owner:
-            # صاحب چک‌لیست فقط می‌تواند is_completed را تغییر دهد
-            # از ارسال فیلدهای غیرمجاز جلوگیری می‌کنیم
-            forbidden_fields = {k for k in data if k not in ('is_completed',)}
+            # صاحب چک‌لیست: فقط is_completed مجاز است
+            forbidden_fields = {k for k in data if k != 'is_completed'}
             if forbidden_fields:
                 raise PermissionDenied(
                     f"شما فقط مجاز به تغییر وضعیت انجام تسک هستید. "
-                    f"فیلدهای غیرمجاز: {', '.join(forbidden_fields)}"
+                    f"فیلدهای غیرمجاز: {', '.join(sorted(forbidden_fields))}"
                 )
-
-            is_completed = data.get('is_completed')
-            if is_completed is True:
-                serializer.save(completed_by=user, completed_at=timezone.now())
-            elif is_completed is False:
-                serializer.save(completed_by=None, completed_at=None)
-            else:
-                serializer.save()
+            _save_with_completion()
 
         else:
             raise PermissionDenied("شما دسترسی به ویرایش این تسک را ندارید.")

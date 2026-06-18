@@ -400,10 +400,15 @@ class MissionSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("کاربر درخواست‌کننده مشخص نیست.")
 
         assigned_to_user = attrs.get('assigned_to')
-        if assigned_to_user and not request.user.is_superior_to(assigned_to_user):
-            raise serializers.ValidationError(
-                {"assigned_to": "شما سطح دسترسی بالادستی برای تخصیص مأموریت به این کاربر را ندارید."}
-            )
+        if assigned_to_user:
+            if not assigned_to_user.is_active:
+                raise serializers.ValidationError(
+                    {"assigned_to": "امکان تخصیص مأموریت به کاربر غیرفعال وجود ندارد."}
+                )
+            if not request.user.is_superior_to(assigned_to_user):
+                raise serializers.ValidationError(
+                    {"assigned_to": "شما سطح دسترسی بالادستی برای تخصیص مأموریت به این کاربر را ندارید."}
+                )
 
         if attrs.get('start_date') and attrs.get('end_date'):
             if attrs['start_date'] >= attrs['end_date']:
@@ -441,6 +446,10 @@ class ChecklistSerializer(serializers.ModelSerializer):
 
     def validate_assigned_to(self, value):
         request = self.context.get('request')
+        if not value.is_active:
+            raise serializers.ValidationError(
+                "امکان تخصیص چک‌لیست به کاربر غیرفعال وجود ندارد."
+            )
         if request and request.user:
             if not request.user.is_superior_to(value):
                 raise serializers.ValidationError(

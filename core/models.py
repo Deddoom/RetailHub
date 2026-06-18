@@ -288,7 +288,7 @@ class Checklist(models.Model):
     id          = models.UUIDField(primary_key=True, default=uuid4, editable=False)
     title       = models.CharField(max_length=150)
     frequency   = models.CharField(max_length=20, choices=FREQUENCY_CHOICES, default='DAILY')
-    assigned_to = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='assigned_checklists')
+    assigned_to = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='assigned_checklists', null=True, blank=True)
     created_by  = models.ForeignKey(CustomUser, on_delete=models.PROTECT,  related_name='created_checklists')
     created_at  = models.DateTimeField(auto_now_add=True)
 
