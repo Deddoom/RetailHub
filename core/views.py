@@ -2,6 +2,7 @@
 import datetime
 from rest_framework import viewsets, status, permissions, filters
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.db import transaction
@@ -37,10 +38,6 @@ from core.permissions import IsAdminUser, IsOwnerOrAdminOnly, IsSuperiorUser
 # ── Safe Destroy Mixin ────────────────────────────────────────────────────────
 
 class SafeDestroyMixin:
-    """
-    جلوگیری از خطای ۵۰۰ هنگام حذف رکوردهایی که رکورد وابسته دارند.
-    خطای ProtectedError را به یک پاسخ ۴۰۰ واضح تبدیل می‌کند.
-    """
     def destroy(self, request, *args, **kwargs):
         try:
             return super().destroy(request, *args, **kwargs)
@@ -69,22 +66,13 @@ class AuthTokenView(APIView):
         try:
             user = CustomUser.objects.get(username=username)
         except CustomUser.DoesNotExist:
-            return Response(
-                {"error": "مشخصات نامعتبر است."},
-                status=status.HTTP_401_UNAUTHORIZED
-            )
+            return Response({"error": "مشخصات نامعتبر است."}, status=status.HTTP_401_UNAUTHORIZED)
 
         if not user.check_password(password):
-            return Response(
-                {"error": "مشخصات نامعتبر است."},
-                status=status.HTTP_401_UNAUTHORIZED
-            )
+            return Response({"error": "مشخصات نامعتبر است."}, status=status.HTTP_401_UNAUTHORIZED)
 
         if not user.is_active:
-            return Response(
-                {"error": "حساب کاربری غیرفعال است."},
-                status=status.HTTP_403_FORBIDDEN
-            )
+            return Response({"error": "حساب کاربری غیرفعال است."}, status=status.HTTP_403_FORBIDDEN)
 
         access_token = StatelessTokenService.generate_token(user)
         roles = list(user.roles.values_list('code', flat=True))
@@ -94,14 +82,9 @@ class AuthTokenView(APIView):
         )
 
 
-# ── شعب ───────────────────────────────────────────────────────────────────────
+# ── Branches ──────────────────────────────────────────────────────────────────
 
 class BranchListView(APIView):
-    """
-    GET /api/branches/
-    برمی‌گرداند لیست ثابت ۴ شعبه سیستم
-    دسترسی: همه کاربران احراز هویت‌شده
-    """
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
@@ -112,8 +95,8 @@ class BranchListView(APIView):
 # ── Users ─────────────────────────────────────────────────────────────────────
 
 class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
-    queryset         = CustomUser.objects.all().order_by('-date_joined')
-    serializer_class = UserSerializer
+    queryset           = CustomUser.objects.all().order_by('-date_joined')
+    serializer_class   = UserSerializer
     permission_classes = [IsAdminUser]
 
 
@@ -130,10 +113,6 @@ class SellerViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='lookup')
     def lookup(self, request):
-        """
-        GET /api/sellers/lookup/
-        لیست ساده برای پر کردن dropdown فرانت‌اند
-        """
         sellers    = self.get_queryset()
         serializer = SellerLookupSerializer(sellers, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
@@ -153,32 +132,28 @@ class SaleViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     permission_classes = [IsOwnerOrAdminOnly]
 
     def get_serializer_class(self):
-        if self.action == 'list':
-            return SaleListSerializer
-        return SaleSerializer
+        return SaleListSerializer if self.action == 'list' else SaleSerializer
 
     def get_queryset(self):
         qs = Sale.objects.select_related(
             'seller', 'customer', 'created_by'
-        ).prefetch_related(
-            'payments', 'payments__cheques', 'deposit_items'
-        )
+        ).prefetch_related('payments', 'payments__cheques', 'deposit_items')
+
         user = self.request.user
         if not (user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())):
             qs = qs.filter(created_by=user)
 
-        branch      = self.request.query_params.get('branch')
-        seller_id   = self.request.query_params.get('seller')
-        customer_id = self.request.query_params.get('customer')
-        from_date   = self.request.query_params.get('from_date')
-        to_date     = self.request.query_params.get('to_date')
+        for param, field in [
+            ('branch',   'branch'),
+            ('seller',   'seller__id'),
+            ('customer', 'customer__id'),
+        ]:
+            val = self.request.query_params.get(param)
+            if val:
+                qs = qs.filter(**{field: val})
 
-        if branch:
-            qs = qs.filter(branch=branch)
-        if seller_id:
-            qs = qs.filter(seller__id=seller_id)
-        if customer_id:
-            qs = qs.filter(customer__id=customer_id)
+        from_date = self.request.query_params.get('from_date')
+        to_date   = self.request.query_params.get('to_date')
         if from_date:
             qs = qs.filter(date_time__date__gte=from_date)
         if to_date:
@@ -194,8 +169,8 @@ class ExpenseViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     permission_classes = [IsOwnerOrAdminOnly]
 
     def get_queryset(self):
-        qs = Expense.objects.select_related('created_by').prefetch_related('cheques')
-        user = self.request.user
+        qs       = Expense.objects.select_related('created_by').prefetch_related('cheques')
+        user     = self.request.user
         is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
         return qs if is_admin else qs.filter(created_by=user)
 
@@ -225,23 +200,10 @@ class ItemExitViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
 # ── DepositOrders ─────────────────────────────────────────────────────────────
 
 class DepositOrderViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
-    """
-    CRUD کامل سفارش‌های بیعانه
-
-    GET    /api/deposit-orders/                → لیست
-    POST   /api/deposit-orders/                → ثبت سفارش جدید
-    GET    /api/deposit-orders/{uuid}/         → جزئیات کامل + اقلام
-    PUT    /api/deposit-orders/{uuid}/         → ویرایش کامل
-    PATCH  /api/deposit-orders/{uuid}/         → ویرایش جزئی
-    DELETE /api/deposit-orders/{uuid}/         → حذف
-    PATCH  /api/deposit-orders/{uuid}/settle/  → تسویه نهایی
-    """
     permission_classes = [IsOwnerOrAdminOnly]
 
     def get_serializer_class(self):
-        if self.action == 'list':
-            return DepositOrderListSerializer
-        return DepositOrderSerializer
+        return DepositOrderListSerializer if self.action == 'list' else DepositOrderSerializer
 
     def get_queryset(self):
         qs = DepositOrder.objects.select_related(
@@ -252,51 +214,31 @@ class DepositOrderViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         if not (user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())):
             qs = qs.filter(created_by=user)
 
-        branch      = self.request.query_params.get('branch')
+        branch       = self.request.query_params.get('branch')
         order_status = self.request.query_params.get('status')
-        seller_id   = self.request.query_params.get('seller')
-        customer_id = self.request.query_params.get('customer')
-        from_date   = self.request.query_params.get('from_date')
-        to_date     = self.request.query_params.get('to_date')
+        seller_id    = self.request.query_params.get('seller')
+        customer_id  = self.request.query_params.get('customer')
+        from_date    = self.request.query_params.get('from_date')
+        to_date      = self.request.query_params.get('to_date')
 
-        if branch:
-            qs = qs.filter(branch=branch)
-        if order_status:
-            qs = qs.filter(status=order_status)
-        if seller_id:
-            qs = qs.filter(seller__id=seller_id)
-        if customer_id:
-            qs = qs.filter(customer__id=customer_id)
-        if from_date:
-            qs = qs.filter(created_at__date__gte=from_date)
-        if to_date:
-            qs = qs.filter(created_at__date__lte=to_date)
+        if branch:       qs = qs.filter(branch=branch)
+        if order_status: qs = qs.filter(status=order_status)
+        if seller_id:    qs = qs.filter(seller__id=seller_id)
+        if customer_id:  qs = qs.filter(customer__id=customer_id)
+        if from_date:    qs = qs.filter(created_at__date__gte=from_date)
+        if to_date:      qs = qs.filter(created_at__date__lte=to_date)
 
         return qs.order_by('-created_at')
 
     @action(detail=True, methods=['patch'], url_path='settle')
     @transaction.atomic
     def settle(self, request, pk=None):
-        """
-        PATCH /api/deposit-orders/{uuid}/settle/
-
-        تسویه نهایی سفارش بیعانه:
-        ۱. یک Sale جدید می‌سازد و به این بیعانه لینک می‌کند
-        ۲. وضعیت بیعانه را DELIVERED می‌کند
-        ۳. آمار مشتری را به‌روز می‌کند
-        """
         order = self.get_object()
 
         if order.status == 'DELIVERED':
-            return Response(
-                {"error": "این سفارش قبلاً تسویه شده است."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({"error": "این سفارش قبلاً تسویه شده است."}, status=status.HTTP_400_BAD_REQUEST)
         if order.status == 'CANCELLED':
-            return Response(
-                {"error": "سفارش لغو شده قابل تسویه نیست."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({"error": "سفارش لغو شده قابل تسویه نیست."}, status=status.HTTP_400_BAD_REQUEST)
 
         debt_payment_method = request.data.get('debt_payment_method')
         if not debt_payment_method:
@@ -307,167 +249,197 @@ class DepositOrderViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
 
         net_amount = Decimal(str(order.total_amount)) - Decimal(str(order.discount_amount))
 
-        # ── ساخت فاکتور Sale ──
         sale = Sale.objects.create(
-            branch            = order.branch,
-            seller            = order.seller,
-            customer          = order.customer,
-            created_by        = request.user,
-            total_amount      = net_amount,
-            remaining_balance = Decimal('0.00'),
-            description       = request.data.get(
-                'description', f"تسویه سفارش بیعانه {order.id}"
-            ),
+            branch=order.branch, seller=order.seller, customer=order.customer,
+            created_by=request.user, total_amount=net_amount,
+            remaining_balance=Decimal('0.00'),
+            description=request.data.get('description', f"تسویه سفارش بیعانه {order.id}"),
         )
 
-        # پرداخت بیعانه قبلی
         if order.deposit_paid > 0:
             Payment.objects.create(
-                sale           = sale,
-                payment_method = order.deposit_payment_method or 'OTHER',
-                amount         = order.deposit_paid,
-                description    = "بیعانه پرداخت‌شده قبلی",
+                sale=sale, payment_method=order.deposit_payment_method or 'OTHER',
+                amount=order.deposit_paid, description="بیعانه پرداخت‌شده قبلی",
             )
-
-        # پرداخت بدهی
         if order.remaining_debt > 0:
             Payment.objects.create(
-                sale           = sale,
-                payment_method = debt_payment_method,
-                amount         = order.remaining_debt,
-                description    = "پرداخت بدهی هنگام تحویل",
+                sale=sale, payment_method=debt_payment_method,
+                amount=order.remaining_debt, description="پرداخت بدهی هنگام تحویل",
             )
 
-        # ── به‌روزرسانی بیعانه ──
         order.sale                = sale
         order.status              = 'DELIVERED'
         order.debt_payment_method = debt_payment_method
-        order.deposit_paid        = net_amount   # کل مبلغ پرداخت شده
-        order.save()             # remaining_debt خودکار صفر می‌شود
+        order.deposit_paid        = net_amount
+        order.save()
 
-        # ── به‌روزرسانی آمار مشتری ──
         customer = Customer.objects.select_for_update().get(pk=order.customer_id)
         customer.last_purchase_date    = date.today()
         customer.total_purchase_amount += net_amount
-        customer.last_purchase_type   = debt_payment_method
+        customer.last_purchase_type    = debt_payment_method
         customer.save()
 
         return Response(
-            {
-                "message":          "سفارش با موفقیت تسویه شد.",
-                "sale_id":          str(sale.id),
-                "deposit_order_id": str(order.id),
-            },
+            {"message": "سفارش با موفقیت تسویه شد.", "sale_id": str(sale.id), "deposit_order_id": str(order.id)},
             status=status.HTTP_200_OK
         )
-    
-# ── ویوسِت مأموریت‌ها ──────────────────────────────────
+
+
+# ── Missions ──────────────────────────────────────────────────────────────────
+
 class MissionViewSet(viewsets.ModelViewSet):
-    serializer_class = MissionSerializer
+    serializer_class   = MissionSerializer
     permission_classes = [IsAuthenticated, IsSuperiorUser]
-    filter_backends = [filters.SearchFilter]
-    search_fields = ['title', 'description']
+    filter_backends    = [filters.SearchFilter]
+    search_fields      = ['title', 'description']
 
     def get_queryset(self):
         user = self.request.user
-        
-        # اگر کاربر ادمین یا مدیریت کل باشد، همه مأموریت‌ها را می‌بیند
+
         if user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all()):
             return Mission.objects.all()
 
-        # در غیر این صورت: مأموریت‌هایی که به خودش تخصیص داده شده
-        # یا خودش ساخته است، یا به کسانی تخصیص داده شده که این کاربر بالادستِ آنهاست.
-        # برای بهینه‌سازی، ابتدا مأموریت‌های مربوط به خودش و مأموریت‌های ساخته شده توسط خودش را می‌گیریم.
-        queryset = Mission.objects.filter(Q(assigned_to=user) | Q(created_by=user))
-        
-        # پیدا کردن تمام مأموریت‌هایی که شخصِ تخصیص‌یافته‌ی آن، زیردستِ این کاربر است
-        all_missions = Mission.objects.all()
-        subordinate_mission_ids = []
-        for mission in all_missions:
-            if user.is_superior_to(mission.assigned_to):
-                subordinate_mission_ids.append(mission.id)
-                
-        return Mission.objects.filter(id__in=list(queryset.values_list('id', flat=True)) + subordinate_mission_ids).distinct()
+        # مأموریت‌هایی که مستقیماً مرتبط با این کاربر هستند
+        mine_ids = set(
+            Mission.objects.filter(Q(assigned_to=user) | Q(created_by=user))
+            .values_list('id', flat=True)
+        )
+
+        # مأموریت‌هایی که زیردستان این کاربر بر عهده دارند
+        # از prefetch برای جلوگیری از N+1 query استفاده می‌کنیم
+        sub_ids = set(
+            m.id for m in Mission.objects.select_related('assigned_to')
+                                         .prefetch_related('assigned_to__roles')
+            if user.is_superior_to(m.assigned_to)
+        )
+
+        return Mission.objects.filter(id__in=mine_ids | sub_ids).distinct()
 
     def perform_create(self, serializer):
-        # ذخیره خودکار سازنده مأموریت
         serializer.save(created_by=self.request.user)
 
 
-# ── ویوسِت چک‌لیست‌ها ──────────────────────────────────
+# ── Checklists ────────────────────────────────────────────────────────────────
+
 class ChecklistViewSet(viewsets.ModelViewSet):
-    serializer_class = ChecklistSerializer
+    serializer_class   = ChecklistSerializer
     permission_classes = [IsAuthenticated, IsSuperiorUser]
 
     def get_queryset(self):
         user = self.request.user
+
         if user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all()):
             return Checklist.objects.all()
 
-        queryset = Checklist.objects.filter(Q(assigned_to=user) | Q(created_by=user))
-        
-        all_checklists = Checklist.objects.all()
-        subordinate_checklist_ids = []
-        for checklist in all_checklists:
-            if user.is_superior_to(checklist.assigned_to):
-                subordinate_checklist_ids.append(checklist.id)
-                
-        return Checklist.objects.filter(id__in=list(queryset.values_list('id', flat=True)) + subordinate_checklist_ids).distinct()
+        mine_ids = set(
+            Checklist.objects.filter(Q(assigned_to=user) | Q(created_by=user))
+            .values_list('id', flat=True)
+        )
+
+        sub_ids = set(
+            cl.id for cl in Checklist.objects.select_related('assigned_to')
+                                              .prefetch_related('assigned_to__roles')
+            if user.is_superior_to(cl.assigned_to)
+        )
+
+        return Checklist.objects.filter(id__in=mine_ids | sub_ids).distinct()
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
 
 
-# ── ویوسِت تکالیف داخل چک‌لیست (Tasks) ─────────────────
+# ── Tasks ─────────────────────────────────────────────────────────────────────
+
 class TaskViewSet(viewsets.ModelViewSet):
     """
-    برای تغییر وضعیت یک آیتمِ چک‌لیست (تیک زدن انجام شد/نشد) توسط خودِ کاربر
-    یا ویرایش متنِ تسک توسط بالادستی‌ها.
+    قوانین دسترسی:
+    - صاحب چک‌لیست (assigned_to): فقط می‌تواند is_completed را تغییر دهد.
+      title و description برای او read-only هستند.
+    - بالادستی‌ها (created_by یا is_superior_to): می‌توانند همه فیلدها را تغییر دهند،
+      از جمله تیک زدن به جای زیردست.
+    - ADMIN/superuser: دسترسی کامل.
     """
-    serializer_class = TaskSerializer
+    serializer_class   = TaskSerializer
     permission_classes = [IsAuthenticated]
+
+    def _is_admin(self, user):
+        return user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
+
+    def _can_manage_task(self, user, task):
+        """آیا این کاربر می‌تواند ساختار تسک (عنوان/توضیحات) را ویرایش کند؟"""
+        return (
+            self._is_admin(user)
+            or task.checklist.created_by == user
+            or user.is_superior_to(task.checklist.assigned_to)
+        )
 
     def get_queryset(self):
         user = self.request.user
-        # کاربر تسک‌هایی را می‌بیند که یا چک‌لیستش مال خودش است یا بالادستِ صاحب چک‌لیست است
-        if user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all()):
-            return Task.objects.all()
-            
-        return Task.objects.filter(
-            Q(checklist__assigned_to=user) | 
-            Q(checklist__created_by=user)
+
+        if self._is_admin(user):
+            return Task.objects.select_related(
+                'checklist', 'checklist__assigned_to', 'checklist__created_by'
+            ).all()
+
+        # تسک‌هایی که این کاربر صاحب چک‌لیستشان است
+        mine_ids = set(
+            Task.objects.filter(
+                Q(checklist__assigned_to=user) | Q(checklist__created_by=user)
+            ).values_list('id', flat=True)
         )
+
+        # تسک‌های زیردستان این کاربر
+        sub_ids = set(
+            t.id for t in Task.objects.select_related('checklist__assigned_to')
+                                       .prefetch_related('checklist__assigned_to__roles')
+            if user.is_superior_to(t.checklist.assigned_to)
+        )
+
+        return Task.objects.filter(id__in=mine_ids | sub_ids).distinct()
 
     def perform_update(self, serializer):
         instance = self.get_object()
-        user = self.request.user
-        
-        # اگر کاربر عادی (صاحب چک‌لیست) در حال ثبت انجامِ کار است:
-        if 'is_completed' in serializer.validated_data and not user.is_superior_to(instance.checklist.assigned_to):
-            # کاربر فقط مجاز است وضعیت تیکِ مأموریت خودش را تغییر دهد و حق تغییر عنوان/توضیحات را ندارد
-            if instance.checklist.assigned_to == user:
-                is_completed = serializer.validated_data.get('is_completed')
-                if is_completed:
-                    serializer.save(completed_by=user, completed_at=timezone.now())
-                else:
-                    serializer.save(completed_by=None, completed_at=None)
+        user     = self.request.user
+        data     = serializer.validated_data
+
+        is_owner    = instance.checklist.assigned_to == user
+        can_manage  = self._can_manage_task(user, instance)
+
+        if can_manage:
+            # بالادستی می‌تواند همه فیلدها را تغییر دهد، از جمله تیک زدن
+            is_completed = data.get('is_completed')
+            if is_completed is True:
+                serializer.save(completed_by=user, completed_at=timezone.now())
+            elif is_completed is False:
+                serializer.save(completed_by=None, completed_at=None)
             else:
-                from rest_framework.exceptions import PermissionDenied
-                raise PermissionDenied("شما دسترسی به تغییر این تسک را ندارید.")
-        else:
-            # اگر بالادستی است، می‌تواند همه‌چیز (عنوان، وضعیت و...) را ویرایش کند.
-            if user.is_superior_to(instance.checklist.assigned_to) or instance.checklist.created_by == user:
                 serializer.save()
+
+        elif is_owner:
+            # صاحب چک‌لیست فقط می‌تواند is_completed را تغییر دهد
+            # از ارسال فیلدهای غیرمجاز جلوگیری می‌کنیم
+            forbidden_fields = {k for k in data if k not in ('is_completed',)}
+            if forbidden_fields:
+                raise PermissionDenied(
+                    f"شما فقط مجاز به تغییر وضعیت انجام تسک هستید. "
+                    f"فیلدهای غیرمجاز: {', '.join(forbidden_fields)}"
+                )
+
+            is_completed = data.get('is_completed')
+            if is_completed is True:
+                serializer.save(completed_by=user, completed_at=timezone.now())
+            elif is_completed is False:
+                serializer.save(completed_by=None, completed_at=None)
             else:
-                from rest_framework.exceptions import PermissionDenied
-                raise PermissionDenied("تغییرات ساختاری تسک‌ها فقط توسط بالادستی مجاز است.")
-            
+                serializer.save()
+
+        else:
+            raise PermissionDenied("شما دسترسی به ویرایش این تسک را ندارید.")
+
+
+# ── Roles ─────────────────────────────────────────────────────────────────────
 
 class RoleViewSet(viewsets.ReadOnlyModelViewSet):
-    """
-    فقط ADMIN می‌تواند لیست نقش‌ها را ببیند
-    نقش‌ها ثابت هستند و از طریق API ساخته نمی‌شوند
-    """
-    queryset = Role.objects.all()
-    serializer_class = RoleSerializer
+    queryset           = Role.objects.all()
+    serializer_class   = RoleSerializer
     permission_classes = [IsAdminUser]

@@ -5,14 +5,24 @@ from decimal import Decimal
 from datetime import date
 
 from core.models import (
-    CustomUser, Seller, Customer,
+    CustomUser, Role, Seller, Customer,
     Sale, Payment, Cheque, DepositItem,
     Expense, DamageReport, ItemExit,
     Checklist, Task,
     DepositOrder, DepositOrderItem,
-    BRANCH_CHOICES, Mission, Checklist,
-    Task, CustomUser, Role
+    BRANCH_CHOICES, Mission,
 )
+
+
+# ── Role  ─────────────────────────────────────────────────────────────────────
+# باید بالاترین سریالایزر باشد چون UserSerializer از آن استفاده می‌کند
+
+class RoleSerializer(serializers.ModelSerializer):
+    display = serializers.CharField(source='get_code_display', read_only=True)
+
+    class Meta:
+        model  = Role
+        fields = ['id', 'code', 'display']
 
 
 # ── Auth / User ───────────────────────────────────────────────────────────────
@@ -25,8 +35,8 @@ class UserSerializer(serializers.ModelSerializer):
     )
 
     class Meta:
-        model  = CustomUser
-        fields = ['id', 'username', 'roles', 'role_ids', 'branch', 'is_active', 'password']
+        model        = CustomUser
+        fields       = ['id', 'username', 'roles', 'role_ids', 'branch', 'is_active', 'password']
         extra_kwargs = {'password': {'write_only': True}}
 
     def create(self, validated_data):
@@ -58,7 +68,6 @@ class SellerSerializer(serializers.ModelSerializer):
 
 
 class SellerLookupSerializer(serializers.ModelSerializer):
-    """فقط برای dropdown فرانت‌اند"""
     class Meta:
         model  = Seller
         fields = ['id', 'name', 'phone', 'branch']
@@ -68,8 +77,8 @@ class SellerLookupSerializer(serializers.ModelSerializer):
 
 class CustomerSerializer(serializers.ModelSerializer):
     class Meta:
-        model       = Customer
-        fields      = '__all__'
+        model            = Customer
+        fields           = '__all__'
         read_only_fields = ['last_purchase_date', 'total_purchase_amount', 'last_purchase_type']
 
 
@@ -77,8 +86,8 @@ class CustomerSerializer(serializers.ModelSerializer):
 
 class ChequeSerializer(serializers.ModelSerializer):
     class Meta:
-        model  = Cheque
-        fields = '__all__'
+        model        = Cheque
+        fields       = '__all__'
         extra_kwargs = {
             'payment':          {'required': False},
             'expense':          {'required': False},
@@ -92,23 +101,23 @@ class PaymentSerializer(serializers.ModelSerializer):
     cheques = ChequeSerializer(many=True, required=False)
 
     class Meta:
-        model  = Payment
-        fields = '__all__'
+        model        = Payment
+        fields       = '__all__'
         extra_kwargs = {'sale': {'required': False}}
 
 
-# ── DepositItem (داخل فاکتور Sale) ───────────────────────────────────────────
+# ── DepositItem ───────────────────────────────────────────────────────────────
 
 class DepositItemSerializer(serializers.ModelSerializer):
     total_price = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
 
     class Meta:
-        model  = DepositItem
-        fields = '__all__'
+        model        = DepositItem
+        fields       = '__all__'
         extra_kwargs = {'sale': {'required': False}}
 
 
-# ── Sale (فاکتور فروش) ────────────────────────────────────────────────────────
+# ── Sale ──────────────────────────────────────────────────────────────────────
 
 class SaleSerializer(serializers.ModelSerializer):
     payments      = PaymentSerializer(many=True, required=False)
@@ -123,9 +132,9 @@ class SaleSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
     def validate(self, attrs):
-        payments_data     = attrs.get('payments', [])
+        payments_data      = attrs.get('payments', [])
         deposit_items_data = attrs.get('deposit_items', [])
-        total_amount      = attrs.get('total_amount', Decimal('0.00'))
+        total_amount       = attrs.get('total_amount', Decimal('0.00'))
 
         total_paid = sum(Decimal(str(p.get('amount', 0))) for p in payments_data)
         if total_paid > total_amount:
@@ -133,9 +142,7 @@ class SaleSerializer(serializers.ModelSerializer):
 
         for payment in payments_data:
             if payment.get('payment_method') == 'DEPOSIT' and not deposit_items_data:
-                raise serializers.ValidationError(
-                    "در نوع پرداخت بیعانه، ثبت اقلام بیعانه اجباری است."
-                )
+                raise serializers.ValidationError("در نوع پرداخت بیعانه، ثبت اقلام بیعانه اجباری است.")
         return attrs
 
     @transaction.atomic
@@ -178,7 +185,6 @@ class SaleSerializer(serializers.ModelSerializer):
         for item_data in deposit_items_data:
             DepositItem.objects.create(sale=sale, **item_data)
 
-        # به‌روزرسانی آمار مشتری فقط اگر مشتری تعیین شده باشد
         if sale.customer_id:
             customer = Customer.objects.select_for_update().get(pk=sale.customer_id)
             customer.last_purchase_date    = date.today()
@@ -193,7 +199,6 @@ class SaleSerializer(serializers.ModelSerializer):
 
 
 class SaleListSerializer(serializers.ModelSerializer):
-    """سریالایزر سبک برای لیست فروش‌ها"""
     seller_name    = serializers.CharField(source='seller.name',  read_only=True)
     customer_name  = serializers.CharField(source='customer.name',  read_only=True, default=None)
     customer_phone = serializers.CharField(source='customer.phone', read_only=True, default=None)
@@ -222,7 +227,7 @@ class ExpenseSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def create(self, validated_data):
-        request     = self.context.get('request')
+        request      = self.context.get('request')
         validated_data['created_by'] = request.user
         cheques_data = validated_data.pop('cheques', [])
 
@@ -236,13 +241,12 @@ class ExpenseSerializer(serializers.ModelSerializer):
             if is_endorsed:
                 existing = Cheque.objects.filter(cheque_number=cheque_number).first()
                 if existing:
-                    existing.is_endorsed = True
-                    existing.expense     = expense
+                    existing.is_endorsed      = True
+                    existing.expense          = expense
                     if cheque_image_url:
                         existing.cheque_image_url = cheque_image_url
                     existing.description = (
-                        f"{existing.description or ''} | "
-                        f"خرج شده بابت فاکتور هزینه {expense.id}"
+                        f"{existing.description or ''} | خرج شده بابت فاکتور هزینه {expense.id}"
                     )
                     existing.save()
                 else:
@@ -307,10 +311,7 @@ class DepositOrderSerializer(serializers.ModelSerializer):
             'total_amount', 'discount_amount',
             'deposit_paid', 'remaining_debt',
             'deposit_payment_method', 'debt_payment_method',
-            'status',
-            'sale',
-            'description',
-            'items',
+            'status', 'sale', 'description', 'items',
         ]
         read_only_fields = ['created_at', 'created_by', 'remaining_debt', 'sale']
 
@@ -322,9 +323,7 @@ class DepositOrderSerializer(serializers.ModelSerializer):
         if discount > total:
             raise serializers.ValidationError("تخفیف نمی‌تواند از مبلغ کل بیشتر باشد.")
         if paid > (total - discount):
-            raise serializers.ValidationError(
-                "مبلغ بیعانه از مبلغ خالص سفارش (پس از تخفیف) بیشتر است."
-            )
+            raise serializers.ValidationError("مبلغ بیعانه از مبلغ خالص سفارش (پس از تخفیف) بیشتر است.")
         if not attrs.get('items'):
             raise serializers.ValidationError("سفارش باید حداقل یک قلم کالا داشته باشد.")
         return attrs
@@ -352,7 +351,6 @@ class DepositOrderSerializer(serializers.ModelSerializer):
 
 
 class DepositOrderListSerializer(serializers.ModelSerializer):
-    """سریالایزر سبک برای لیست بیعانه‌ها — بدون nested items"""
     customer_name  = serializers.CharField(source='customer.name',  read_only=True)
     customer_phone = serializers.CharField(source='customer.phone', read_only=True)
     seller_name    = serializers.CharField(source='seller.name',    read_only=True)
@@ -368,38 +366,31 @@ class DepositOrderListSerializer(serializers.ModelSerializer):
             'delivery_date',
             'total_amount', 'discount_amount',
             'deposit_paid', 'remaining_debt',
-            'status',
-            'sale',
-            'description',
+            'status', 'sale', 'description',
         ]
 
 
-# ── Endpoint اطلاعات شعب ─────────────────────────────────────────────────────
+# ── Branch choices ────────────────────────────────────────────────────────────
 
 class BranchChoicesSerializer(serializers.Serializer):
-    """برمی‌گرداند لیست شعب برای نمایش در فرانت‌اند"""
     value = serializers.CharField()
     label = serializers.CharField()
 
-# ── سریالایزر نقش‌ها ───────────────────────────────────
-class RoleSerializer(serializers.ModelSerializer):
-    display = serializers.CharField(source='get_code_display', read_only=True)
-    class Meta:
-        model  = Role
-        fields = ['id', 'code', 'display']
 
+# ── Mission ───────────────────────────────────────────────────────────────────
 
-# ── سریالایزر مأموریت‌ها ─────────────────────────────────
 class MissionSerializer(serializers.ModelSerializer):
-    created_by_username = serializers.ReadOnlyField(source='created_by.username')
+    created_by_username  = serializers.ReadOnlyField(source='created_by.username')
     assigned_to_username = serializers.ReadOnlyField(source='assigned_to.username')
 
     class Meta:
-        model = Mission
+        model  = Mission
         fields = [
-            'id', 'title', 'assigned_to', 'assigned_to_username', 
-            'created_by', 'created_by_username', 'start_date', 
-            'end_date', 'status', 'description', 'created_at', 'updated_at'
+            'id', 'title',
+            'assigned_to', 'assigned_to_username',
+            'created_by',  'created_by_username',
+            'start_date', 'end_date', 'status',
+            'description', 'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_by', 'created_at', 'updated_at']
 
@@ -409,55 +400,78 @@ class MissionSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("کاربر درخواست‌کننده مشخص نیست.")
 
         assigned_to_user = attrs.get('assigned_to')
-        
-        # موقع ساخت (Create) یا ویرایش کامل تخصیص:
-        if assigned_to_user:
-            # بررسی سلسله مراتب: آیا مجاز است به این شخص تکالیف بدهد؟
-            if not request.user.is_superior_to(assigned_to_user):
-                raise serializers.ValidationError(
-                    {"assigned_to": "شما سطح دسترسی بالادستی برای تخصیص مأموریت به این کاربر را ندارید."}
-                )
+        if assigned_to_user and not request.user.is_superior_to(assigned_to_user):
+            raise serializers.ValidationError(
+                {"assigned_to": "شما سطح دسترسی بالادستی برای تخصیص مأموریت به این کاربر را ندارید."}
+            )
 
-        # اعتبارسنجی تاریخ‌ها
         if attrs.get('start_date') and attrs.get('end_date'):
             if attrs['start_date'] >= attrs['end_date']:
-                raise serializers.ValidationError({"end_date": "تاریخ پایان مأموریت باید بعد از تاریخ شروع باشد."})
-
+                raise serializers.ValidationError(
+                    {"end_date": "تاریخ پایان مأموریت باید بعد از تاریخ شروع باشد."}
+                )
         return attrs
 
 
-# ── سریالایزر آیتم‌های چک‌لیست (Tasks) ───────────────────
+# ── Task ──────────────────────────────────────────────────────────────────────
+
 class TaskSerializer(serializers.ModelSerializer):
     class Meta:
-        model = Task
-        fields = ['id', 'checklist', 'title', 'is_completed', 'completed_by', 'completed_at', 'description']
+        model            = Task
+        fields           = ['id', 'checklist', 'title', 'is_completed', 'completed_by', 'completed_at', 'description']
         read_only_fields = ['id', 'checklist', 'completed_by', 'completed_at']
 
 
-# ── سریالایزر اصلی چک‌لیست ──────────────────────────────
+# ── Checklist ─────────────────────────────────────────────────────────────────
+
 class ChecklistSerializer(serializers.ModelSerializer):
-    tasks = TaskSerializer(many=True, required=False) # برای ثبت همزمان تکالیف داخل چک‌لیست
-    created_by_username = serializers.ReadOnlyField(source='created_by.username')
+    tasks                = TaskSerializer(many=True, required=False)
+    created_by_username  = serializers.ReadOnlyField(source='created_by.username')
     assigned_to_username = serializers.ReadOnlyField(source='assigned_to.username')
 
     class Meta:
-        model = Checklist
-        fields = ['id', 'title', 'frequency', 'assigned_to', 'assigned_to_username', 'created_by', 'created_by_username', 'tasks', 'created_at']
+        model            = Checklist
+        fields           = [
+            'id', 'title', 'frequency',
+            'assigned_to', 'assigned_to_username',
+            'created_by',  'created_by_username',
+            'tasks', 'created_at',
+        ]
         read_only_fields = ['id', 'created_by', 'created_at']
 
     def validate_assigned_to(self, value):
         request = self.context.get('request')
         if request and request.user:
             if not request.user.is_superior_to(value):
-                raise serializers.ValidationError("شما بالادست این کاربر نیستید و نمی‌توانید برای او چک‌لیست تعیین کنید.")
+                raise serializers.ValidationError(
+                    "شما بالادست این کاربر نیستید و نمی‌توانید برای او چک‌لیست تعیین کنید."
+                )
         return value
 
     def create(self, validated_data):
-        # جداسازی تسک‌ها از دیتای اصلی چک‌لیست
         tasks_data = validated_data.pop('tasks', [])
-        checklist = Checklist.objects.create(**validated_data)
-        
-        # ساخت تسک‌های ارسالی زیرمجموعه چک‌لیست
+        checklist  = Checklist.objects.create(**validated_data)
         for task_data in tasks_data:
             Task.objects.create(checklist=checklist, **task_data)
         return checklist
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        """
+        ویرایش چک‌لیست توسط بالادستی:
+        - فیلدهای اصلی چک‌لیست به‌روز می‌شوند
+        - اگر آرایه tasks ارسال شده باشد، تسک‌های قدیمی حذف و تسک‌های جدید جایگزین می‌شوند
+        - اگر tasks ارسال نشده باشد (None)، تسک‌های موجود دست‌نخورده می‌مانند
+        """
+        tasks_data = validated_data.pop('tasks', None)
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        if tasks_data is not None:
+            instance.tasks.all().delete()
+            for task_data in tasks_data:
+                Task.objects.create(checklist=instance, **task_data)
+
+        return instance
