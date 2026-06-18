@@ -10,7 +10,8 @@ from core.models import (
     Expense, DamageReport, ItemExit,
     Checklist, Task,
     DepositOrder, DepositOrderItem,
-    BRANCH_CHOICES,
+    BRANCH_CHOICES, Mission, Checklist,
+    Task, CustomUser, Role
 )
 
 
@@ -375,3 +376,83 @@ class BranchChoicesSerializer(serializers.Serializer):
     """برمی‌گرداند لیست شعب برای نمایش در فرانت‌اند"""
     value = serializers.CharField()
     label = serializers.CharField()
+
+# ── سریالایزر نقش‌ها ───────────────────────────────────
+class RoleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Role
+        fields = ['id', 'code', 'get_code_display']
+
+
+# ── سریالایزر مأموریت‌ها ─────────────────────────────────
+class MissionSerializer(serializers.ModelSerializer):
+    created_by_username = serializers.ReadOnlyField(source='created_by.username')
+    assigned_to_username = serializers.ReadOnlyField(source='assigned_to.username')
+
+    class Meta:
+        model = Mission
+        fields = [
+            'id', 'title', 'assigned_to', 'assigned_to_username', 
+            'created_by', 'created_by_username', 'start_date', 
+            'end_date', 'status', 'description', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_by', 'created_at', 'updated_at']
+
+    def validate(self, attrs):
+        request = self.context.get('request')
+        if not request or not request.user:
+            raise serializers.ValidationError("کاربر درخواست‌کننده مشخص نیست.")
+
+        assigned_to_user = attrs.get('assigned_to')
+        
+        # موقع ساخت (Create) یا ویرایش کامل تخصیص:
+        if assigned_to_user:
+            # بررسی سلسله مراتب: آیا مجاز است به این شخص تکالیف بدهد؟
+            if not request.user.is_superior_to(assigned_to_user):
+                raise serializers.ValidationError(
+                    {"assigned_to": "شما سطح دسترسی بالادستی برای تخصیص مأموریت به این کاربر را ندارید."}
+                )
+
+        # اعتبارسنجی تاریخ‌ها
+        if attrs.get('start_date') and attrs.get('end_date'):
+            if attrs['start_date'] >= attrs['end_date']:
+                raise serializers.ValidationError({"end_date": "تاریخ پایان مأموریت باید بعد از تاریخ شروع باشد."})
+
+        return attrs
+
+
+# ── سریالایزر آیتم‌های چک‌لیست (Tasks) ───────────────────
+class TaskSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Task
+        fields = ['id', 'checklist', 'title', 'is_completed', 'completed_by', 'completed_at', 'description']
+        read_only_fields = ['id', 'checklist', 'completed_by', 'completed_at']
+
+
+# ── سریالایزر اصلی چک‌لیست ──────────────────────────────
+class ChecklistSerializer(serializers.ModelSerializer):
+    tasks = TaskSerializer(many=True, required=False) # برای ثبت همزمان تکالیف داخل چک‌لیست
+    created_by_username = serializers.ReadOnlyField(source='created_by.username')
+    assigned_to_username = serializers.ReadOnlyField(source='assigned_to.username')
+
+    class Meta:
+        model = Checklist
+        fields = ['id', 'title', 'frequency', 'assigned_to', 'assigned_to_username', 'created_by', 'created_by_username', 'tasks', 'created_at']
+        read_only_fields = ['id', 'created_by', 'created_at']
+
+    def validate_assigned_to(self, value):
+        request = self.context.get('request')
+        if request and request.user:
+            if not request.user.is_superior_to(value):
+                raise serializers.ValidationError("شما بالادست این کاربر نیستید و نمی‌توانید برای او چک‌لیست تعیین کنید.")
+        return value
+
+    def create(self, validated_data):
+        # جداسازی تسک‌ها از دیتای اصلی چک‌لیست
+        tasks_data = validated_data.pop('tasks', [])
+        checklist = Checklist.objects.create(**validated_data)
+        
+        # ساخت تسک‌های ارسالی زیرمجموعه چک‌لیست
+        for task_data in tasks_data:
+            Task.objects.create(checklist=checklist, **task_data)
+        return checklist

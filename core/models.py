@@ -13,27 +13,99 @@ BRANCH_CHOICES = [
     ('شعبه کاجستان','شعبه کاجستان'),
 ]
 
+# ── تعریف نقش‌ها و رتبه‌بندی آنها برای سنجش سلسله‌مراتب ──────────────────────
+ROLE_HIERARCHY = {
+    'ADMIN': 100,              # مدیریت سیستم (بالاترین)
+    'FINANCIAL_MANAGER': 80,   # مدیر مالی
+    'EXECUTIVE_MANAGER': 80,   # مدیر اجرایی
+    'SUPERVISOR': 70,          # سرپرست‌ها
+    'ACCOUNTANT': 60,          # حسابدار
+    'STATISTICIAN': 60,        # آمارگیر
+    'CASHIER': 40,             # صندوق‌دار
+    'USER': 10,                # کارکنان عادی
+}
+
+class Role(models.Model):
+    ROLE_CHOICES = [
+        ('ADMIN', 'مدیریت (Admin)'),
+        ('FINANCIAL_MANAGER', 'مدیر مالی'),
+        ('EXECUTIVE_MANAGER', 'مدیر اجرایی'),
+        ('SUPERVISOR', 'سرپرست'),
+        ('ACCOUNTANT', 'حسابدار'),
+        ('STATISTICIAN', 'آمارگیر'),
+        ('CASHIER', 'صندوق‌دار'),
+        ('USER', 'کارکنان عادی'),
+    ]
+    id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    code = models.CharField(max_length=30, choices=ROLE_CHOICES, unique=True)
+    
+    def __str__(self):
+        return self.get_code_display()
 
 class CustomUser(AbstractUser):
-    ROLE_CHOICES = [
-        ('ADMIN',   'مدیر سیستم (Admin)'),
-        ('CASHIER', 'صندوق‌دار (Cashier)'),
-        ('USER',    'کارکنان عادی (User)'),
-    ]
-    id     = models.UUIDField(primary_key=True, default=uuid4, editable=False)
-    role   = models.CharField(max_length=20, choices=ROLE_CHOICES, default='USER')
+    id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    roles = models.ManyToManyField(Role, related_name='users', blank=True)
     branch = models.CharField(max_length=50, choices=BRANCH_CHOICES, blank=True, null=True)
 
-    groups = models.ManyToManyField(
-        'auth.Group', related_name='custom_users_groups', blank=True
-    )
-    user_permissions = models.ManyToManyField(
-        'auth.Permission', related_name='custom_users_permissions', blank=True
-    )
+    groups = models.ManyToManyField('auth.Group', related_name='custom_users_groups', blank=True)
+    user_permissions = models.ManyToManyField('auth.Permission', related_name='custom_users_permissions', blank=True)
 
     def __str__(self):
-        return f"{self.username} ({self.get_role_display()})"
+        roles_str = ", ".join([r.get_code_display() for r in self.roles.all()])
+        return f"{self.username} ({roles_str})"
 
+    @property
+    def max_role_weight(self):
+        """به دست آوردن بالاترین سطح دسترسی کاربر برای بررسی بالادستی بودن"""
+        weights = [ROLE_HIERARCHY.get(role.code, 0) for role in self.roles.all()]
+        return max(weights) if weights else 0
+
+    def is_superior_to(self, target_user):
+        """بررسی اینکه آیا این کاربر بالادست کاربر هدف محسوب می‌شود یا خیر"""
+        if self.is_superuser or any(r.code == 'ADMIN' for r in self.roles.all()):
+            return True
+        
+        # بررسی شاخه مدیریت مالی و زیرشاخه‌ها
+        my_codes = [r.code for r in self.roles.all()]
+        target_codes = [r.code for r in target_user.roles.all()]
+        
+        # مدیر مالی دسترسی به حسابدار، آمارگیر و صندوق‌دار دارد
+        if 'FINANCIAL_MANAGER' in my_codes:
+            valid_subordinates = ['ACCOUNTANT', 'STATISTICIAN', 'CASHIER', 'USER']
+            if any(tc in valid_subordinates for tc in target_codes):
+                return True
+                
+        # حسابدار دسترسی به صندوق‌دار دارد
+        if 'ACCOUNTANT' in my_codes:
+            if 'CASHIER' in target_codes or 'USER' in target_codes:
+                return True
+
+        # در حالت کلی اگر رتبه نقشی بالاتر باشد (مثلاً سرپرست به کاربر عادی)
+        return self.max_role_weight > target_user.max_role_weight
+
+
+class Mission(models.Model):
+    STATUS_CHOICES = [
+        ('PENDING', 'در انتظار انجام'),
+        ('DOING', 'در حال انجام'),
+        ('COMPLETED', 'انجام شده'),
+        ('CANCELLED', 'لغو شده'),
+    ]
+    id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    title = models.CharField(max_length=150)
+    assigned_to = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='missions')
+    created_by = models.ForeignKey(CustomUser, on_delete=models.PROTECT, related_name='created_missions')
+    
+    start_date = models.DateTimeField()
+    end_date = models.DateTimeField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    description = models.TextField(blank=True, null=True)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"ماموریت: {self.title} برای {self.assigned_to.username}"
 
 class Seller(models.Model):
     id     = models.UUIDField(primary_key=True, default=uuid4, editable=False)
@@ -181,20 +253,36 @@ class ItemExit(models.Model):
 
 
 class Checklist(models.Model):
-    id         = models.UUIDField(primary_key=True, default=uuid4, editable=False)
-    title      = models.CharField(max_length=150)
+    FREQUENCY_CHOICES = [
+        ('DAILY', 'روزانه'),
+        ('WEEKLY', 'هفتگی'),
+        ('MONTHLY', 'ماهانه'),
+    ]
+    id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    title = models.CharField(max_length=150)
+    frequency = models.CharField(max_length=20, choices=FREQUENCY_CHOICES, default='DAILY')
+    
+    # چک لیست برای چه کسی یا چه نقشی تعریف شده است
+    assigned_to = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='assigned_checklists')
+    created_by = models.ForeignKey(CustomUser, on_delete=models.PROTECT, related_name='created_checklists')
+    
     created_at = models.DateTimeField(auto_now_add=True)
-    created_by = models.ForeignKey(CustomUser, on_delete=models.PROTECT)
+
+    def __str__(self):
+        return f"چک‌لیست {self.get_frequency_display()} - {self.title}"
 
 
 class Task(models.Model):
-    id           = models.UUIDField(primary_key=True, default=uuid4, editable=False)
-    checklist    = models.ForeignKey(Checklist, on_delete=models.CASCADE, related_name='tasks')
-    title        = models.CharField(max_length=150)
+    id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    checklist = models.ForeignKey(Checklist, on_delete=models.CASCADE, related_name='tasks')
+    title = models.CharField(max_length=150)
     is_completed = models.BooleanField(default=False)
     completed_by = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
-    description  = models.TextField(blank=True, null=True)
+    description = models.TextField(blank=True, null=True)
+
+    def __str__(self):
+        return self.title
 
 
 class DepositOrder(models.Model):
