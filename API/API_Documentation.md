@@ -1974,3 +1974,230 @@ dartdio.options.headers['Authorization'] = 'Bearer $token';
 
 **شماره چک یکتا:**
 `cheque_number` در کل سیستم یکتا است — مگر برای ظهرنویسی (`is_endorsed: true`).
+
+
+
+---
+
+# مستندات تکمیلی و جامع API سیستم RetailHub
+
+این مستند حاوی ساختار کامل اندپوینت‌ها، قوانین سطوح دسترسی مبتنی بر درختواره نقش‌ها، مأموریت‌ها، چک‌لیست‌ها و فرآیندهای مالی سیستم است.
+
+---
+
+## ── درختواره نقش‌ها و منطق سلسله‌مراتب (Role Hierarchy)
+
+دسترسی‌ها و پایش اطلاعات در سیستم بر اساس ساختار درختی زیر ارزیابی می‌شود:
+* **ADMIN**: دسترسی کامل به تمامی نقش‌ها و کل داده‌های سیستم.
+* **FINANCIAL_MANAGER**: بالادستِ حسابدار، آمارگیر، صندوق‌دار و کارکنان عادی.
+* **EXECUTIVE_MANAGER**: بالادستِ سرپرست و کارکنان عادی.
+* **SUPERVISOR**: بالادستِ کارکنان عادی (USER).
+* **ACCOUNTANT**: بالادستِ صندوق‌دار و کارکنان عادی.
+
+> **قانون پایش:** کاربران بالادست به مأموریت‌ها، چک‌لیست‌ها و عملکرد تمام کاربران زیرمجموعه خود به صورت تجمیعی دسترسی نظارتی دارند.
+
+---
+
+## ── ۱. احراز هویت و مدیریت کاربران
+
+### ورود به سیستم (Login)
+* **آدرس:** `POST /api/auth/token/`
+* **دسترسی:** عمومی (`AllowAny`)
+
+```json
+{
+  "username": "amir_admin",
+  "password": "secret_password"
+}
+```
+
+**پاسخ موفق (200 OK):**
+
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsIn...",
+  "roles": ["ADMIN"],
+  "branch": "شعبه بهشتی"
+}
+```
+
+### مدیریت کاربران (Users)
+
+* **آدرس:** `/api/users/`
+* **متدها:** `GET, POST, PUT, PATCH, DELETE`
+* **دسترسی:** فقط ADMIN یا Superuser
+
+```json
+{
+  "username": "employee_1",
+  "password": "secure_password",
+  "branch": "شعبه مدرس",
+  "role_ids": ["uuid-of-role-cashier"],
+  "is_active": true
+}
+```
+
+---
+
+## ── ۲. مأموریت‌ها (Missions)
+
+* **آدرس مبدا:** `/api/missions/`
+* **دسترسی:** کاربران احراز هویت شده (بر اساس شرط بالادستی)
+* **جستجو:** `?search=` روی `title` و `description`
+
+### ایجاد مأموریت جدید
+
+```json
+{
+  "title": "سرکشی و بررسی انبار شعبه مدرس",
+  "assigned_to": "uuid-of-target-user",
+  "start_date": "2026-06-20T09:00:00Z",
+  "end_date": "2026-06-20T17:00:00Z",
+  "status": "PENDING",
+  "description": "بررسی موجودی فیزیکی گلدان‌ها و تطابق با سیستم"
+}
+```
+
+**مقادیر مجاز وضعیت:**
+
+```text
+PENDING
+DOING
+COMPLETED
+CANCELLED
+```
+
+---
+
+## ── ۳. چک‌لیست‌ها و تسک‌ها (Checklists & Tasks)
+
+### ایجاد چک‌لیست
+
+```json
+{
+  "title": "کارهای شروع شیفت صبح صندوق",
+  "frequency": "DAILY",
+  "assigned_to": "uuid-of-cashier",
+  "tasks": [
+    {
+      "title": "روشن کردن سیستم پوز و کارتخوان",
+      "description": "بررسی اتصال کابل شبکه"
+    },
+    {
+      "title": "شمارش پول نقد تنخواه اولیه",
+      "description": "ثبت مبلغ در دفترچه"
+    }
+  ]
+}
+```
+
+**مقادیر مجاز frequency:**
+
+```text
+DAILY
+WEEKLY
+MONTHLY
+```
+
+### منطق تکمیل تسک
+
+با ارسال:
+
+```json
+{
+  "is_completed": true
+}
+```
+
+فیلدهای `completed_by` و `completed_at` به‌صورت خودکار مقداردهی می‌شوند.
+
+---
+
+## ── ۴. فرآیند فروش و تسویه بیعانه‌ها (Sales & Deposits)
+
+### ثبت فروش
+
+```json
+{
+  "total_amount": "5500000.00",
+  "branch": "شعبه بهشتی",
+  "seller": "uuid-of-seller",
+  "customer": "uuid-of-customer",
+  "description": "فروش گلدان و کود آپارتمانی",
+  "payments": [
+    {
+      "payment_method": "CHEQUE",
+      "amount": "3000000.00"
+    },
+    {
+      "payment_method": "POS",
+      "amount": "2500000.00"
+    }
+  ]
+}
+```
+
+### تسویه سفارش بیعانه
+
+`PATCH /api/deposit-orders/{id}/settle/`
+
+```json
+{
+  "debt_payment_method": "POS",
+  "description": "تسویه فاکتور و تحویل نهایی گیاه به مشتری"
+}
+```
+
+```json
+{
+  "message": "سفارش با موفقیت تسویه شد.",
+  "sale_id": "uuid-of-new-generated-sale",
+  "deposit_order_id": "uuid-of-order"
+}
+```
+
+---
+
+## ── ۵. هزینه‌ها، ضایعات و خروج کالا
+
+### گزارش ضایعات
+
+```json
+{
+  "item_name": "گلدان سفالی سایز بزرگ (شکستگی شیفت شب)",
+  "quantity": 3,
+  "estimated_loss": "450000.00",
+  "date": "2026-06-19",
+  "branch": "شعبه کاجستان",
+  "description": "در حین جابجایی کالاها آسیب دیده است."
+}
+```
+
+### دلایل مجاز خروج کالا
+
+```text
+RETURN
+DAMAGE
+INTERNAL
+```
+
+---
+
+## ── ۶. اطلاعات ثابت سیستم (Utilities)
+
+### لیست شعب فعال
+
+`GET /api/branches/`
+
+```json
+[
+  { "value": "شعبه بهشتی", "label": "شعبه بهشتی" },
+  { "value": "شعبه مدرس", "label": "شعبه مدرس" },
+  { "value": "شعبه سپیده", "label": "شعبه سپیده" },
+  { "value": "شعبه کاجستان", "label": "شعبه کاجستان" }
+]
+```
+
+---
+
+این مستندات جدید با کدهای فعلی بک‌اند سیستم شما هماهنگ است و برای توسعه‌دهندگان فرانت‌اند یا وب‌هوک‌ها به عنوان مرجع کاملاً دقیق عمل می‌کند.
