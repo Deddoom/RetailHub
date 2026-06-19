@@ -23,4 +23,7 @@ RetailHub/
     ├── views.py
     └── urls.py          
     └── migrations/
+    	└── 0001_initial.py
     	└── 0002_depositorder_depositorderitem.py
+    	└── 0003_depositorder_depositorderitem.py
+    	└── 0004_role_mission_checklist_update.py
