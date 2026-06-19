@@ -33,13 +33,14 @@ class IsSuperiorUser(permissions.BasePermission):
         return request.user and request.user.is_authenticated
 
     def has_object_permission(self, request, view, obj):
-        if request.method in permissions.SAFE_METHODS:
-            return (
-                obj.assigned_to == request.user or
-                obj.created_by == request.user or
-                request.user.is_superior_to(obj.assigned_to)
-            )
+        # ادمین دسترسی کامل دارد
+        if request.user.is_superuser or any(r.code == 'ADMIN' for r in request.user.roles.all()):
+            return True
+            
+        # در همه حالتها (حتی ویرایش)، خود فرد ارجاع‌شده، سازنده، یا بالادستی دسترسی دارند.
+        # کنترل اینکه زیردست چه فیلدهایی را می‌تواند ویرایش کند در perform_update ویو انجام می‌شود.
         return (
+            obj.assigned_to == request.user or
             obj.created_by == request.user or
             request.user.is_superior_to(obj.assigned_to)
         )

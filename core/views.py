@@ -313,6 +313,30 @@ class MissionViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
+    
+    def perform_update(self, serializer):
+        instance = self.get_object()
+        user     = self.request.user
+        data     = serializer.validated_data
+
+        is_admin   = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
+        can_manage = is_admin or instance.created_by == user or user.is_superior_to(instance.assigned_to)
+        is_owner   = instance.assigned_to == user
+
+        if can_manage:
+            # دسترسی کامل به بالادستی و سازنده
+            serializer.save()
+        elif is_owner:
+            # زیردست: فقط مجاز به تغییر وضعیت ماموریت (status) است
+            forbidden_fields = {k for k in data if k != 'status'}
+            if forbidden_fields:
+                raise PermissionDenied(
+                    f"شما فقط مجاز به تغییر وضعیت انجام ماموریت (status) هستید. "
+                    f"فیلدهای غیرمجاز: {', '.join(sorted(forbidden_fields))}"
+                )
+            serializer.save()
+        else:
+            raise PermissionDenied("شما دسترسی به ویرایش این ماموریت را ندارید.")
 
 
 # ── Checklists ────────────────────────────────────────────────────────────────

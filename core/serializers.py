@@ -132,17 +132,22 @@ class SaleSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
     def validate(self, attrs):
-        payments_data      = attrs.get('payments', [])
-        deposit_items_data = attrs.get('deposit_items', [])
-        total_amount       = attrs.get('total_amount', Decimal('0.00'))
+        request = self.context.get('request')
+        if not request or not request.user:
+            raise serializers.ValidationError("کاربر درخواست‌کننده مشخص نیست.")
 
-        total_paid = sum(Decimal(str(p.get('amount', 0))) for p in payments_data)
-        if total_paid > total_amount:
-            raise serializers.ValidationError("مجموع پرداخت‌ها از مبلغ کل فاکتور بیشتر است.")
+        assigned_to_user = attrs.get('assigned_to')
+        if assigned_to_user:
+            if not assigned_to_user.is_active:
+                raise serializers.ValidationError({"assigned_to": "امکان تخصیص مأموریت به کاربر غیرفعال وجود ندارد."})
+            
+            # اجازه بده سازنده اولیه یا بالادستی ویرایش یا ایجاد کند
+            if assigned_to_user != request.user and not request.user.is_superior_to(assigned_to_user):
+                raise serializers.ValidationError({"assigned_to": "شما سطح دسترسی بالادستی برای این کاربر را ندارید."})
 
-        for payment in payments_data:
-            if payment.get('payment_method') == 'DEPOSIT' and not deposit_items_data:
-                raise serializers.ValidationError("در نوع پرداخت بیعانه، ثبت اقلام بیعانه اجباری است.")
+        if attrs.get('start_date') and attrs.get('end_date'):
+            if attrs['start_date'] >= attrs['end_date']:
+                raise serializers.ValidationError({"end_date": "تاریخ پایان مأموریت باید بعد از تاریخ شروع باشد."})
         return attrs
 
     @transaction.atomic

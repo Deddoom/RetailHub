@@ -95,12 +95,15 @@ class CustomUser(AbstractUser):
         my_codes     = [r.code for r in self.roles.all()]
         target_codes = {r.code for r in target_user.roles.all()}
 
+        # اگر کاربر فعلی خودش فقط نقش USER دارد یا هیچ نقشی ندارد، بالادست کسی نیست
+        if not my_codes or my_codes == ['USER']:
+            return False
+
         if not target_codes:
-            # اگر کاربر هدف هیچ نقشی ندارد، هر کاربر دارای نقشی بالادستِ اوست
-            return bool(my_codes)
+            # اگر هدف نقشی ندارد، کاربر فعلی باید نقشی بالاتر از USER داشته باشد
+            return any(code in ['FINANCIAL_MANAGER', 'EXECUTIVE_MANAGER', 'SUPERVISOR', 'ACCOUNTANT'] for code in my_codes)
 
         all_subordinates = _get_all_subordinate_codes(my_codes)
-        # این کاربر بالادست است اگر تمام نقش‌های هدف در زیرمجموعه‌ی او باشند
         return target_codes.issubset(all_subordinates)
 
 
