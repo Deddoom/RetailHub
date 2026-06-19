@@ -296,15 +296,20 @@ class MissionViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
 
-        if user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all()):
+        # برای بهینه‌سازی، نقش‌های کاربر فعلی را یکبار لود می‌کنیم
+        user_roles = set(user.roles.values_list('code', flat=True))
+
+        if user.is_superuser or 'ADMIN' in user_roles:
             return Mission.objects.all()
 
-        # ۱. یک‌بار همه کاربران را با نقش‌هایشان بارگذاری می‌کنیم (یک query)
-        #    و لیست ID زیردستان را در پایتون محاسبه می‌کنیم
         all_users = CustomUser.objects.prefetch_related('roles').exclude(pk=user.pk)
-        subordinate_ids = [u.id for u in all_users if user.is_superior_to(u)]
+        
+        # بررسی شرط بالادستی به صورت مستقیم و بهینه در پایتون
+        subordinate_ids = []
+        for u in all_users:
+            if user.is_superior_to(u):
+                subordinate_ids.append(u.id)
 
-        # ۲. فیلتر نهایی مستقیماً در دیتابیس — بدون لود کردن کل مأموریت‌ها
         return Mission.objects.filter(
             Q(assigned_to=user) |
             Q(created_by=user)  |
@@ -347,15 +352,18 @@ class ChecklistViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
+        user_roles = set(user.roles.values_list('code', flat=True))
 
-        if user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all()):
+        if user.is_superuser or 'ADMIN' in user_roles:
             return Checklist.objects.all()
 
-        # ۱. یک‌بار همه کاربران را با نقش‌هایشان بارگذاری می‌کنیم (یک query)
         all_users = CustomUser.objects.prefetch_related('roles').exclude(pk=user.pk)
-        subordinate_ids = [u.id for u in all_users if user.is_superior_to(u)]
+        
+        subordinate_ids = []
+        for u in all_users:
+            if user.is_superior_to(u):
+                subordinate_ids.append(u.id)
 
-        # ۲. فیلتر نهایی مستقیماً در دیتابیس
         return Checklist.objects.filter(
             Q(assigned_to=user) |
             Q(created_by=user)  |

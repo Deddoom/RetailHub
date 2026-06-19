@@ -135,19 +135,6 @@ class SaleSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         if not request or not request.user:
             raise serializers.ValidationError("کاربر درخواست‌کننده مشخص نیست.")
-
-        assigned_to_user = attrs.get('assigned_to')
-        if assigned_to_user:
-            if not assigned_to_user.is_active:
-                raise serializers.ValidationError({"assigned_to": "امکان تخصیص مأموریت به کاربر غیرفعال وجود ندارد."})
-            
-            # اجازه بده سازنده اولیه یا بالادستی ویرایش یا ایجاد کند
-            if assigned_to_user != request.user and not request.user.is_superior_to(assigned_to_user):
-                raise serializers.ValidationError({"assigned_to": "شما سطح دسترسی بالادستی برای این کاربر را ندارید."})
-
-        if attrs.get('start_date') and attrs.get('end_date'):
-            if attrs['start_date'] >= attrs['end_date']:
-                raise serializers.ValidationError({"end_date": "تاریخ پایان مأموریت باید بعد از تاریخ شروع باشد."})
         return attrs
 
     @transaction.atomic
@@ -450,6 +437,9 @@ class ChecklistSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_by', 'created_at']
 
     def validate_assigned_to(self, value):
+        if value is None:
+            return value
+            
         request = self.context.get('request')
         if not value.is_active:
             raise serializers.ValidationError(
