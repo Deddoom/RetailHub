@@ -35,7 +35,7 @@ class Migration(migrations.Migration):
         ),
         # حذف فیلد role قدیمی از CustomUser
         migrations.RemoveField(model_name='customuser', name='role'),
-        # اصلاح branch در CustomUser (از max_length=100 به 50 با choices)
+        # اصلاح branch در CustomUser
         migrations.AlterField(
             model_name='customuser',
             name='branch',
