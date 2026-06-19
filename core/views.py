@@ -295,8 +295,6 @@ class MissionViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-
-        # برای بهینه‌سازی، نقش‌های کاربر فعلی را یکبار لود می‌کنیم
         user_roles = set(user.roles.values_list('code', flat=True))
 
         if user.is_superuser or 'ADMIN' in user_roles:
@@ -304,7 +302,6 @@ class MissionViewSet(viewsets.ModelViewSet):
 
         all_users = CustomUser.objects.prefetch_related('roles').exclude(pk=user.pk)
         
-        # بررسی شرط بالادستی به صورت مستقیم و بهینه در پایتون
         subordinate_ids = []
         for u in all_users:
             if user.is_superior_to(u):
@@ -329,10 +326,8 @@ class MissionViewSet(viewsets.ModelViewSet):
         is_owner   = instance.assigned_to == user
 
         if can_manage:
-            # دسترسی کامل به بالادستی و سازنده
             serializer.save()
         elif is_owner:
-            # زیردست: فقط مجاز به تغییر وضعیت ماموریت (status) است
             forbidden_fields = {k for k in data if k != 'status'}
             if forbidden_fields:
                 raise PermissionDenied(
@@ -377,14 +372,6 @@ class ChecklistViewSet(viewsets.ModelViewSet):
 # ── Tasks ─────────────────────────────────────────────────────────────────────
 
 class TaskViewSet(viewsets.ModelViewSet):
-    """
-    قوانین دسترسی:
-    - صاحب چک‌لیست (assigned_to): فقط می‌تواند is_completed را تغییر دهد.
-      title و description برای او read-only هستند.
-    - بالادستی‌ها (created_by یا is_superior_to): می‌توانند همه فیلدها را تغییر دهند،
-      از جمله تیک زدن به جای زیردست.
-    - ADMIN/superuser: دسترسی کامل.
-    """
     serializer_class   = TaskSerializer
     permission_classes = [IsAuthenticated]
 
@@ -392,7 +379,6 @@ class TaskViewSet(viewsets.ModelViewSet):
         return user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
 
     def _can_manage_task(self, user, task):
-        """آیا این کاربر می‌تواند ساختار تسک (عنوان/توضیحات) را ویرایش کند؟"""
         return (
             self._is_admin(user)
             or task.checklist.created_by == user
@@ -407,11 +393,9 @@ class TaskViewSet(viewsets.ModelViewSet):
                 'checklist', 'checklist__assigned_to', 'checklist__created_by'
             ).all()
 
-        # ۱. یک query برای پیدا کردن ID زیردستان
         all_users = CustomUser.objects.prefetch_related('roles').exclude(pk=user.pk)
         subordinate_ids = [u.id for u in all_users if user.is_superior_to(u)]
 
-        # ۲. فیلتر در دیتابیس
         return Task.objects.filter(
             Q(checklist__assigned_to=user) |
             Q(checklist__created_by=user)  |
@@ -426,30 +410,18 @@ class TaskViewSet(viewsets.ModelViewSet):
         is_owner   = instance.checklist.assigned_to == user
         can_manage = self._can_manage_task(user, instance)
 
-        # ── تابع کمکی: اعمال تغییر وضعیت تیک ────────────────────────────
         def _save_with_completion():
-            """
-            فقط زمانی completed_by/completed_at را تغییر می‌دهد که فیلد
-            is_completed صریحاً در بدنه درخواست ارسال شده باشد.
-            استفاده از 'in data' به جای data.get() تضمین می‌کند که
-            مقدار False با عدم ارسال فیلد اشتباه گرفته نشود.
-            """
             if 'is_completed' in data:
                 if data['is_completed'] is True:
                     serializer.save(completed_by=user, completed_at=timezone.now())
                 else:
-                    # False یا هر مقدار falsy دیگر → ریست کردن تیک
                     serializer.save(completed_by=None, completed_at=None)
             else:
-                # is_completed ارسال نشده، فقط فیلدهای دیگر ذخیره می‌شوند
                 serializer.save()
 
         if can_manage:
-            # بالادستی / سازنده / ادمین: همه فیلدها مجاز است
             _save_with_completion()
-
         elif is_owner:
-            # صاحب چک‌لیست: فقط is_completed مجاز است
             forbidden_fields = {k for k in data if k != 'is_completed'}
             if forbidden_fields:
                 raise PermissionDenied(
@@ -457,7 +429,6 @@ class TaskViewSet(viewsets.ModelViewSet):
                     f"فیلدهای غیرمجاز: {', '.join(sorted(forbidden_fields))}"
                 )
             _save_with_completion()
-
         else:
             raise PermissionDenied("شما دسترسی به ویرایش این تسک را ندارید.")
 

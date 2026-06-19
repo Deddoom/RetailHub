@@ -87,14 +87,7 @@ class Migration(migrations.Migration):
             field=models.ForeignKey(
                 settings.AUTH_USER_MODEL, on_delete=django.db.models.deletion.CASCADE,
                 related_name='assigned_checklists',
-                null=True,  # null=True برای مایگریشن روی دیتای موجود
+                null=True,
             ),
-        ),
-        # اضافه کردن title به Task
-        migrations.AddField(
-            model_name='task',
-            name='title',
-            field=models.CharField(max_length=150, default=''),
-            preserve_default=False,
         ),
     ]

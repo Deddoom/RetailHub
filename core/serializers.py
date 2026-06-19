@@ -15,7 +15,6 @@ from core.models import (
 
 
 # ── Role  ─────────────────────────────────────────────────────────────────────
-# باید بالاترین سریالایزر باشد چون UserSerializer از آن استفاده می‌کند
 
 class RoleSerializer(serializers.ModelSerializer):
     display = serializers.CharField(source='get_code_display', read_only=True)
@@ -142,7 +141,7 @@ class SaleSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         user    = request.user
 
-        payments_data      = validated_data.pop('payments', [])
+        payments_data = validated_data.pop('payments', [])
         deposit_items_data = validated_data.pop('deposit_items', [])
 
         total_paid   = sum(Decimal(str(p.get('amount', 0))) for p in payments_data)
@@ -158,9 +157,9 @@ class SaleSerializer(serializers.ModelSerializer):
 
             if payment_item.get('payment_method') in ['CHEQUE', 'COMBINED']:
                 for cheque_item in cheques_for_this_payment:
-                    customer_phone   = cheque_item.pop('customer_phone',
+                    customer_phone = cheque_item.pop('customer_phone',
                         sale.customer.phone if sale.customer else None)
-                    customer_name    = cheque_item.pop('customer_name',
+                    customer_name = cheque_item.pop('customer_name',
                         sale.customer.name if sale.customer else None)
                     cheque_image_url = cheque_item.pop('cheque_image_url', None)
 
@@ -439,7 +438,7 @@ class ChecklistSerializer(serializers.ModelSerializer):
     def validate_assigned_to(self, value):
         if value is None:
             return value
-            
+
         request = self.context.get('request')
         if not value.is_active:
             raise serializers.ValidationError(
@@ -461,12 +460,6 @@ class ChecklistSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def update(self, instance, validated_data):
-        """
-        ویرایش چک‌لیست توسط بالادستی:
-        - فیلدهای اصلی چک‌لیست به‌روز می‌شوند
-        - اگر آرایه tasks ارسال شده باشد، تسک‌های قدیمی حذف و تسک‌های جدید جایگزین می‌شوند
-        - اگر tasks ارسال نشده باشد (None)، تسک‌های موجود دست‌نخورده می‌مانند
-        """
         tasks_data = validated_data.pop('tasks', None)
 
         for attr, value in validated_data.items():
