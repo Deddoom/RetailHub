@@ -99,6 +99,30 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     serializer_class   = UserSerializer
     permission_classes = [IsAdminUser]
 
+    # --- اکشن جدید برای آپدیت شعبه کاربری که لاگین کرده ---
+    @action(detail=False, methods=['patch'], permission_classes=[IsAuthenticated], url_path='update-branch')
+    def update_branch(self, request):
+        user = request.user
+        new_branch = request.data.get('branch')
+
+        # استخراج لیست شعب مجاز از مدل
+        valid_branches = [branch[0] for branch in BRANCH_CHOICES]
+
+        if not new_branch or new_branch not in valid_branches:
+            return Response(
+                {"error": f"شعبه نامعتبر است. شعب مجاز: {', '.join(valid_branches)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # تغییر شعبه و ذخیره‌سازی
+        user.branch = new_branch
+        user.save()
+
+        return Response(
+            {"message": "شعبه با موفقیت بروزرسانی شد.", "branch": user.branch},
+            status=status.HTTP_200_OK
+        )
+
 
 # ── Sellers ───────────────────────────────────────────────────────────────────
 
