@@ -35,12 +35,23 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model        = CustomUser
-        # فیلد password را از extra_kwargs خارج می‌کنیم تا در متدهای GET نیز قابل دسترسی باشد
-        fields       = ['id', 'username', 'roles', 'role_ids', 'branch', 'is_active', 'password']
+        fields       = [
+            'id', 'username', 'first_name', 'last_name', 
+            'is_profile_completed', 'roles', 'role_ids', 
+            'branch', 'is_active', 'password'
+        ]
+        # فیلد تکمیل پروفایل توسط سیستم کنترل می‌شود اما قابل خواندن است
+        read_only_fields = ['is_profile_completed']
 
     def create(self, validated_data):
         roles = validated_data.pop('roles', [])
-        # استفاده از create_user برای هش کردن پسورد هنگام ساخت کاربر جدید
+        first_name = validated_data.get('first_name', '')
+        last_name = validated_data.get('last_name', '')
+        
+        # اگر ادمین از ابتدا نام و فامیل را پر کرده باشد، پروفایل تکمیل‌شده فرض می‌شود
+        if first_name or last_name:
+            validated_data['is_profile_completed'] = True
+            
         user  = CustomUser.objects.create_user(**validated_data)
         if roles:
             user.roles.set(roles)
@@ -49,13 +60,18 @@ class UserSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         roles    = validated_data.pop('roles', None)
         password = validated_data.pop('password', None)
+        first_name = validated_data.get('first_name', instance.first_name)
+        last_name = validated_data.get('last_name', instance.last_name)
         
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
             
         if password:
-            # بررسی اینکه اگر پسورد تغییر کرده یا جدید است، مجدداً هش شود
             instance.set_password(password)
+            
+        # اگر نام یا فامیل ثبت شد، وضعیت تکمیل پروفایل True می‌شود
+        if first_name or last_name:
+            instance.is_profile_completed = True
             
         instance.save()
         if roles is not None:
