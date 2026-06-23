@@ -106,15 +106,26 @@ class BranchListView(APIView):
 class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     queryset           = CustomUser.objects.all().order_by('-date_joined')
     serializer_class   = UserSerializer
-    permission_classes = [IsAdminUser]
+    # خط permission_classes قبلی را حذف می‌کنیم و کنترل را به متد پایین می‌سپاریم
 
-    # --- اکشن جدید: دریافت لیست کاربران زیردست ---
-    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated], url_path='subordinates')
+    # ─── مدیریت پویای سطح دسترسی بر اساس اکشن‌ها ───
+    def get_permissions(self):
+        # اکشن‌هایی که تمام کاربران لاگین شده باید به آن‌ها دسترسی داشته باشند
+        public_actions = ['subordinates', 'update_branch', 'complete_profile']
+        
+        if self.action in public_actions:
+            return [permissions.IsAuthenticated()]
+            
+        # برای بقیه متدها (مثل لیست کل کاربران، ساخت، حذف و ویرایش) فقط ادمین مجاز است
+        return [IsAdminUser()]
+
+    # ─── اکشن دریافت لیست کاربران زیردست ───
+    @action(detail=False, methods=['get'], url_path='subordinates')
     def subordinates(self, request):
         current_user = request.user
         all_users = CustomUser.objects.prefetch_related('roles').all()
         
-        # فیلتر کردن کاربران بر اساس منطق بالادستی مدل شما
+        # فیلتر کردن بر اساس منطق بالادستی مدل شما
         subordinate_users = [
             user for user in all_users 
             if current_user.is_superior_to(user) or current_user.is_superuser
@@ -123,8 +134,8 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         serializer = self.get_serializer(subordinate_users, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
-    # --- اکشن آپدیت شعبه کاربری که لاگین کرده ---
-    @action(detail=False, methods=['patch'], permission_classes=[IsAuthenticated], url_path='update-branch')
+    # ─── اکشن آپدیت شعبه کاربری که لاگین کرده ───
+    @action(detail=False, methods=['patch'], url_path='update-branch')
     def update_branch(self, request):
         user = request.user
         new_branch = request.data.get('branch')
@@ -145,8 +156,8 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
             status=status.HTTP_200_OK
         )
 
-    # --- اکشن تکمیل پروفایل (نام و نام‌خانوادگی) توسط خود کاربر در اولین ورود ---
-    @action(detail=False, methods=['patch'], permission_classes=[IsAuthenticated], url_path='complete-profile')
+    # ─── اکشن تکمیل پروفایل (نام و نام‌خانوادگی) توسط خود کاربر در اولین ورود ───
+    @action(detail=False, methods=['patch'], url_path='complete-profile')
     def complete_profile(self, request):
         user = request.user
         first_name = request.data.get('first_name')
