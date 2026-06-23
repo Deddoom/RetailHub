@@ -74,10 +74,21 @@ class AuthTokenView(APIView):
         if not user.is_active:
             return Response({"error": "حساب کاربری غیرفعال است."}, status=status.HTTP_403_FORBIDDEN)
 
+        # تولید توکن اختصاصی سیستم شما
         access_token = StatelessTokenService.generate_token(user)
         roles = list(user.roles.values_list('code', flat=True))
+        
+        # پاسخ اصلاح‌شده همراه با تمام اطلاعات مورد نیاز فرانت کار
         return Response(
-            {"access_token": access_token, "roles": roles, "branch": user.branch},
+            {
+                "access_token": access_token, 
+                "roles": roles, 
+                "branch": user.branch,
+                "id": str(user.id),  # ارسال UUID کاربر به صورت رشته
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "is_profile_completed": user.is_profile_completed
+            },
             status=status.HTTP_200_OK
         )
 
