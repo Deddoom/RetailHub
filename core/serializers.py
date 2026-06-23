@@ -35,11 +35,12 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model        = CustomUser
+        # فیلد password را از extra_kwargs خارج می‌کنیم تا در متدهای GET نیز قابل دسترسی باشد
         fields       = ['id', 'username', 'roles', 'role_ids', 'branch', 'is_active', 'password']
-        extra_kwargs = {'password': {'write_only': True}}
 
     def create(self, validated_data):
         roles = validated_data.pop('roles', [])
+        # استفاده از create_user برای هش کردن پسورد هنگام ساخت کاربر جدید
         user  = CustomUser.objects.create_user(**validated_data)
         if roles:
             user.roles.set(roles)
@@ -48,10 +49,14 @@ class UserSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         roles    = validated_data.pop('roles', None)
         password = validated_data.pop('password', None)
+        
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
+            
         if password:
+            # بررسی اینکه اگر پسورد تغییر کرده یا جدید است، مجدداً هش شود
             instance.set_password(password)
+            
         instance.save()
         if roles is not None:
             instance.roles.set(roles)

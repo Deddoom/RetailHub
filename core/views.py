@@ -97,15 +97,14 @@ class BranchListView(APIView):
 class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     queryset           = CustomUser.objects.all().order_by('-date_joined')
     serializer_class   = UserSerializer
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAdminUser]  # این پرمیشن تضمین می‌کند فقط ادمین به این بخش دسترسی دارد
 
-    # --- اکشن جدید برای آپدیت شعبه کاربری که لاگین کرده ---
+    # --- اکشن آپدیت شعبه کاربری که لاگین کرده ---
     @action(detail=False, methods=['patch'], permission_classes=[IsAuthenticated], url_path='update-branch')
     def update_branch(self, request):
         user = request.user
         new_branch = request.data.get('branch')
 
-        # استخراج لیست شعب مجاز از مدل
         valid_branches = [branch[0] for branch in BRANCH_CHOICES]
 
         if not new_branch or new_branch not in valid_branches:
@@ -114,7 +113,6 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # تغییر شعبه و ذخیره‌سازی
         user.branch = new_branch
         user.save()
 
