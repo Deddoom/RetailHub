@@ -10,12 +10,12 @@ def main():
     except ImportError as exc:
         raise ImportError("Django standard framework is not installed.") from exc
         
-    # پشتیبانی از دستور اختصاصی seed کماکان به صورت استاندارد داخل فریمورک
     if len(sys.argv) > 1 and sys.argv[1] == 'seed':
         import django
         django.setup()
+        
         from django.core.management import call_command
-        from core.models import CustomUser, Seller, Customer, Role
+        from core.models import CustomUser, Seller, Customer, Role # انتقال ایمپورت به بعد از ستاپ
 
         print("[!] Preparing database tables (Migrating)...")
         call_command('migrate', run_syncdb=True, interactive=False)
@@ -23,32 +23,35 @@ def main():
         print("[!] Seeding initial data rows into database...")
     
         # ساخت نقش‌ها
-        admin_role, _ = Role.objects.get_or_create(code='ADMIN')
-        cashier_role, _ = Role.objects.get_or_create(code='CASHIER')
-        Role.objects.get_or_create(code='FINANCIAL_MANAGER')
-        Role.objects.get_or_create(code='EXECUTIVE_MANAGER')
-        Role.objects.get_or_create(code='SUPERVISOR')
-        Role.objects.get_or_create(code='ACCOUNTANT')
-        Role.objects.get_or_create(code='STATISTICIAN')
-        Role.objects.get_or_create(code='USER')
+        role_codes = [
+            'ADMIN', 'CASHIER', 'FINANCIAL_MANAGER', 'EXECUTIVE_MANAGER', 
+            'SUPERVISOR', 'ACCOUNTANT', 'STATISTICIAN', 'USER'
+        ]
+        roles = {}
+        for code in role_codes:
+            roles[code], _ = Role.objects.get_or_create(code=code)
 
-        admin_user, created = CustomUser.objects.get_or_create(
-            username='admin',
-            defaults={'branch': 'شعبه بهشتی', 'is_staff': True, 'is_superuser': True}
-        )
-        if created:
-            admin_user.set_password('admin1234')
-            admin_user.save()
-        admin_user.roles.add(admin_role)
+        # دیتای کاربران تستی (username, password, branch, role_obj, is_superuser)
+        seed_users = [
+            ('admin', 'admin1234', 'شعبه بهشتی', roles['ADMIN'], True),
+            ('cashier', 'cashier1234', 'شعبه مدرس', roles['CASHIER'], False),
+            ('fin_manager', 'fin1234', 'شعبه بهشتی', roles['FINANCIAL_MANAGER'], False),
+            ('exec_manager', 'exec1234', 'شعبه مدرس', roles['EXECUTIVE_MANAGER'], False),
+            ('supervisor', 'super1234', 'شعبه سپیده', roles['SUPERVISOR'], False),
+            ('accountant', 'acc1234', 'شعبه بهشتی', roles['ACCOUNTANT'], False),
+            ('statistician', 'stat1234', 'شعبه کاجستان', roles['STATISTICIAN'], False),
+            ('normal_user', 'user1234', 'شعبه مدرس', roles['USER'], False),
+        ]
 
-        cashier_user, created = CustomUser.objects.get_or_create(
-            username='cashier',
-            defaults={'branch': 'شعبه مدرس'}
-        )
-        if created:
-            cashier_user.set_password('cashier1234')
-            cashier_user.save()
-        cashier_user.roles.add(cashier_role)
+        for username, password, branch, role_obj, is_super in seed_users:
+            user, created = CustomUser.objects.get_or_create(
+                username=username,
+                defaults={'branch': branch, 'is_staff': is_super, 'is_superuser': is_super}
+            )
+            if created:
+                user.set_password(password)
+                user.save()
+            user.roles.add(role_obj)
 
         Seller.objects.get_or_create(
             name='امیر قاسمی',

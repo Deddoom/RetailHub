@@ -85,9 +85,11 @@ class Migration(migrations.Migration):
             model_name='checklist',
             name='assigned_to',
             field=models.ForeignKey(
-                settings.AUTH_USER_MODEL, on_delete=django.db.models.deletion.CASCADE,
+                settings.AUTH_USER_MODEL, 
+                on_delete=django.db.models.deletion.CASCADE,
                 related_name='assigned_checklists',
                 null=True,
+                blank=True, # این خط اضافه شد
             ),
         ),
     ]
