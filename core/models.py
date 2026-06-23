@@ -63,44 +63,45 @@ class Role(models.Model):
         return self.get_code_display()
 
 
-class CustomUser(AbstractUser, SafeDestroyModel):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    branch = models.CharField(max_length=50, choices=BRANCH_CHOICES, null=True, blank=True)
-    roles = models.ManyToManyField('Role', blank=True, related_name='users')
+class CustomUser(AbstractUser):
+    id     = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    roles  = models.ManyToManyField(Role, related_name='users', blank=True)
+    branch = models.CharField(max_length=50, choices=BRANCH_CHOICES, blank=True, null=True)
     
-    # فیلد جدید برای بررسی اینکه کاربر نام و فامیل خود را در اولین ورود ثبت کرده است یا خیر
+    # فیلد جدید برای وضعیت تکمیل مشخصات فردی
     is_profile_completed = models.BooleanField(default=False)
 
+    groups           = models.ManyToManyField('auth.Group',      related_name='custom_users_groups',      blank=True)
+    user_permissions = models.ManyToManyField('auth.Permission', related_name='custom_users_permissions', blank=True)
+
     def __str__(self):
-        # اگر نام یا نام‌خانوادگی ثبت شده باشد، آن را در کنار یوزرنیم نشان می‌دهد تا ادمین راحت‌تر تشخیص دهد
+        # نمایش نام و فامیل در کنار یوزرنیم برای ادمین
         if self.first_name or self.last_name:
             return f"{self.username} ({self.first_name} {self.last_name})".strip()
-        return self.username
+        roles_str = ", ".join([r.get_code_display() for r in self.roles.all()])
+        return f"{self.username} ({roles_str})"
 
-    def is_superior_to(self, other_user):
+    def is_superior_to(self, target_user) -> bool:
         """
-        منطق بررسی بالادست بودن کاربر (کدهای قبلی شما)
+        بررسی می‌کند که آیا این کاربر بالادستِ کاربر هدف است یا خیر.
         """
-        if self.is_superuser:
-            return True
-        if other_user.is_superuser:
+        if self.pk == target_user.pk:
             return False
 
-        # ادمین به همه دسترسی دارد
-        if self.roles.filter(code='ADMIN').exists():
+        if self.is_superuser or any(r.code == 'ADMIN' for r in self.roles.all()):
             return True
-        if other_user.roles.filter(code='ADMIN').exists():
+
+        my_codes     = [r.code for r in self.roles.all()]
+        target_codes = {r.code for r in target_user.roles.all()}
+
+        if not my_codes or my_codes == ['USER']:
             return False
 
-        # سوپروایزر به حسابدار و کارکنان عادی دسترسی دارد
-        if self.roles.filter(code='SUPERVISOR').exists():
-            return other_user.roles.filter(code__in=['ACCOUNTANT', 'USER']).exists()
+        if not target_codes:
+            return any(code in ['FINANCIAL_MANAGER', 'EXECUTIVE_MANAGER', 'SUPERVISOR', 'ACCOUNTANT'] for code in my_codes)
 
-        # حسابدار فقط به کارکنان عادی دسترسی دارد
-        if self.roles.filter(code='ACCOUNTANT').exists():
-            return other_user.roles.filter(code='USER').exists()
-
-        return False
+        all_subordinates = _get_all_subordinate_codes(my_codes)
+        return target_codes.issubset(all_subordinates)
 
 
 # ── Mission ────────────────────────────────────────────────────────────────────
