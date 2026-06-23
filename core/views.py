@@ -74,24 +74,22 @@ class AuthTokenView(APIView):
         if not user.is_active:
             return Response({"error": "حساب کاربری غیرفعال است."}, status=status.HTTP_403_FORBIDDEN)
 
-        # تولید توکن اختصاصی سیستم شما
         access_token = StatelessTokenService.generate_token(user)
         roles = list(user.roles.values_list('code', flat=True))
         
-        # پاسخ اصلاح‌شده همراه با تمام اطلاعات مورد نیاز فرانت کار
+        # خروجی کامل لاگین شامل UUID، نام، فامیل و وضعیت تکمیل پروفایل
         return Response(
             {
                 "access_token": access_token, 
                 "roles": roles, 
                 "branch": user.branch,
-                "id": str(user.id),  # ارسال UUID کاربر به صورت رشته
+                "id": str(user.id),
                 "first_name": user.first_name,
                 "last_name": user.last_name,
                 "is_profile_completed": user.is_profile_completed
             },
             status=status.HTTP_200_OK
         )
-
 
 # ── Branches ──────────────────────────────────────────────────────────────────
 
@@ -108,15 +106,29 @@ class BranchListView(APIView):
 class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     queryset           = CustomUser.objects.all().order_by('-date_joined')
     serializer_class   = UserSerializer
-    permission_classes = [IsAdminUser]  # دسترسی کلی برای متدهای اصلی (CRUD) فقط برای ادمین است
+    permission_classes = [IsAdminUser]
 
-    # ─── اکشن آپدیت شعبه کاربری که لاگین کرده ───
+    # --- اکشن جدید: دریافت لیست کاربران زیردست ---
+    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated], url_path='subordinates')
+    def subordinates(self, request):
+        current_user = request.user
+        all_users = CustomUser.objects.prefetch_related('roles').all()
+        
+        # فیلتر کردن کاربران بر اساس منطق بالادستی مدل شما
+        subordinate_users = [
+            user for user in all_users 
+            if current_user.is_superior_to(user) or current_user.is_superuser
+        ]
+        
+        serializer = self.get_serializer(subordinate_users, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    # --- اکشن آپدیت شعبه کاربری که لاگین کرده ---
     @action(detail=False, methods=['patch'], permission_classes=[IsAuthenticated], url_path='update-branch')
     def update_branch(self, request):
         user = request.user
         new_branch = request.data.get('branch')
 
-        # استخراج لیست شعب مجاز از مدل
         valid_branches = [branch[0] for branch in BRANCH_CHOICES]
 
         if not new_branch or new_branch not in valid_branches:
@@ -125,7 +137,6 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # تغییر شعبه و ذخیره‌سازی
         user.branch = new_branch
         user.save()
 
@@ -134,7 +145,7 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
             status=status.HTTP_200_OK
         )
 
-    # ─── اکشن تکمیل پروفایل (نام و نام‌خانوادگی) توسط خود کاربر در اولین ورود ───
+    # --- اکشن تکمیل پروفایل (نام و نام‌خانوادگی) توسط خود کاربر در اولین ورود ---
     @action(detail=False, methods=['patch'], permission_classes=[IsAuthenticated], url_path='complete-profile')
     def complete_profile(self, request):
         user = request.user
