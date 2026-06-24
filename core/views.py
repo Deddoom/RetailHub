@@ -433,24 +433,25 @@ class ChecklistViewSet(viewsets.ModelViewSet):
         user = self.request.user
         user_roles = set(user.roles.values_list('code', flat=True))
 
+        # ۱. مشخص کردن مجموعه اولیه چک‌لیست‌های مجاز برای این کاربر
         if user.is_superuser or 'ADMIN' in user_roles:
-            return Checklist.objects.all()
+            qs = Checklist.objects.all()
+        else:
+            all_users = CustomUser.objects.prefetch_related('roles').exclude(pk=user.pk)
+            subordinate_ids = [u.id for u in all_users if user.is_superior_to(u)]
 
-        all_users = CustomUser.objects.prefetch_related('roles').exclude(pk=user.pk)
-        
-        subordinate_ids = []
-        for u in all_users:
-            if user.is_superior_to(u):
-                subordinate_ids.append(u.id)
+            qs = Checklist.objects.filter(
+                Q(assigned_to=user) |
+                Q(created_by=user)  |
+                Q(assigned_to_id__in=subordinate_ids)
+            ).distinct()
 
-        return Checklist.objects.filter(
-            Q(assigned_to=user) |
-            Q(created_by=user)  |
-            Q(assigned_to_id__in=subordinate_ids)
-        ).distinct().order_by('-created_at')
+        # ۲. اضافه کردن فیلتر اختصاصی بر اساس پارامتر ارسالی فرانت (مشکل اصلی اینجاست)
+        assigned_to_param = self.request.query_params.get('assigned_to')
+        if assigned_to_param:
+            qs = qs.filter(assigned_to_id=assigned_to_param)
 
-    def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user)
+        return qs.order_by('-created_at')
 
 
 # ── Tasks ─────────────────────────────────────────────────────────────────────
