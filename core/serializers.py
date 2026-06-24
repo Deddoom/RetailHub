@@ -474,9 +474,26 @@ class ChecklistSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         tasks_data = validated_data.pop('tasks', [])
-        checklist  = Checklist.objects.create(**validated_data)
+        
+        # ۱. ابتدا نمونه چک‌لیست را بدون ذخیره نهایی در دیتابیس می‌سازیم (commit=False)
+        checklist = Checklist(**validated_data)
+        
+        # ۲. کاربر لاگین شده را به صورت مستقیم به ریلیشن مدل متصل می‌کنیم
+        request = self.context.get('request')
+        if request and request.user:
+            checklist.created_by = request.user
+        
+        # ۳. حالا چک‌لیست را به صورت امن در دیتابیس ذخیره می‌کنیم
+        checklist.save()
+        
+        # ۴. ذخیره تسک‌های متصل به آن
         for task_data in tasks_data:
-            Task.objects.create(checklist=checklist, **task_data)
+            Task.objects.create(
+                checklist=checklist,
+                title=task_data.get('title'),
+                description=task_data.get('description', '')
+            )
+            
         return checklist
 
     @transaction.atomic
