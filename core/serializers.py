@@ -392,18 +392,20 @@ class BranchChoicesSerializer(serializers.Serializer):
 # ── Mission ───────────────────────────────────────────────────────────────────
 
 class MissionSerializer(serializers.ModelSerializer):
-    created_by_username  = serializers.ReadOnlyField(source='created_by.username')
-    assigned_to_username = serializers.ReadOnlyField(source='assigned_to.username')
+    # ─── حل مشکل اصلی: اضافه کردن فیلدهای متنی ریلیشن‌ها به صورت Read Only ───
+    assigned_to_username = serializers.CharField(source='assigned_to.username', read_only=True)
+    created_by_username  = serializers.CharField(source='created_by.username', read_only=True)
 
     class Meta:
         model  = Mission
-        fields = [
-            'id', 'title',
-            'assigned_to', 'assigned_to_username',
-            'created_by',  'created_by_username',
-            'start_date', 'end_date', 'status',
-            'description', 'created_at', 'updated_at',
-        ]
+        fields = '__all__'
+        #fields = [
+        #    'id', 'title',
+        #    'assigned_to', 'assigned_to_username',
+        #    'created_by',  'created_by_username',
+        #    'start_date', 'end_date', 'status',
+        #    'description', 'created_at', 'updated_at',
+        #]
         read_only_fields = ['id', 'created_by', 'created_at', 'updated_at']
 
     def validate(self, attrs):
