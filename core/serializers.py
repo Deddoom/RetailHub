@@ -11,7 +11,8 @@ from core.models import (
     Checklist, Task, 
     DepositOrder, DepositOrderItem,
     BRANCH_CHOICES, Mission, ChecklistLog, ChecklistLogItem,
-    Claim, ClaimItem, ClaimFollowUp,
+    Claim, ClaimItem, ClaimFollowUp,DamageRegistration, DamageItem, 
+    ReturnRequest, ReturnItem, ExchangeItem,
 )
 
 
@@ -588,4 +589,118 @@ class ClaimSerializer(serializers.ModelSerializer):
             instance.items.all().delete()
             for item in items_data:
                 ClaimItem.objects.create(claim=instance, **item)
+        return instance
+    
+# ── Damage Registration Serializers ─────────────────────────────────────────────
+class DamageItemSerializer(serializers.ModelSerializer):
+    total_price = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+
+    class Meta:
+        model  = DamageItem
+        fields = ['id', 'item_name', 'quantity', 'unit_price', 'total_price']
+
+class DamageRegistrationSerializer(serializers.ModelSerializer):
+    items           = DamageItemSerializer(many=True)
+    created_by_name = serializers.CharField(source='created_by.first_name', read_only=True)
+
+    class Meta:
+        model  = DamageRegistration
+        fields = [
+            'id', 'date', 'branch', 'reason', 'culprit', 'description',
+            'created_by', 'created_by_name', 'items', 'created_at'
+        ]
+        read_only_fields = ['created_by', 'created_at']
+
+    @transaction.atomic
+    def create(self, validated_data):
+        items_data = validated_data.pop('items', [])
+        validated_data['created_by'] = self.context['request'].user
+        
+        registration = DamageRegistration.objects.create(**validated_data)
+        for item in items_data:
+            DamageItem.objects.create(registration=registration, **item)
+        return registration
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        items_data = validated_data.pop('items', None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        if items_data is not None:
+            instance.items.all().delete()
+            for item in items_data:
+                DamageItem.objects.create(registration=instance, **item)
+        return instance
+
+
+# ── Return Request Serializers ────────────────────────────────────────────────
+class ReturnItemSerializer(serializers.ModelSerializer):
+    total_price = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+
+    class Meta:
+        model  = ReturnItem
+        fields = ['id', 'item_name', 'quantity', 'unit_price', 'discount', 'total_price']
+
+class ExchangeItemSerializer(serializers.ModelSerializer):
+    total_price = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+
+    class Meta:
+        model  = ExchangeItem
+        fields = ['id', 'item_name', 'quantity', 'unit_price', 'total_price']
+
+class ReturnRequestSerializer(serializers.ModelSerializer):
+    return_items    = ReturnItemSerializer(many=True)
+    exchange_items  = ExchangeItemSerializer(many=True, required=False)
+    created_by_name = serializers.CharField(source='created_by.first_name', read_only=True)
+    seller_name     = serializers.CharField(source='seller.name', read_only=True)
+
+    class Meta:
+        model  = ReturnRequest
+        fields = [
+            'id', 'customer_name', 'customer_phone', 'seller', 'seller_name',
+            'action_type', 'refund_amount', 'status', 'is_approved',
+            'refund_date', 'refund_method', 'description',
+            'created_by', 'created_by_name',
+            'return_items', 'exchange_items', 'created_at', 'updated_at'
+        ]
+        # وضعیت و تایید باید منحصراً توسط Endpointهای مخصوص تغییر کنند
+        read_only_fields = ['created_by', 'status', 'is_approved', 'created_at', 'updated_at']
+
+    @transaction.atomic
+    def create(self, validated_data):
+        return_items_data   = validated_data.pop('return_items', [])
+        exchange_items_data = validated_data.pop('exchange_items', [])
+        validated_data['created_by'] = self.context['request'].user
+        
+        return_request = ReturnRequest.objects.create(**validated_data)
+        
+        for item in return_items_data:
+            ReturnItem.objects.create(return_request=return_request, **item)
+            
+        for item in exchange_items_data:
+            ExchangeItem.objects.create(return_request=return_request, **item)
+            
+        return return_request
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        return_items_data   = validated_data.pop('return_items', None)
+        exchange_items_data = validated_data.pop('exchange_items', None)
+        
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        if return_items_data is not None:
+            instance.return_items.all().delete()
+            for item in return_items_data:
+                ReturnItem.objects.create(return_request=instance, **item)
+                
+        if exchange_items_data is not None:
+            instance.exchange_items.all().delete()
+            for item in exchange_items_data:
+                ExchangeItem.objects.create(return_request=instance, **item)
+                
         return instance

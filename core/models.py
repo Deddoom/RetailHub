@@ -537,3 +537,107 @@ class ClaimFollowUp(models.Model):
 
     def __str__(self):
         return f"پیگیری {self.get_follow_up_type_display()} توسط {self.follower.username}"
+    
+# ── DamageRegistration (ثبت ضایعات) ──────────────────────────────────────────
+class DamageRegistration(models.Model):
+    REASON_CHOICES = [
+        ('IRRIGATION', 'آبیاری'),
+        ('PEST',       'آفت'),
+        ('BREAKAGE',   'شکستگی'),
+        ('LIGHT',      'نور'),
+        ('OTHER',      'متفرقه'),
+        ('UNKNOWN',    'نامعلوم'),
+    ]
+    id          = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    date        = models.DateField()
+    branch      = models.CharField(max_length=50, choices=BRANCH_CHOICES)
+    created_by  = models.ForeignKey(CustomUser, on_delete=models.PROTECT, related_name='damage_registrations')
+    reason      = models.CharField(max_length=20, choices=REASON_CHOICES)
+    culprit     = models.CharField(max_length=150, blank=True, null=True, help_text="مقصر")
+    description = models.TextField(blank=True, null=True)
+    created_at  = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"ضایعات {self.branch} - {self.date}"
+
+class DamageItem(models.Model):
+    id           = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    registration = models.ForeignKey(DamageRegistration, on_delete=models.CASCADE, related_name='items')
+    item_name    = models.CharField(max_length=150)
+    quantity     = models.IntegerField()
+    unit_price   = models.DecimalField(max_digits=12, decimal_places=2)
+    total_price  = models.DecimalField(max_digits=12, decimal_places=2, editable=False)
+
+    def save(self, *args, **kwargs):
+        self.total_price = Decimal(str(self.quantity)) * Decimal(str(self.unit_price))
+        super().save(*args, **kwargs)
+
+
+# ── ReturnRequest (درخواست برگشتی کالا و وجه) ──────────────────────────────────
+class ReturnRequest(models.Model):
+    STATUS_CHOICES = [
+        ('PENDING',   'در انتظار تایید مدیریت'),
+        ('APPROVED',  'تایید شده (در انتظار واریز)'),
+        ('COMPLETED', 'تکمیل شده (واریز شده)'),
+        ('REJECTED',  'رد شده'),
+    ]
+    ACTION_CHOICES = [
+        ('REFUND',   'فقط برگشت پول'),
+        ('EXCHANGE', 'فقط تعویض کالا'),
+        ('BOTH',     'هم برگشت پول هم تعویض کالا'),
+    ]
+    REFUND_METHOD_CHOICES = [
+        ('CASH',         'نقدی'),
+        ('CARD_TO_CARD', 'کارت به کارت'),
+        ('ACCOUNT',      'حساب به حساب'),
+        ('CHEQUE',       'چکی'),
+    ]
+
+    id             = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    customer_name  = models.CharField(max_length=150)
+    customer_phone = models.CharField(max_length=15)
+    seller         = models.ForeignKey(Seller, on_delete=models.PROTECT, related_name='return_requests')
+    created_by     = models.ForeignKey(CustomUser, on_delete=models.PROTECT, related_name='created_returns')
+    
+    action_type    = models.CharField(max_length=20, choices=ACTION_CHOICES)
+    refund_amount  = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="مبلغ برگشتی به مشتری")
+    
+    status         = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    is_approved    = models.BooleanField(default=False)
+    
+    refund_date    = models.DateField(blank=True, null=True, help_text="تاریخ واریز وجه")
+    refund_method  = models.CharField(max_length=30, choices=REFUND_METHOD_CHOICES, blank=True, null=True)
+    
+    description    = models.TextField(blank=True, null=True)
+    created_at     = models.DateTimeField(auto_now_add=True)
+    updated_at     = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"برگشتی {self.customer_name} - {self.get_status_display()}"
+
+
+class ReturnItem(models.Model):
+    id             = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    return_request = models.ForeignKey(ReturnRequest, on_delete=models.CASCADE, related_name='return_items')
+    item_name      = models.CharField(max_length=150)
+    quantity       = models.IntegerField()
+    unit_price     = models.DecimalField(max_digits=12, decimal_places=2)
+    discount       = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    total_price    = models.DecimalField(max_digits=12, decimal_places=2, editable=False)
+
+    def save(self, *args, **kwargs):
+        self.total_price = (Decimal(str(self.quantity)) * Decimal(str(self.unit_price))) - Decimal(str(self.discount))
+        super().save(*args, **kwargs)
+
+
+class ExchangeItem(models.Model):
+    id             = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    return_request = models.ForeignKey(ReturnRequest, on_delete=models.CASCADE, related_name='exchange_items')
+    item_name      = models.CharField(max_length=150)
+    quantity       = models.IntegerField()
+    unit_price     = models.DecimalField(max_digits=12, decimal_places=2)
+    total_price    = models.DecimalField(max_digits=12, decimal_places=2, editable=False)
+
+    def save(self, *args, **kwargs):
+        self.total_price = Decimal(str(self.quantity)) * Decimal(str(self.unit_price))
+        super().save(*args, **kwargs)

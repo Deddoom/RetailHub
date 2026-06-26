@@ -19,7 +19,7 @@ from core.models import (
     Checklist, Task,
     DepositOrder, DepositOrderItem,
     BRANCH_CHOICES, Mission, Role, ChecklistLog,
-    Claim, ClaimItem, ClaimFollowUp,
+    Claim, ClaimItem, ClaimFollowUp,DamageRegistration, ReturnRequest,
 )
 from core.serializers import (
     UserSerializer,
@@ -32,6 +32,7 @@ from core.serializers import (
     DepositOrderSerializer, DepositOrderListSerializer,
     MissionSerializer, RoleSerializer, ChecklistLogSerializer,
     ClaimSerializer, ClaimFollowUpSerializer,
+    DamageRegistrationSerializer, ReturnRequestSerializer,
 )
 from core.authentication import StatelessTokenService
 from core.permissions import IsAdminUser, IsOwnerOrAdminOnly, IsSuperiorUser
@@ -612,3 +613,83 @@ class ClaimViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         
         serializer = ClaimFollowUpSerializer(follow_up)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+    
+# ── Damage Registration ViewSet ───────────────────────────────────────────────
+class DamageRegistrationViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
+    queryset           = DamageRegistration.objects.all().order_by('-created_at')
+    serializer_class   = DamageRegistrationSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        
+        # کارمندان عادی فقط ثبت‌های خودشان را می‌بینند اما ادمین همه را می‌بیند
+        if not (user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())):
+            qs = qs.filter(created_by=user)
+        return qs
+
+
+# ── Return Request ViewSet ────────────────────────────────────────────────────
+class ReturnRequestViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
+    queryset           = ReturnRequest.objects.all().order_by('-created_at')
+    serializer_class   = ReturnRequestSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        
+        # فیلتر اختصاصی فرانت برای تفکیک در انتظارها و واریز شده‌ها
+        # با ارسال پارامتر ?status=PENDING یا APPROVED یا COMPLETED
+        status_param = self.request.query_params.get('status')
+        if status_param:
+            qs = qs.filter(status=status_param)
+            
+        return qs
+
+    # ۱. اکشن تایید توسط مدیریت
+    @action(detail=True, methods=['post'], url_path='approve')
+    def approve(self, request, pk=None):
+        return_req = self.get_object()
+        user = request.user
+        
+        # بررسی دسترسی: فقط ادمین یا مدیر مالی مجاز به تایید است
+        has_permission = user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in user.roles.all())
+        if not has_permission:
+            return Response({"error": "شما دسترسی تایید برگشتی را ندارید."}, status=status.HTTP_403_FORBIDDEN)
+            
+        if return_req.status != 'PENDING':
+            return Response({"error": "این درخواست در وضعیت انتظار تایید مدیریت نیست."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        return_req.is_approved = True
+        return_req.status = 'APPROVED'
+        return_req.save()
+        
+        return Response({"message": "درخواست برگشتی با موفقیت تایید شد. در انتظار واریز."}, status=status.HTTP_200_OK)
+
+    # ۲. اکشن ثبت واریزی و تکمیل درخواست
+    @action(detail=True, methods=['post'], url_path='finalize-refund')
+    def finalize_refund(self, request, pk=None):
+        return_req = self.get_object()
+        user = request.user
+        
+        # دسترسی: مدیران مالی و ادمین و صندوق‌دار
+        has_permission = user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER', 'CASHIER', 'ACCOUNTANT'] for r in user.roles.all())
+        if not has_permission:
+            return Response({"error": "شما دسترسی ثبت واریزی را ندارید."}, status=status.HTTP_403_FORBIDDEN)
+            
+        if return_req.status != 'APPROVED':
+            return Response({"error": "این درخواست هنوز توسط مدیریت تایید نشده یا قبلاً واریز شده است."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        refund_date   = request.data.get('refund_date')
+        refund_method = request.data.get('refund_method')
+        
+        if not refund_date or not refund_method:
+            return Response({"error": "ورود تاریخ واریز (refund_date) و روش واریز (refund_method) الزامی است."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        return_req.refund_date   = refund_date
+        return_req.refund_method = refund_method
+        return_req.status        = 'COMPLETED'
+        return_req.save()
+        
+        return Response({"message": "واریز ثبت شد و درخواست از لیست انتظار به لیست تکمیل‌شده‌ها منتقل شد."}, status=status.HTTP_200_OK)
