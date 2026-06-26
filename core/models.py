@@ -139,15 +139,23 @@ class Customer(models.Model):
         ('SHOP',   'مغازه'),
         ('OTHER',  'متفرقه'),
     ]
+    # گزینه‌های جدید برای فیلد چند-انتخابی (چک‌باکس)
+    PAYMENT_METHOD_CHOICES = [
+        ('CASH',    'نقدی'),
+        ('CARD',    'کارتی'),
+        ('ACCOUNT', 'حساب به حساب'),
+        ('CHEQUE',  'چکی'),
+    ]
+
     id                    = models.UUIDField(primary_key=True, default=uuid4, editable=False)
-    name                  = models.CharField(max_length=150)
+    name                  = models.CharField(max_length=150) # نام و نام خانوادگی
     phone                 = models.CharField(max_length=15, unique=True)
     address               = models.TextField(blank=True, null=True)
+    purchase_types        = models.JSONField(default=list, help_text="لیست روش‌های پرداخت انتخابی")
+    total_purchase_amount = models.DecimalField(max_digits=12, decimal_places=0, default=0)
+    last_purchase_date    = models.DateField(auto_now_add=True) # تاریخ خرید مشتری
     primary_goods         = models.CharField(max_length=50, choices=PRIMARY_GOODS_CHOICES, default='OTHER')
     buying_for            = models.CharField(max_length=50, choices=BUYING_FOR_CHOICES,    default='OTHER')
-    last_purchase_date    = models.DateField(blank=True, null=True)
-    total_purchase_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
-    last_purchase_type    = models.CharField(max_length=30, blank=True, null=True)
     description           = models.TextField(blank=True, null=True)
 
     def __str__(self):
@@ -469,3 +477,63 @@ class DepositOrderItem(models.Model):
 
     def __str__(self):
         return f"{self.item_name} × {self.quantity}"
+    
+# ── Claim (مطالبه) ──────────────────────────────────────────────────────────────
+class Claim(models.Model):
+    STATUS_CHOICES = [
+        ('UNPAID',      'پرداخت نشده'),
+        ('IN_PROGRESS', 'در حال پیگیری'),
+        ('NO_ANSWER',   'پاسخگو نیست'),
+        ('REFUSED',     'عدم پرداخت'),
+        ('PAID',        'پرداخت شده'),
+    ]
+    
+    id                = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    customer_name     = models.CharField(max_length=150)
+    customer_phone    = models.CharField(max_length=15)
+    total_debt_amount = models.DecimalField(max_digits=12, decimal_places=2)
+    status            = models.CharField(max_length=20, choices=STATUS_CHOICES, default='UNPAID')
+    taken_date        = models.DateField(help_text="زمان بردن اجناس")
+    payment_deadline  = models.DateField(help_text="مهلت خواسته شده برای پرداخت")
+    seller            = models.ForeignKey(Seller, on_delete=models.PROTECT, related_name='claims')
+    assigned_to       = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_claims')
+    created_by        = models.ForeignKey(CustomUser, on_delete=models.PROTECT, related_name='created_claims')
+    description       = models.TextField(blank=True, null=True)
+    created_at        = models.DateTimeField(auto_now_add=True)
+    updated_at        = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"مطالبه {self.customer_name} - {self.get_status_display()}"
+
+
+# ── ClaimItem (اجناس بدهکاری) ──────────────────────────────────────────────────
+class ClaimItem(models.Model):
+    id          = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    claim       = models.ForeignKey(Claim, on_delete=models.CASCADE, related_name='items')
+    item_name   = models.CharField(max_length=150)
+    quantity    = models.IntegerField()
+    unit_price  = models.DecimalField(max_digits=12, decimal_places=2)
+    total_price = models.DecimalField(max_digits=12, decimal_places=2, editable=False)
+
+    def save(self, *args, **kwargs):
+        self.total_price = Decimal(str(self.quantity)) * Decimal(str(self.unit_price))
+        super().save(*args, **kwargs)
+
+
+# ── ClaimFollowUp (پیگیری‌ها) ──────────────────────────────────────────────────
+class ClaimFollowUp(models.Model):
+    TYPE_CHOICES = [
+        ('SMS',       'اس ام اسی'),
+        ('PHONE',     'تلفنی'),
+        ('IN_PERSON', 'حضوری'),
+        ('OTHER',     'سایر'),
+    ]
+    id             = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    claim          = models.ForeignKey(Claim, on_delete=models.CASCADE, related_name='follow_ups')
+    follower       = models.ForeignKey(CustomUser, on_delete=models.PROTECT, related_name='follow_ups_made')
+    follow_up_type = models.CharField(max_length=20, choices=TYPE_CHOICES)
+    description    = models.TextField()
+    date           = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"پیگیری {self.get_follow_up_type_display()} توسط {self.follower.username}"

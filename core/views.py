@@ -18,7 +18,8 @@ from core.models import (
     DamageReport, ItemExit,
     Checklist, Task,
     DepositOrder, DepositOrderItem,
-    BRANCH_CHOICES, Mission, Role,
+    BRANCH_CHOICES, Mission, Role, ChecklistLog,
+    Claim, ClaimItem, ClaimFollowUp,
 )
 from core.serializers import (
     UserSerializer,
@@ -29,7 +30,8 @@ from core.serializers import (
     DamageReportSerializer, ItemExitSerializer,
     ChecklistSerializer, TaskSerializer,
     DepositOrderSerializer, DepositOrderListSerializer,
-    MissionSerializer, RoleSerializer,
+    MissionSerializer, RoleSerializer, ChecklistLogSerializer,
+    ClaimSerializer, ClaimFollowUpSerializer,
 )
 from core.authentication import StatelessTokenService
 from core.permissions import IsAdminUser, IsOwnerOrAdminOnly, IsSuperiorUser
@@ -514,10 +516,11 @@ class TaskViewSet(viewsets.ModelViewSet):
         if can_manage:
             _save_with_completion()
         elif is_owner:
-            forbidden_fields = {k for k in data if k != 'is_completed'}
+            # ─── حل مشکل: اضافه کردن completion_note به لیست فیلدهای مجاز ───
+            forbidden_fields = {k for k in data if k not in ['is_completed', 'completion_note']}
             if forbidden_fields:
                 raise PermissionDenied(
-                    f"شما فقط مجاز به تغییر وضعیت انجام تسک هستید. "
+                    f"شما فقط مجاز به تغییر وضعیت انجام تسک و ثبت یادداشت هستید. "
                     f"فیلدهای غیرمجاز: {', '.join(sorted(forbidden_fields))}"
                 )
             _save_with_completion()
@@ -531,3 +534,81 @@ class RoleViewSet(viewsets.ReadOnlyModelViewSet):
     queryset           = Role.objects.all()
     serializer_class   = RoleSerializer
     permission_classes = [IsAdminUser]
+
+class ChecklistLogViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    نمایش تاریخچه چک‌لیست‌ها.
+    مدیران ارشد همه را می‌بینند.
+    مدیران میانی لاگ‌های زیرمجموعه خود را می‌بینند.
+    کارمندان فقط لاگ‌های خودشان را می‌بینند.
+    """
+    serializer_class = ChecklistLogSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        
+        # اگر ادمین اصلی است، همه لاگ‌ها را ببیند
+        if user.is_superuser or user.roles.filter(code='ADMIN').exists():
+            return ChecklistLog.objects.all().prefetch_related('items')
+            
+        # پیدا کردن کاربرانی که زیرمجموعه این شخص هستند
+        # (با استفاده از متد is_superior_to که در مدل CustomUser نوشتی)
+        subordinate_users = []
+        all_users = CustomUser.objects.exclude(id=user.id)
+        for u in all_users:
+            if user.is_superior_to(u):
+                subordinate_users.append(u.id)
+        
+        # لاگ‌های مربوط به خودش + لاگ‌های زیرمجموعه‌اش
+        allowed_users = [user.id] + subordinate_users
+        
+        return ChecklistLog.objects.filter(
+            assigned_to_id__in=allowed_users
+        ).prefetch_related('items')
+    
+# ── Claims ────────────────────────────────────────────────────────────────────
+
+class ClaimViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
+    queryset           = Claim.objects.all().order_by('-created_at')
+    serializer_class   = ClaimSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        
+        # فیلتر برای نمایش مطالبات پرداخت شده یا نشده در فرانت‌اند
+        status_param = self.request.query_params.get('status')
+        if status_param:
+            qs = qs.filter(status=status_param)
+            
+        # فیلتر برای گرفتن مطالباتی که فقط به این شخص سپرده شده
+        assigned_to = self.request.query_params.get('assigned_to')
+        if assigned_to:
+            qs = qs.filter(assigned_to_id=assigned_to)
+
+        return qs
+
+    # اکشن اختصاصی برای اضافه کردن یک پیگیری جدید به مطالبه
+    @action(detail=True, methods=['post'], url_path='add-follow-up')
+    def add_follow_up(self, request, pk=None):
+        claim = self.get_object()
+        follow_up_type = request.data.get('follow_up_type')
+        description    = request.data.get('description')
+
+        if not follow_up_type or not description:
+            return Response(
+                {"error": "وارد کردن نوع پیگیری (follow_up_type) و توضیحات (description) الزامی است."}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # ساخت رکورد پیگیری جدید و متصل کردنش به کاربر لاگین شده
+        follow_up = ClaimFollowUp.objects.create(
+            claim=claim,
+            follower=request.user,
+            follow_up_type=follow_up_type,
+            description=description
+        )
+        
+        serializer = ClaimFollowUpSerializer(follow_up)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)

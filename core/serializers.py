@@ -8,9 +8,10 @@ from core.models import (
     CustomUser, Role, Seller, Customer,
     Sale, Payment, Cheque, DepositItem,
     Expense, DamageReport, ItemExit,
-    Checklist, Task,
+    Checklist, Task, 
     DepositOrder, DepositOrderItem,
-    BRANCH_CHOICES, Mission,
+    BRANCH_CHOICES, Mission, ChecklistLog, ChecklistLogItem,
+    Claim, ClaimItem, ClaimFollowUp,
 )
 
 
@@ -96,6 +97,9 @@ class SellerLookupSerializer(serializers.ModelSerializer):
 # ── Customer ──────────────────────────────────────────────────────────────────
 
 class CustomerSerializer(serializers.ModelSerializer):
+    purchase_type = serializers.MultipleChoiceField(
+        choices=[('CASH', 'نقدی'), ('CARD', 'کارتی'), ('ACCOUNT', 'حساب به حساب'), ('CHEQUE', 'چکی')]
+    )
     class Meta:
         model            = Customer
         fields           = '__all__'
@@ -437,7 +441,7 @@ class MissionSerializer(serializers.ModelSerializer):
 class TaskSerializer(serializers.ModelSerializer):
     class Meta:
         model            = Task
-        fields           = ['id', 'checklist', 'title', 'is_completed', 'completed_by', 'completed_at', 'description']
+        fields           = ['id', 'checklist', 'title', 'is_completed', 'completed_by', 'completed_at', 'completion_note', 'description']
         read_only_fields = ['id', 'checklist', 'completed_by', 'completed_at']
 
 
@@ -511,4 +515,77 @@ class ChecklistSerializer(serializers.ModelSerializer):
             for task_data in tasks_data:
                 Task.objects.create(checklist=instance, **task_data)
 
+        return instance
+    
+class ChecklistLogItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ChecklistLogItem
+        fields = '__all__'
+
+class ChecklistLogSerializer(serializers.ModelSerializer):
+    items = ChecklistLogItemSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = ChecklistLog
+        fields = '__all__'
+
+# ── Claim Serializers ─────────────────────────────────────────────────────────
+
+class ClaimItemSerializer(serializers.ModelSerializer):
+    total_price = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+
+    class Meta:
+        model  = ClaimItem
+        fields = ['id', 'item_name', 'quantity', 'unit_price', 'total_price']
+
+
+class ClaimFollowUpSerializer(serializers.ModelSerializer):
+    follower_name = serializers.CharField(source='follower.username', read_only=True)
+
+    class Meta:
+        model  = ClaimFollowUp
+        fields = ['id', 'follower', 'follower_name', 'follow_up_type', 'description', 'date']
+        read_only_fields = ['follower', 'date']
+
+
+class ClaimSerializer(serializers.ModelSerializer):
+    items            = ClaimItemSerializer(many=True)
+    follow_ups       = ClaimFollowUpSerializer(many=True, read_only=True)
+    created_by_name  = serializers.CharField(source='created_by.username', read_only=True)
+    seller_name      = serializers.CharField(source='seller.name', read_only=True)
+    assigned_to_name = serializers.CharField(source='assigned_to.username', read_only=True)
+
+    class Meta:
+        model  = Claim
+        fields = [
+            'id', 'customer_name', 'customer_phone', 'total_debt_amount',
+            'status', 'taken_date', 'payment_deadline',
+            'seller', 'seller_name', 'assigned_to', 'assigned_to_name',
+            'created_by', 'created_by_name', 'description',
+            'items', 'follow_ups', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['created_by', 'created_at', 'updated_at']
+
+    @transaction.atomic
+    def create(self, validated_data):
+        items_data = validated_data.pop('items', [])
+        validated_data['created_by'] = self.context['request'].user
+        
+        claim = Claim.objects.create(**validated_data)
+        for item in items_data:
+            ClaimItem.objects.create(claim=claim, **item)
+        return claim
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        items_data = validated_data.pop('items', None)
+        
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        
+        if items_data is not None:
+            instance.items.all().delete()
+            for item in items_data:
+                ClaimItem.objects.create(claim=instance, **item)
         return instance
