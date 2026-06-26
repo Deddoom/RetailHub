@@ -14,8 +14,6 @@ BRANCH_CHOICES = [
 ]
 
 # ── درخت سلسله‌مراتب نقش‌ها ────────────────────────────────────────────────
-# کلید: نقش بالادست  →  مقدار: مجموعه نقش‌هایی که مستقیماً زیرمجموعه آن هستند
-# برای پیمایش چندسطحی از تابع کمکی _get_all_subordinate_codes استفاده می‌شود
 ROLE_TREE: dict[str, set[str]] = {
     'ADMIN':             {'FINANCIAL_MANAGER', 'EXECUTIVE_MANAGER', 'SUPERVISOR',
                           'ACCOUNTANT', 'STATISTICIAN', 'CASHIER', 'USER'},
@@ -30,21 +28,18 @@ ROLE_TREE: dict[str, set[str]] = {
 
 
 def _get_all_subordinate_codes(role_codes: list[str]) -> set[str]:
-    """
-    با توجه به لیست نقش‌های یک کاربر، تمام نقش‌هایی را که او بر آن‌ها
-    بالادستی دارد (به‌صورت تجمیعی در کل درخت) برمی‌گرداند.
-    """
     result: set[str] = set()
     queue  = list(role_codes)
     while queue:
-        current = queue.pop()
+        current  = queue.pop()
         children = ROLE_TREE.get(current, set())
-        new = children - result
-        result |= new
+        new      = children - result
+        result  |= new
         queue.extend(new)
     return result
 
 
+# ── Role ───────────────────────────────────────────────────────────────────────
 class Role(models.Model):
     ROLE_CHOICES = [
         ('ADMIN',             'مدیریت (Admin)'),
@@ -63,43 +58,33 @@ class Role(models.Model):
         return self.get_code_display()
 
 
+# ── CustomUser ─────────────────────────────────────────────────────────────────
 class CustomUser(AbstractUser):
     id     = models.UUIDField(primary_key=True, default=uuid4, editable=False)
     roles  = models.ManyToManyField(Role, related_name='users', blank=True)
     branch = models.CharField(max_length=50, choices=BRANCH_CHOICES, blank=True, null=True)
-    
-    # فیلد جدید برای وضعیت تکمیل مشخصات فردی
     is_profile_completed = models.BooleanField(default=False)
 
     groups           = models.ManyToManyField('auth.Group',      related_name='custom_users_groups',      blank=True)
     user_permissions = models.ManyToManyField('auth.Permission', related_name='custom_users_permissions', blank=True)
 
     def __str__(self):
-        # نمایش نام و فامیل در کنار یوزرنیم برای ادمین
         if self.first_name or self.last_name:
             return f"{self.username} ({self.first_name} {self.last_name})".strip()
         roles_str = ", ".join([r.get_code_display() for r in self.roles.all()])
         return f"{self.username} ({roles_str})"
 
     def is_superior_to(self, target_user) -> bool:
-        """
-        بررسی می‌کند که آیا این کاربر بالادستِ کاربر هدف است یا خیر.
-        """
         if self.pk == target_user.pk:
             return False
-
         if self.is_superuser or any(r.code == 'ADMIN' for r in self.roles.all()):
             return True
-
         my_codes     = [r.code for r in self.roles.all()]
         target_codes = {r.code for r in target_user.roles.all()}
-
         if not my_codes or my_codes == ['USER']:
             return False
-
         if not target_codes:
             return any(code in ['FINANCIAL_MANAGER', 'EXECUTIVE_MANAGER', 'SUPERVISOR', 'ACCOUNTANT'] for code in my_codes)
-
         all_subordinates = _get_all_subordinate_codes(my_codes)
         return target_codes.issubset(all_subordinates)
 
@@ -298,16 +283,122 @@ class Checklist(models.Model):
 
 # ── Task ───────────────────────────────────────────────────────────────────────
 class Task(models.Model):
-    id           = models.UUIDField(primary_key=True, default=uuid4, editable=False)
-    checklist    = models.ForeignKey(Checklist, on_delete=models.CASCADE, related_name='tasks')
-    title        = models.CharField(max_length=150)
-    is_completed = models.BooleanField(default=False)
-    completed_by = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True)
-    completed_at = models.DateTimeField(null=True, blank=True)
-    description  = models.TextField(blank=True, null=True)
+    id              = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    checklist       = models.ForeignKey(Checklist, on_delete=models.CASCADE, related_name='tasks')
+    title           = models.CharField(max_length=150)
+    is_completed    = models.BooleanField(default=False)
+    completed_by    = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True)
+    completed_at    = models.DateTimeField(null=True, blank=True)
+    # ── فیلد جدید: یادداشت کاربر هنگام تکمیل تسک ──
+    completion_note = models.TextField(
+        blank=True, null=True,
+        help_text="توضیح اختیاری که کاربر هنگام تیک زدن تسک وارد می‌کند"
+    )
+    description     = models.TextField(blank=True, null=True)
 
     def __str__(self):
         return self.title
+
+
+# ── ChecklistLog ───────────────────────────────────────────────────────────────
+class ChecklistLog(models.Model):
+    """
+    Snapshot غیرقابل‌تغییر از وضعیت کامل یک چک‌لیست در پایان هر دوره.
+    این مدل هرگز از طریق API قابل ویرایش یا حذف نیست.
+    """
+    FREQUENCY_CHOICES = [
+        ('DAILY',   'روزانه'),
+        ('WEEKLY',  'هفتگی'),
+        ('MONTHLY', 'ماهانه'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+
+    # ─── اشاره به چک‌لیست اصلی (nullable تا حتی بعد از حذف چک‌لیست هم بماند) ───
+    checklist           = models.ForeignKey(
+        Checklist, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='logs'
+    )
+    checklist_title     = models.CharField(max_length=150)
+    checklist_frequency = models.CharField(max_length=20, choices=FREQUENCY_CHOICES)
+
+    # ─── اطلاعات flat شخص مسئول ───
+    assigned_to          = models.ForeignKey(
+        CustomUser, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='checklist_logs_assigned'
+    )
+    assigned_to_username = models.CharField(max_length=150)
+
+    # ─── اطلاعات flat سازنده چک‌لیست ───
+    created_by          = models.ForeignKey(
+        CustomUser, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='checklist_logs_created'
+    )
+    created_by_username = models.CharField(max_length=150)
+
+    # ─── بازه زمانی دوره ───
+    period_start = models.DateField(help_text="شروع دوره‌ای که این لاگ برای آن ثبت شده")
+    period_end   = models.DateField(help_text="پایان دوره‌ای که این لاگ برای آن ثبت شده")
+
+    # ─── زمان ثبت لاگ (auto — غیرقابل تغییر) ───
+    logged_at = models.DateTimeField(auto_now_add=True)
+
+    # ─── کسی که دکمه ریست را فشار داده ───
+    reset_by          = models.ForeignKey(
+        CustomUser, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='checklist_logs_reset'
+    )
+    reset_by_username = models.CharField(max_length=150, blank=True)
+
+    # ─── آمار خلاصه دوره ───
+    total_tasks     = models.PositiveIntegerField(default=0)
+    completed_tasks = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ['-logged_at']
+
+    def __str__(self):
+        return (
+            f"[{self.checklist_frequency}] {self.checklist_title}"
+            f" — {self.assigned_to_username}"
+            f" — {self.period_start} تا {self.period_end}"
+        )
+
+
+# ── ChecklistLogItem ───────────────────────────────────────────────────────────
+class ChecklistLogItem(models.Model):
+    """
+    یک آیتم غیرقابل‌تغییر از یک ChecklistLog.
+    معادل وضعیت یک Task در لحظه ریست.
+    """
+    id  = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    log = models.ForeignKey(ChecklistLog, on_delete=models.CASCADE, related_name='items')
+
+    # ─── اطلاعات flat تسک ───
+    task_title       = models.CharField(max_length=150)
+    task_description = models.TextField(blank=True, null=True)
+
+    # ─── وضعیت در زمان ریست ───
+    is_completed    = models.BooleanField(default=False)
+    completion_note = models.TextField(
+        blank=True, null=True,
+        help_text="یادداشتی که کاربر هنگام تیک زدن وارد کرده"
+    )
+
+    # ─── اطلاعات flat تکمیل‌کننده ───
+    completed_by          = models.ForeignKey(
+        CustomUser, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='checklist_log_items_completed'
+    )
+    completed_by_username = models.CharField(max_length=150, blank=True)
+    completed_at          = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['task_title']
+
+    def __str__(self):
+        status = "✓" if self.is_completed else "✗"
+        return f"{status} {self.task_title}"
 
 
 # ── DepositOrder ───────────────────────────────────────────────────────────────
