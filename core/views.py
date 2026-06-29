@@ -553,25 +553,36 @@ class ChecklistLogViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        
-        # اگر ادمین اصلی است، همه لاگ‌ها را ببیند
+    
         if user.is_superuser or user.roles.filter(code='ADMIN').exists():
-            return ChecklistLog.objects.all().prefetch_related('items')
-            
-        # پیدا کردن کاربرانی که زیرمجموعه این شخص هستند
-        # (با استفاده از متد is_superior_to که در مدل CustomUser نوشتی)
-        subordinate_users = []
-        all_users = CustomUser.objects.exclude(id=user.id)
-        for u in all_users:
-            if user.is_superior_to(u):
-                subordinate_users.append(u.id)
-        
-        # لاگ‌های مربوط به خودش + لاگ‌های زیرمجموعه‌اش
-        allowed_users = [user.id] + subordinate_users
-        
-        return ChecklistLog.objects.filter(
-            assigned_to_id__in=allowed_users
-        ).prefetch_related('items')
+            qs = ChecklistLog.objects.all().prefetch_related('items')
+        else:
+            subordinate_users = []
+            all_users = CustomUser.objects.exclude(id=user.id)
+            for u in all_users:
+                if user.is_superior_to(u):
+                    subordinate_users.append(u.id)
+            allowed_users = [user.id] + subordinate_users
+            qs = ChecklistLog.objects.filter(
+                assigned_to_id__in=allowed_users
+            ).prefetch_related('items')
+
+        # ── فیلترهای جدید ──────────────────────────────────
+        assigned_to_param = self.request.query_params.get('assigned_to')
+        frequency_param   = self.request.query_params.get('frequency')
+        from_date_param   = self.request.query_params.get('from_date')
+        to_date_param     = self.request.query_params.get('to_date')
+
+        if assigned_to_param:
+            qs = qs.filter(assigned_to_id=assigned_to_param)
+        if frequency_param:
+            qs = qs.filter(checklist_frequency=frequency_param)
+        if from_date_param:
+            qs = qs.filter(period_start__gte=from_date_param)
+        if to_date_param:
+            qs = qs.filter(period_end__lte=to_date_param)
+
+        return qs.order_by('-logged_at')
     
 # ── Claims ────────────────────────────────────────────────────────────────────
 

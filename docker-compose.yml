@@ -1,5 +1,4 @@
 version: '3.8'
-
 services:
   # سرویس دیتابیس پروژه
   db:
@@ -49,6 +48,20 @@ services:
       - static_volume:/app/staticfiles:ro
     depends_on:
       - web
+
+  # ── سرویس cron برای ریست خودکار چک‌لیست‌ها ──────────────────
+  cron:
+    build: .
+    container_name: retail_cron
+    restart: always
+    environment:
+      - DEBUG=False
+      - SECRET_KEY=${SECRET_KEY}
+      - DATABASE_URL=postgres://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
+    depends_on:
+      db:
+        condition: service_healthy
+    command: sh /app/cron_runner.sh
 
 volumes:
   postgres_data:
