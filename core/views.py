@@ -19,7 +19,7 @@ from core.models import (
     Checklist, Task,
     DepositOrder, DepositOrderItem,
     BRANCH_CHOICES, Mission, Role, ChecklistLog,
-    Claim, ClaimItem, ClaimFollowUp,DamageRegistration, ReturnRequest,
+    Claim, ClaimFollowUp,DamageRegistration, ReturnRequest,
 )
 from core.serializers import (
     UserSerializer,
@@ -363,7 +363,8 @@ class DepositOrderViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         customer = Customer.objects.select_for_update().get(pk=order.customer_id)
         customer.last_purchase_date    = date.today()
         customer.total_purchase_amount += net_amount
-        customer.last_purchase_type    = debt_payment_method
+        if debt_payment_method not in customer.purchase_types:
+            customer.purchase_types = customer.purchase_types + [debt_payment_method]
         customer.save()
 
         return Response(
@@ -474,11 +475,15 @@ class TaskViewSet(viewsets.ModelViewSet):
         return user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
 
     def _can_manage_task(self, user, task):
-        return (
-            self._is_admin(user)
-            or task.checklist.created_by == user
-            or user.is_superior_to(task.checklist.assigned_to)
-        )
+        if self._is_admin(user):
+            return True
+        if task.checklist.created_by == user:
+            return True
+        # FIX: اول چک کن assigned_to وجود داره
+        if task.checklist.assigned_to is not None:
+            return user.is_superior_to(task.checklist.assigned_to)
+        return False
+
 
     def get_queryset(self):
         user = self.request.user

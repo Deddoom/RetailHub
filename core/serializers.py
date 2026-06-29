@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+from urllib import request
+
 from rest_framework import serializers
 from django.db import transaction
 from decimal import Decimal
@@ -98,13 +100,23 @@ class SellerLookupSerializer(serializers.ModelSerializer):
 # ── Customer ──────────────────────────────────────────────────────────────────
 
 class CustomerSerializer(serializers.ModelSerializer):
-    purchase_type = serializers.MultipleChoiceField(
-        choices=[('CASH', 'نقدی'), ('CARD', 'کارتی'), ('ACCOUNT', 'حساب به حساب'), ('CHEQUE', 'چکی')]
+    # FIX: نام فیلد باید purchase_types باشه (مطابق مدل)، نه purchase_type
+    purchase_types = serializers.MultipleChoiceField(
+        choices=[
+            ('CASH',    'نقدی'),
+            ('CARD',    'کارتی'),
+            ('ACCOUNT', 'حساب به حساب'),
+            ('CHEQUE',  'چکی'),
+        ],
+        required=False,
     )
+ 
     class Meta:
         model            = Customer
         fields           = '__all__'
-        read_only_fields = ['last_purchase_date', 'total_purchase_amount', 'last_purchase_type']
+        read_only_fields = ['last_purchase_date', 'total_purchase_amount']
+
+
 
 
 # ── Cheque ────────────────────────────────────────────────────────────────────
@@ -206,10 +218,9 @@ class SaleSerializer(serializers.ModelSerializer):
             customer = Customer.objects.select_for_update().get(pk=sale.customer_id)
             customer.last_purchase_date    = date.today()
             customer.total_purchase_amount += total_amount
-            customer.last_purchase_type    = (
-                'COMBINED' if len(payments_data) > 1
-                else (payments_data[0].get('payment_method') if payments_data else 'REMAINING')
-            )
+            customer.purchase_types = list(set(
+                [p.get('payment_method') for p in payments_data if p.get('payment_method')]
+            ))
             customer.save()
 
         return sale
@@ -466,18 +477,17 @@ class ChecklistSerializer(serializers.ModelSerializer):
     def validate_assigned_to(self, value):
         if value is None:
             return value
-
         request = self.context.get('request')
         if not value.is_active:
-            raise serializers.ValidationError(
-                "امکان تخصیص چک‌لیست به کاربر غیرفعال وجود ندارد."
-            )
+            raise serializers.ValidationError("کاربر غیرفعال است.")
         if request and request.user:
-            if not request.user.is_superior_to(value):
-                raise serializers.ValidationError(
-                    "شما بالادست این کاربر نیستید و نمی‌توانید برای او چک‌لیست تعیین کنید."
-                )
+            user = request.user
+            # FIX: ادمین و superuser همیشه مجاز هستند
+            is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
+            if not is_admin and not user.is_superior_to(value):
+                raise serializers.ValidationError("شما بالادست این کاربر نیستید.")
         return value
+
 
     def create(self, validated_data):
         tasks_data = validated_data.pop('tasks', [])
@@ -553,12 +563,17 @@ class ClaimSerializer(serializers.ModelSerializer):
     items            = ClaimItemSerializer(many=True)
     follow_ups       = ClaimFollowUpSerializer(many=True, read_only=True)
     created_by_name  = serializers.CharField(source='created_by.username', read_only=True)
-    seller_name      = serializers.CharField(source='seller.name', read_only=True)
-    assigned_to_name = serializers.CharField(source='assigned_to.username', read_only=True)
-
+    seller_name      = serializers.CharField(source='seller.name',         read_only=True)
+    # FIX: assigned_to nullable است، باید allow_null=True داشته باشه
+    assigned_to_name = serializers.SerializerMethodField()
+ 
+    def get_assigned_to_name(self, obj):
+        # FIX: اگر assigned_to=None باشه crash نمیکنه
+        return obj.assigned_to.username if obj.assigned_to else None
+ 
     class Meta:
-        model  = Claim
-        fields = [
+        model            = Claim
+        fields           = [
             'id', 'customer_name', 'customer_phone', 'total_debt_amount',
             'status', 'taken_date', 'payment_deadline',
             'seller', 'seller_name', 'assigned_to', 'assigned_to_name',
@@ -566,30 +581,28 @@ class ClaimSerializer(serializers.ModelSerializer):
             'items', 'follow_ups', 'created_at', 'updated_at'
         ]
         read_only_fields = ['created_by', 'created_at', 'updated_at']
-
+ 
     @transaction.atomic
     def create(self, validated_data):
         items_data = validated_data.pop('items', [])
         validated_data['created_by'] = self.context['request'].user
-        
         claim = Claim.objects.create(**validated_data)
         for item in items_data:
             ClaimItem.objects.create(claim=claim, **item)
         return claim
-
+ 
     @transaction.atomic
     def update(self, instance, validated_data):
         items_data = validated_data.pop('items', None)
-        
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
-        
         if items_data is not None:
             instance.items.all().delete()
             for item in items_data:
                 ClaimItem.objects.create(claim=instance, **item)
         return instance
+
     
 # ── Damage Registration Serializers ─────────────────────────────────────────────
 class DamageItemSerializer(serializers.ModelSerializer):
