@@ -563,25 +563,24 @@ class ClaimSerializer(serializers.ModelSerializer):
     items            = ClaimItemSerializer(many=True)
     follow_ups       = ClaimFollowUpSerializer(many=True, read_only=True)
     created_by_name  = serializers.CharField(source='created_by.username', read_only=True)
-    seller_name      = serializers.CharField(source='seller.name',         read_only=True)
-    # FIX: assigned_to nullable است، باید allow_null=True داشته باشه
+    # FIX: seller_name حذف شد چون seller الان CharField هست
     assigned_to_name = serializers.SerializerMethodField()
- 
+
     def get_assigned_to_name(self, obj):
-        # FIX: اگر assigned_to=None باشه crash نمیکنه
         return obj.assigned_to.username if obj.assigned_to else None
- 
+
     class Meta:
-        model            = Claim
-        fields           = [
+        model  = Claim
+        fields = [
             'id', 'customer_name', 'customer_phone', 'total_debt_amount',
             'status', 'taken_date', 'payment_deadline',
-            'seller', 'seller_name', 'assigned_to', 'assigned_to_name',
+            'seller',                        # ← الان فقط یه رشته متنیه
+            'assigned_to', 'assigned_to_name',
             'created_by', 'created_by_name', 'description',
             'items', 'follow_ups', 'created_at', 'updated_at'
         ]
         read_only_fields = ['created_by', 'created_at', 'updated_at']
- 
+
     @transaction.atomic
     def create(self, validated_data):
         items_data = validated_data.pop('items', [])
@@ -590,7 +589,7 @@ class ClaimSerializer(serializers.ModelSerializer):
         for item in items_data:
             ClaimItem.objects.create(claim=claim, **item)
         return claim
- 
+
     @transaction.atomic
     def update(self, instance, validated_data):
         items_data = validated_data.pop('items', None)

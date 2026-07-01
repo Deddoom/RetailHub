@@ -495,7 +495,7 @@ class Claim(models.Model):
     status            = models.CharField(max_length=20, choices=STATUS_CHOICES, default='UNPAID')
     taken_date        = models.DateField(help_text="زمان بردن اجناس")
     payment_deadline  = models.DateField(help_text="مهلت خواسته شده برای پرداخت")
-    seller            = models.ForeignKey(Seller, on_delete=models.PROTECT, related_name='claims')
+    seller            = models.CharField(max_length=150)
     assigned_to       = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_claims')
     created_by        = models.ForeignKey(CustomUser, on_delete=models.PROTECT, related_name='created_claims')
     description       = models.TextField(blank=True, null=True)
