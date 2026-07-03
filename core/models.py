@@ -64,6 +64,15 @@ class CustomUser(AbstractUser):
     roles  = models.ManyToManyField(Role, related_name='users', blank=True)
     branch = models.CharField(max_length=50, choices=BRANCH_CHOICES, blank=True, null=True)
     is_profile_completed = models.BooleanField(default=False)
+    
+    # ─── فیلد جدید برای تعریف افراد بالادستی ───
+    superiors = models.ManyToManyField(
+        'self', 
+        symmetrical=False, 
+        related_name='subordinate_users', 
+        blank=True,
+        help_text="افراد بالادستی مستقیم این کاربر"
+    )
 
     groups           = models.ManyToManyField('auth.Group',      related_name='custom_users_groups',      blank=True)
     user_permissions = models.ManyToManyField('auth.Permission', related_name='custom_users_permissions', blank=True)
@@ -75,18 +84,36 @@ class CustomUser(AbstractUser):
         return f"{self.username} ({roles_str})"
 
     def is_superior_to(self, target_user) -> bool:
+        """
+        بررسی سلسله‌مراتبی: آیا این کاربر (self) در درخت بالادستی‌های کاربر هدف (target_user) قرار دارد؟
+        """
         if self.pk == target_user.pk:
             return False
+            
+        # ادمین کل به همه افراد دسترسی بالادستی دارد
         if self.is_superuser or any(r.code == 'ADMIN' for r in self.roles.all()):
             return True
-        my_codes     = [r.code for r in self.roles.all()]
-        target_codes = {r.code for r in target_user.roles.all()}
-        if not my_codes or my_codes == ['USER']:
-            return False
-        if not target_codes:
-            return any(code in ['FINANCIAL_MANAGER', 'EXECUTIVE_MANAGER', 'SUPERVISOR', 'ACCOUNTANT'] for code in my_codes)
-        all_subordinates = _get_all_subordinate_codes(my_codes)
-        return target_codes.issubset(all_subordinates)
+
+        # جستجوی درختی (BFS) به سمت بالا برای یافتن این کاربر در بین مدیران
+        visited = set()
+        queue = [target_user]
+        
+        while queue:
+            current = queue.pop(0)
+            if current.pk in visited:
+                continue
+            visited.add(current.pk)
+            
+            # اگر کاربر فعلی (self) در لیست مدیران مستقیم گره در حال بررسی بود
+            if self in current.superiors.all():
+                return True
+                
+            # اضافه کردن مدیران گره فعلی به صف بررسی
+            for sup in current.superiors.all():
+                if sup.pk not in visited:
+                    queue.append(sup)
+                    
+        return False
 
 
 # ── Mission ────────────────────────────────────────────────────────────────────

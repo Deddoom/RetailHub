@@ -126,13 +126,24 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='subordinates')
     def subordinates(self, request):
         current_user = request.user
-        all_users = CustomUser.objects.prefetch_related('roles').all()
         
-        # فیلتر کردن بر اساس منطق بالادستی مدل شما
-        subordinate_users = [
-            user for user in all_users 
-            if current_user.is_superior_to(user) or current_user.is_superuser
-        ]
+        # اگر ادمین باشد، کل کاربران سامانه (غیر از خودش) را می‌بیند
+        if current_user.is_superuser or any(r.code == 'ADMIN' for r in current_user.roles.all()):
+            subordinate_users = CustomUser.objects.exclude(pk=current_user.pk).prefetch_related('roles', 'superiors')
+        else:
+            # جستجوی درختی رو به پایین برای یافتن همه زیردستان مستقیم و غیرمستقیم
+            subordinate_users_set = set()
+            # استخراج افرادی که مستقیماً این شخص را بالادستی خود معرفی کرده‌اند
+            queue = list(current_user.subordinate_users.all())
+            
+            while queue:
+                curr = queue.pop(0)
+                if curr not in subordinate_users_set:
+                    subordinate_users_set.add(curr)
+                    # پیدا کردن زیردستان شخص فعلی و افزودن به صف
+                    queue.extend(curr.subordinate_users.all())
+            
+            subordinate_users = list(subordinate_users_set)
         
         serializer = self.get_serializer(subordinate_users, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)

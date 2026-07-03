@@ -29,40 +29,62 @@ class RoleSerializer(serializers.ModelSerializer):
 
 
 # ── Auth / User ───────────────────────────────────────────────────────────────
-
 class UserSerializer(serializers.ModelSerializer):
     roles    = RoleSerializer(many=True, read_only=True)
     role_ids = serializers.PrimaryKeyRelatedField(
         many=True, queryset=Role.objects.all(),
         source='roles', write_only=True, required=False
     )
+    
+    # ─── فیلدهای جدید مربوط به اشخاص بالادستی ───
+    superior_ids = serializers.PrimaryKeyRelatedField(
+        many=True, queryset=CustomUser.objects.all(),
+        source='superiors', write_only=True, required=False
+    )
+    superiors_info = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model        = CustomUser
         fields       = [
             'id', 'username', 'first_name', 'last_name', 
             'is_profile_completed', 'roles', 'role_ids', 
-            'branch', 'is_active', 'password'
+            'branch', 'is_active', 'password',
+            'superiors_info', 'superior_ids'  # <--- اضافه شد
         ]
-        # فیلد تکمیل پروفایل توسط سیستم کنترل می‌شود اما قابل خواندن است
         read_only_fields = ['is_profile_completed']
+
+    # تابع نمایش اطلاعات مدیران به صورت خوانا در خروجی JSON
+    def get_superiors_info(self, obj):
+        return [
+            {
+                "id": sup.id, 
+                "username": sup.username, 
+                "name": f"{sup.first_name} {sup.last_name}".strip()
+            } 
+            for sup in obj.superiors.all()
+        ]
 
     def create(self, validated_data):
         roles = validated_data.pop('roles', [])
+        superiors = validated_data.pop('superiors', []) # استخراج مدیران ارسالی
         first_name = validated_data.get('first_name', '')
         last_name = validated_data.get('last_name', '')
         
-        # اگر ادمین از ابتدا نام و فامیل را پر کرده باشد، پروفایل تکمیل‌شده فرض می‌شود
         if first_name or last_name:
             validated_data['is_profile_completed'] = True
             
         user  = CustomUser.objects.create_user(**validated_data)
+        
         if roles:
             user.roles.set(roles)
+        if superiors:
+            user.superiors.set(superiors) # متصل کردن مدیران
+            
         return user
 
     def update(self, instance, validated_data):
         roles    = validated_data.pop('roles', None)
+        superiors = validated_data.pop('superiors', None) # استخراج مدیران ارسالی
         password = validated_data.pop('password', None)
         first_name = validated_data.get('first_name', instance.first_name)
         last_name = validated_data.get('last_name', instance.last_name)
@@ -73,13 +95,16 @@ class UserSerializer(serializers.ModelSerializer):
         if password:
             instance.set_password(password)
             
-        # اگر نام یا فامیل ثبت شد، وضعیت تکمیل پروفایل True می‌شود
         if first_name or last_name:
             instance.is_profile_completed = True
             
         instance.save()
+        
         if roles is not None:
             instance.roles.set(roles)
+        if superiors is not None:
+            instance.superiors.set(superiors) # بروزرسانی مدیران
+            
         return instance
 
 
