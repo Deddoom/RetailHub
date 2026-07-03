@@ -52,6 +52,9 @@ class UserSerializer(serializers.ModelSerializer):
             'superiors_info', 'superior_ids'  # <--- اضافه شد
         ]
         read_only_fields = ['is_profile_completed']
+        extra_kwargs = {
+            'password': {'write_only': True, 'required': False}
+        }
 
     # تابع نمایش اطلاعات مدیران به صورت خوانا در خروجی JSON
     def get_superiors_info(self, obj):
