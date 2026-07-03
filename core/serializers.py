@@ -49,11 +49,11 @@ class UserSerializer(serializers.ModelSerializer):
             'id', 'username', 'first_name', 'last_name', 
             'is_profile_completed', 'roles', 'role_ids', 
             'branch', 'is_active', 'password',
-            'superiors_info', 'superior_ids'  # <--- اضافه شد
-        ]
+            'superiors_info', 'superior_ids'
+        ]   
         read_only_fields = ['is_profile_completed']
         extra_kwargs = {
-            'password': {'write_only': True, 'required': False}
+            'password': {'write_only': True, 'required': False},
         }
 
     # تابع نمایش اطلاعات مدیران به صورت خوانا در خروجی JSON
