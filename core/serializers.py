@@ -15,6 +15,7 @@ from core.models import (
     BRANCH_CHOICES, Mission, ChecklistLog, ChecklistLogItem,
     Claim, ClaimItem, ClaimFollowUp,DamageRegistration, DamageItem, 
     ReturnRequest, ReturnItem, ExchangeItem,
+    ReportDefinition, ReportSubmission, ReportImage
 )
 
 
@@ -744,3 +745,44 @@ class ReturnRequestSerializer(serializers.ModelSerializer):
                 ExchangeItem.objects.create(return_request=instance, **item)
                 
         return instance
+    
+class ReportDefinitionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ReportDefinition
+        fields = '__all__'
+        read_only_fields = ('superior', 'created_at')
+
+    def validate(self, data):
+        # اعتبارسنجی منطقی برای نوع گزارش
+        if data.get('report_type') == 'RECURRING' and not data.get('interval'):
+            raise serializers.ValidationError("برای گزارش‌های تکراری، تعیین دوره (interval) الزامی است.")
+        if data.get('report_type') == 'DEADLINE' and not data.get('deadline'):
+            raise serializers.ValidationError("برای گزارش‌های مهلت‌دار، تعیین تاریخ (deadline) الزامی است.")
+        return data
+
+class ReportImageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ReportImage
+        fields = ('id', 'image', 'uploaded_at')
+
+class ReportSubmissionSerializer(serializers.ModelSerializer):
+    images = ReportImageSerializer(many=True, read_only=True)
+    uploaded_images = serializers.ListField(
+        child=serializers.ImageField(allow_empty_file=False, use_url=False),
+        write_only=True,
+        required=False
+    )
+
+    class Meta:
+        model = ReportSubmission
+        fields = ('id', 'definition', 'submitted_by', 'answers', 'submitted_at', 'images', 'uploaded_images')
+        read_only_fields = ('submitted_by', 'submitted_at')
+
+    def create(self, validated_data):
+        uploaded_images = validated_data.pop('uploaded_images', [])
+        submission = ReportSubmission.objects.create(**validated_data)
+        
+        for image in uploaded_images:
+            ReportImage.objects.create(submission=submission, image=image)
+            
+        return submission

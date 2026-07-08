@@ -3,7 +3,7 @@ from django.db import models
 from django.contrib.auth.models import AbstractUser
 from uuid import uuid4
 from decimal import Decimal
-
+from django.contrib.auth import get_user_model
 
 # ── تعریف شعب ثابت سیستم ──────────────────────────────────────────────────
 BRANCH_CHOICES = [
@@ -38,6 +38,7 @@ def _get_all_subordinate_codes(role_codes: list[str]) -> set[str]:
         queue.extend(new)
     return result
 
+User = get_user_model()
 
 # ── Role ───────────────────────────────────────────────────────────────────────
 class Role(models.Model):
@@ -668,3 +669,52 @@ class ExchangeItem(models.Model):
     def save(self, *args, **kwargs):
         self.total_price = Decimal(str(self.quantity)) * Decimal(str(self.unit_price))
         super().save(*args, **kwargs)
+
+class ReportDefinition(models.Model):
+    REPORT_TYPE_CHOICES = (
+        ('RECURRING', 'تکراری'),
+        ('DEADLINE', 'مهلت‌دار'),
+    )
+    
+    INTERVAL_CHOICES = (
+        ('WEEKLY', 'هفتگی'),
+        ('MONTHLY', 'ماهانه'),
+        ('BIMONTHLY', 'دو ماهه'),
+        ('TRIMONTHLY', 'سه ماهه'),
+    )
+
+    superior = models.ForeignKey(User, related_name='created_reports', on_delete=models.CASCADE, verbose_name="بالادستی")
+    subordinate = models.ForeignKey(User, related_name='assigned_reports', on_delete=models.CASCADE, verbose_name="زیردستی")
+    
+    title = models.CharField(max_length=255, verbose_name="عنوان کلی گزارش")
+    report_type = models.CharField(max_length=20, choices=REPORT_TYPE_CHOICES, verbose_name="نوع گزارش")
+    
+    # فیلدهای مربوط به زمان‌بندی
+    interval = models.CharField(max_length=20, choices=INTERVAL_CHOICES, null=True, blank=True, verbose_name="دوره تکرار")
+    deadline = models.DateTimeField(null=True, blank=True, verbose_name="مهلت انجام")
+    
+    # آرایه‌ای از رشته‌ها (عناوین/سوالاتی که بالادستی تعریف می‌کند)
+    questions = models.JSONField(default=list, verbose_name="عناوین گزارش")
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return f"{self.title} - {self.subordinate.username}"
+
+class ReportSubmission(models.Model):
+    definition = models.ForeignKey(ReportDefinition, related_name='submissions', on_delete=models.CASCADE)
+    submitted_by = models.ForeignKey(User, related_name='submitted_reports', on_delete=models.CASCADE)
+    
+    # دیکشنری از پاسخ‌ها: {"سوال ۱": "جواب ۱", "سوال ۲": "جواب ۲"}
+    answers = models.JSONField(default=dict, verbose_name="پاسخ‌ها")
+    
+    submitted_at = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        return f"Submission for {self.definition.title} by {self.submitted_by.username}"
+
+class ReportImage(models.Model):
+    submission = models.ForeignKey(ReportSubmission, related_name='images', on_delete=models.CASCADE)
+    image = models.ImageField(upload_to='reports/images/%Y/%m/')
+    uploaded_at = models.DateTimeField(auto_now_add=True)

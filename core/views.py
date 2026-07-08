@@ -20,6 +20,7 @@ from core.models import (
     DepositOrder, DepositOrderItem,
     BRANCH_CHOICES, Mission, Role, ChecklistLog,
     Claim, ClaimFollowUp,DamageRegistration, ReturnRequest,
+    ReportDefinition, ReportSubmission
 )
 from core.serializers import (
     UserSerializer,
@@ -33,6 +34,7 @@ from core.serializers import (
     MissionSerializer, RoleSerializer, ChecklistLogSerializer,
     ClaimSerializer, ClaimFollowUpSerializer,
     DamageRegistrationSerializer, ReturnRequestSerializer,
+    ReportDefinitionSerializer, ReportSubmissionSerializer, ReportImageSerializer
 )
 from core.authentication import StatelessTokenService
 from core.permissions import IsAdminUser, IsOwnerOrAdminOnly, IsSuperiorUser
@@ -720,3 +722,40 @@ class ReturnRequestViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         return_req.save()
         
         return Response({"message": "واریز ثبت شد و درخواست از لیست انتظار به لیست تکمیل‌شده‌ها منتقل شد."}, status=status.HTTP_200_OK)
+    
+class ReportDefinitionViewSet(viewsets.ModelViewSet):
+    serializer_class = ReportDefinitionSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        # اگر کاربر بالادستی باشد، گزارش‌هایی که ساخته را می‌بیند
+        # اگر زیردستی باشد، گزارش‌هایی که به او محول شده را می‌بیند
+        return ReportDefinition.objects.filter(models.Q(superior=user) | models.Q(subordinate=user)).distinct()
+
+    def perform_create(self, serializer):
+        # ثبت اتوماتیک بالادستی (کاربر درخواست دهنده)
+        serializer.save(superior=self.request.user)
+
+class ReportSubmissionViewSet(viewsets.ModelViewSet):
+    serializer_class = ReportSubmissionSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    
+    # برای پشتیبانی از آپلود فایل و دیتای متنی به صورت همزمان
+    # parser_classes = (MultiPartParser, FormParser) # در صورت نیاز در تنظیمات ویو اضافه شود
+
+    def get_queryset(self):
+        user = self.request.user
+        # بالادستی می‌تواند جواب‌های مربوط به گزارشات خودش را ببیند
+        # زیردستی هم می‌تواند گزارشاتی که خودش ثبت کرده را ببیند
+        return ReportSubmission.objects.filter(
+            models.Q(definition__superior=user) | models.Q(submitted_by=user)
+        ).distinct()
+
+    def perform_create(self, serializer):
+        # بررسی اینکه آیا گزارش به این کاربر محول شده است یا خیر
+        definition = serializer.validated_data['definition']
+        if definition.subordinate != self.request.user:
+            raise serializers.ValidationError("شما دسترسی ثبت پاسخ برای این گزارش را ندارید.")
+            
+        serializer.save(submitted_by=self.request.user)
