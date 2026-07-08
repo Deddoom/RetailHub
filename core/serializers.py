@@ -746,43 +746,115 @@ class ReturnRequestSerializer(serializers.ModelSerializer):
                 
         return instance
     
-class ReportDefinitionSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ReportDefinition
-        fields = '__all__'
-        read_only_fields = ('superior', 'created_at')
-
-    def validate(self, data):
-        # اعتبارسنجی منطقی برای نوع گزارش
-        if data.get('report_type') == 'RECURRING' and not data.get('interval'):
-            raise serializers.ValidationError("برای گزارش‌های تکراری، تعیین دوره (interval) الزامی است.")
-        if data.get('report_type') == 'DEADLINE' and not data.get('deadline'):
-            raise serializers.ValidationError("برای گزارش‌های مهلت‌دار، تعیین تاریخ (deadline) الزامی است.")
-        return data
+# ── Report Serializers ─────────────────────────────────────────────────────────
 
 class ReportImageSerializer(serializers.ModelSerializer):
     class Meta:
-        model = ReportImage
-        fields = ('id', 'image', 'uploaded_at')
+        model  = ReportImage
+        fields = ['id', 'image_url', 'caption', 'uploaded_at']
+        read_only_fields = ['uploaded_at']
+
+
+class ReportDefinitionSerializer(serializers.ModelSerializer):
+    superior_username    = serializers.CharField(source='superior.username',    read_only=True)
+    subordinate_username = serializers.CharField(source='subordinate.username', read_only=True)
+
+    class Meta:
+        model  = ReportDefinition
+        fields = [
+            'id', 'title', 'report_type',
+            'interval', 'deadline',
+            'questions', 'is_active', 'created_at',
+            'superior',    'superior_username',
+            'subordinate', 'subordinate_username',
+        ]
+        read_only_fields = ['id', 'superior', 'created_at']
+
+    def validate(self, data):
+        report_type = data.get('report_type') or (self.instance.report_type if self.instance else None)
+
+        if report_type == 'RECURRING' and not data.get('interval'):
+            raise serializers.ValidationError(
+                {"interval": "برای گزارش‌های تکراری، تعیین دوره (interval) الزامی است."}
+            )
+        if report_type == 'DEADLINE' and not data.get('deadline'):
+            raise serializers.ValidationError(
+                {"deadline": "برای گزارش‌های مهلت‌دار، تعیین تاریخ مهلت (deadline) الزامی است."}
+            )
+        if not data.get('questions') and not (self.instance and self.instance.questions):
+            raise serializers.ValidationError(
+                {"questions": "حداقل یک عنوان/سوال برای گزارش الزامی است."}
+            )
+
+        # بررسی اینکه زیردستی واقعاً زیردست بالادستی هست
+        request = self.context.get('request')
+        subordinate = data.get('subordinate')
+        if request and subordinate:
+            superior = request.user
+            is_admin = superior.is_superuser or any(r.code == 'ADMIN' for r in superior.roles.all())
+            if not is_admin and not superior.is_superior_to(subordinate):
+                raise serializers.ValidationError(
+                    {"subordinate": "شما بالادست این کاربر نیستید و نمی‌توانید برایش گزارش تعریف کنید."}
+                )
+        return data
+
 
 class ReportSubmissionSerializer(serializers.ModelSerializer):
-    images = ReportImageSerializer(many=True, read_only=True)
-    uploaded_images = serializers.ListField(
-        child=serializers.ImageField(allow_empty_file=False, use_url=False),
+    images               = ReportImageSerializer(many=True, read_only=True)
+    submitted_by_username = serializers.CharField(source='submitted_by.username', read_only=True)
+    definition_title     = serializers.CharField(source='definition.title',      read_only=True)
+    # برای ارسال عکس‌ها به صورت لیستی از دیکشنری‌ها
+    image_urls = serializers.ListField(
+        child=serializers.DictField(),
         write_only=True,
-        required=False
+        required=False,
+        help_text='لیستی از {"image_url": "...", "caption": "..."}'
     )
 
     class Meta:
-        model = ReportSubmission
-        fields = ('id', 'definition', 'submitted_by', 'answers', 'submitted_at', 'images', 'uploaded_images')
-        read_only_fields = ('submitted_by', 'submitted_at')
+        model  = ReportSubmission
+        fields = [
+            'id', 'definition', 'definition_title',
+            'submitted_by', 'submitted_by_username',
+            'answers', 'submitted_at',
+            'images', 'image_urls',
+        ]
+        read_only_fields = ['id', 'submitted_by', 'submitted_at']
 
+    def validate(self, data):
+        request    = self.context.get('request')
+        definition = data.get('definition') or (self.instance.definition if self.instance else None)
+
+        if not definition:
+            return data
+
+        # فقط زیردستی که گزارش به او اختصاص داده شده می‌تواند ارسال کند
+        if request and definition.subordinate != request.user:
+            raise serializers.ValidationError(
+                "شما دسترسی ثبت پاسخ برای این گزارش را ندارید."
+            )
+
+        # بررسی که همه سوال‌ها پاسخ داده شده‌اند
+        answers   = data.get('answers', {})
+        questions = definition.questions
+        missing   = [q for q in questions if q not in answers]
+        if missing:
+            raise serializers.ValidationError(
+                {"answers": f"پاسخ این عناوین ارسال نشده: {', '.join(missing)}"}
+            )
+        return data
+
+    @transaction.atomic
     def create(self, validated_data):
-        uploaded_images = validated_data.pop('uploaded_images', [])
+        image_urls_data = validated_data.pop('image_urls', [])
+        validated_data['submitted_by'] = self.context['request'].user
+
         submission = ReportSubmission.objects.create(**validated_data)
-        
-        for image in uploaded_images:
-            ReportImage.objects.create(submission=submission, image=image)
-            
+
+        for img in image_urls_data:
+            ReportImage.objects.create(
+                submission=submission,
+                image_url=img.get('image_url', ''),
+                caption=img.get('caption', '')
+            )
         return submission

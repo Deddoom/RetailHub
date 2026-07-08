@@ -670,51 +670,91 @@ class ExchangeItem(models.Model):
         self.total_price = Decimal(str(self.quantity)) * Decimal(str(self.unit_price))
         super().save(*args, **kwargs)
 
+# ── ReportDefinition (تعریف گزارش توسط بالادستی) ──────────────────────────────
 class ReportDefinition(models.Model):
-    REPORT_TYPE_CHOICES = (
+    REPORT_TYPE_CHOICES = [
         ('RECURRING', 'تکراری'),
-        ('DEADLINE', 'مهلت‌دار'),
+        ('DEADLINE',  'مهلت‌دار'),
+    ]
+    INTERVAL_CHOICES = [
+        ('WEEKLY',      'هفتگی'),
+        ('MONTHLY',     'ماهانه'),
+        ('BIMONTHLY',   'دو ماهه'),
+        ('TRIMONTHLY',  'سه ماهه'),
+    ]
+ 
+    id          = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    superior    = models.ForeignKey(
+        CustomUser, related_name='created_report_definitions',
+        on_delete=models.CASCADE, verbose_name="بالادستی"
     )
-    
-    INTERVAL_CHOICES = (
-        ('WEEKLY', 'هفتگی'),
-        ('MONTHLY', 'ماهانه'),
-        ('BIMONTHLY', 'دو ماهه'),
-        ('TRIMONTHLY', 'سه ماهه'),
+    subordinate = models.ForeignKey(
+        CustomUser, related_name='assigned_report_definitions',
+        on_delete=models.CASCADE, verbose_name="زیردستی"
     )
-
-    superior = models.ForeignKey(User, related_name='created_reports', on_delete=models.CASCADE, verbose_name="بالادستی")
-    subordinate = models.ForeignKey(User, related_name='assigned_reports', on_delete=models.CASCADE, verbose_name="زیردستی")
-    
-    title = models.CharField(max_length=255, verbose_name="عنوان کلی گزارش")
+    title       = models.CharField(max_length=255, verbose_name="عنوان کلی گزارش")
     report_type = models.CharField(max_length=20, choices=REPORT_TYPE_CHOICES, verbose_name="نوع گزارش")
-    
-    # فیلدهای مربوط به زمان‌بندی
-    interval = models.CharField(max_length=20, choices=INTERVAL_CHOICES, null=True, blank=True, verbose_name="دوره تکرار")
-    deadline = models.DateTimeField(null=True, blank=True, verbose_name="مهلت انجام")
-    
-    # آرایه‌ای از رشته‌ها (عناوین/سوالاتی که بالادستی تعریف می‌کند)
-    questions = models.JSONField(default=list, verbose_name="عناوین گزارش")
-    
-    created_at = models.DateTimeField(auto_now_add=True)
-    is_active = models.BooleanField(default=True)
-
+ 
+    # فقط برای نوع RECURRING
+    interval    = models.CharField(
+        max_length=20, choices=INTERVAL_CHOICES,
+        null=True, blank=True, verbose_name="دوره تکرار"
+    )
+    # فقط برای نوع DEADLINE
+    deadline    = models.DateTimeField(null=True, blank=True, verbose_name="مهلت انجام")
+ 
+    # لیست عناوین/سوالاتی که زیردستی باید پاسخ دهد — آرایه‌ای از رشته
+    questions   = models.JSONField(default=list, verbose_name="عناوین گزارش")
+ 
+    is_active   = models.BooleanField(default=True)
+    created_at  = models.DateTimeField(auto_now_add=True)
+ 
+    class Meta:
+        ordering = ['-created_at']
+ 
     def __str__(self):
-        return f"{self.title} - {self.subordinate.username}"
+        return f"{self.title} — {self.subordinate.username}"
 
+
+# ── ReportSubmission (ارسال گزارش توسط زیردستی) ────────────────────────────────
 class ReportSubmission(models.Model):
-    definition = models.ForeignKey(ReportDefinition, related_name='submissions', on_delete=models.CASCADE)
-    submitted_by = models.ForeignKey(User, related_name='submitted_reports', on_delete=models.CASCADE)
-    
-    # دیکشنری از پاسخ‌ها: {"سوال ۱": "جواب ۱", "سوال ۲": "جواب ۲"}
-    answers = models.JSONField(default=dict, verbose_name="پاسخ‌ها")
-    
+    id           = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    definition   = models.ForeignKey(
+        ReportDefinition, related_name='submissions',
+        on_delete=models.CASCADE, verbose_name="تعریف گزارش"
+    )
+    submitted_by = models.ForeignKey(
+        CustomUser, related_name='submitted_reports',
+        on_delete=models.CASCADE, verbose_name="ارسال‌کننده"
+    )
+    # دیکشنری از پاسخ‌ها: {"عنوان ۱": "پاسخ ۱", "عنوان ۲": "پاسخ ۲"}
+    answers      = models.JSONField(default=dict, verbose_name="پاسخ‌ها")
     submitted_at = models.DateTimeField(auto_now_add=True)
-    
+ 
+    class Meta:
+        ordering = ['-submitted_at']
+ 
     def __str__(self):
-        return f"Submission for {self.definition.title} by {self.submitted_by.username}"
+        return f"گزارش «{self.definition.title}» توسط {self.submitted_by.username}"
 
+
+# ── ReportImage (عکس‌های ضمیمه گزارش) ─────────────────────────────────────────
 class ReportImage(models.Model):
-    submission = models.ForeignKey(ReportSubmission, related_name='images', on_delete=models.CASCADE)
-    image = models.ImageField(upload_to='reports/images/%Y/%m/')
-    uploaded_at = models.DateTimeField(auto_now_add=True)
+    """
+    به جای ImageField از URLField استفاده می‌کنیم تا نیاز به Pillow و MEDIA_ROOT نباشد.
+    فرانت‌اند عکس را آپلود می‌کند و URL را ارسال می‌کند.
+    """
+    id           = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    submission   = models.ForeignKey(
+        ReportSubmission, related_name='images',
+        on_delete=models.CASCADE, verbose_name="گزارش"
+    )
+    image_url    = models.URLField(max_length=500, verbose_name="آدرس تصویر")
+    caption      = models.CharField(max_length=255, blank=True, null=True, verbose_name="توضیح تصویر")
+    uploaded_at  = models.DateTimeField(auto_now_add=True)
+ 
+    class Meta:
+        ordering = ['uploaded_at']
+ 
+    def __str__(self):
+        return f"تصویر گزارش {self.submission_id}"

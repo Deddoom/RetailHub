@@ -723,39 +723,131 @@ class ReturnRequestViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         
         return Response({"message": "واریز ثبت شد و درخواست از لیست انتظار به لیست تکمیل‌شده‌ها منتقل شد."}, status=status.HTTP_200_OK)
     
-class ReportDefinitionViewSet(viewsets.ModelViewSet):
-    serializer_class = ReportDefinitionSerializer
+# ── Report Definition ViewSet ─────────────────────────────────────────────────
+
+class ReportDefinitionViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
+    """
+    بالادستی گزارش تعریف می‌کند.
+    زیردستی فقط گزارش‌های اختصاص‌داده‌شده به خود را می‌بیند.
+    """
+    serializer_class   = ReportDefinitionSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
         user = self.request.user
-        # اگر کاربر بالادستی باشد، گزارش‌هایی که ساخته را می‌بیند
-        # اگر زیردستی باشد، گزارش‌هایی که به او محول شده را می‌بیند
-        return ReportDefinition.objects.filter(models.Q(superior=user) | models.Q(subordinate=user)).distinct()
+        is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
+
+        if is_admin:
+            qs = ReportDefinition.objects.all()
+        else:
+            # بالادستی گزارش‌هایی که خودش ساخته + گزارش‌هایی که به او سپرده شده
+            qs = ReportDefinition.objects.filter(
+                Q(superior=user) | Q(subordinate=user)
+            ).distinct()
+
+        # فیلتر اختیاری
+        subordinate_param = self.request.query_params.get('subordinate')
+        report_type_param = self.request.query_params.get('report_type')
+        is_active_param   = self.request.query_params.get('is_active')
+
+        if subordinate_param:
+            qs = qs.filter(subordinate_id=subordinate_param)
+        if report_type_param:
+            qs = qs.filter(report_type=report_type_param)
+        if is_active_param is not None:
+            qs = qs.filter(is_active=(is_active_param.lower() == 'true'))
+
+        return qs.order_by('-created_at')
 
     def perform_create(self, serializer):
-        # ثبت اتوماتیک بالادستی (کاربر درخواست دهنده)
         serializer.save(superior=self.request.user)
 
-class ReportSubmissionViewSet(viewsets.ModelViewSet):
-    serializer_class = ReportSubmissionSerializer
+    @action(detail=True, methods=['patch'], url_path='toggle-active')
+    def toggle_active(self, request, pk=None):
+        """فعال/غیرفعال کردن گزارش"""
+        definition = self.get_object()
+        user = request.user
+
+        # فقط سازنده یا ادمین می‌تواند وضعیت را تغییر دهد
+        is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
+        if not is_admin and definition.superior != user:
+            return Response(
+                {"error": "فقط سازنده گزارش می‌تواند وضعیت آن را تغییر دهد."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        definition.is_active = not definition.is_active
+        definition.save()
+        return Response(
+            {
+                "message": f"گزارش {'فعال' if definition.is_active else 'غیرفعال'} شد.",
+                "is_active": definition.is_active
+            },
+            status=status.HTTP_200_OK
+        )
+
+
+# ── Report Submission ViewSet ─────────────────────────────────────────────────
+
+class ReportSubmissionViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
+    """
+    زیردستی گزارش پر می‌کند.
+    بالادستی گزارش‌های ارسال‌شده برای خود را می‌بیند.
+    """
+    serializer_class   = ReportSubmissionSerializer
     permission_classes = [permissions.IsAuthenticated]
-    
-    # برای پشتیبانی از آپلود فایل و دیتای متنی به صورت همزمان
-    # parser_classes = (MultiPartParser, FormParser) # در صورت نیاز در تنظیمات ویو اضافه شود
 
     def get_queryset(self):
         user = self.request.user
-        # بالادستی می‌تواند جواب‌های مربوط به گزارشات خودش را ببیند
-        # زیردستی هم می‌تواند گزارشاتی که خودش ثبت کرده را ببیند
-        return ReportSubmission.objects.filter(
-            models.Q(definition__superior=user) | models.Q(submitted_by=user)
-        ).distinct()
+        is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
+
+        if is_admin:
+            qs = ReportSubmission.objects.select_related(
+                'definition', 'submitted_by'
+            ).prefetch_related('images').all()
+        else:
+            qs = ReportSubmission.objects.select_related(
+                'definition', 'submitted_by'
+            ).prefetch_related('images').filter(
+                Q(definition__superior=user) | Q(submitted_by=user)
+            ).distinct()
+
+        # فیلترها
+        definition_param = self.request.query_params.get('definition')
+        from_date_param  = self.request.query_params.get('from_date')
+        to_date_param    = self.request.query_params.get('to_date')
+
+        if definition_param:
+            qs = qs.filter(definition_id=definition_param)
+        if from_date_param:
+            qs = qs.filter(submitted_at__date__gte=from_date_param)
+        if to_date_param:
+            qs = qs.filter(submitted_at__date__lte=to_date_param)
+
+        return qs.order_by('-submitted_at')
 
     def perform_create(self, serializer):
-        # بررسی اینکه آیا گزارش به این کاربر محول شده است یا خیر
-        definition = serializer.validated_data['definition']
-        if definition.subordinate != self.request.user:
-            raise serializers.ValidationError("شما دسترسی ثبت پاسخ برای این گزارش را ندارید.")
-            
         serializer.save(submitted_by=self.request.user)
+
+    def update(self, request, *args, **kwargs):
+        """فقط ارسال‌کننده می‌تواند گزارش خودش را ویرایش کند"""
+        instance = self.get_object()
+        if instance.submitted_by != request.user:
+            return Response(
+                {"error": "فقط ارسال‌کننده گزارش می‌تواند آن را ویرایش کند."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        return super().update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        """فقط بالادستی یا ادمین می‌تواند گزارش را حذف کند"""
+        instance = self.get_object()
+        user = request.user
+        is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
+
+        if not is_admin and instance.definition.superior != user:
+            return Response(
+                {"error": "شما دسترسی حذف این گزارش را ندارید."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        return super().destroy(request, *args, **kwargs)
