@@ -38,7 +38,6 @@ def _get_all_subordinate_codes(role_codes: list[str]) -> set[str]:
         queue.extend(new)
     return result
 
-User = get_user_model()
 
 # ── Role ───────────────────────────────────────────────────────────────────────
 class Role(models.Model):
@@ -677,12 +676,12 @@ class ReportDefinition(models.Model):
         ('DEADLINE',  'مهلت‌دار'),
     ]
     INTERVAL_CHOICES = [
-        ('WEEKLY',      'هفتگی'),
-        ('MONTHLY',     'ماهانه'),
-        ('BIMONTHLY',   'دو ماهه'),
-        ('TRIMONTHLY',  'سه ماهه'),
+        ('WEEKLY',     'هفتگی'),
+        ('MONTHLY',    'ماهانه'),
+        ('BIMONTHLY',  'دو ماهه'),
+        ('TRIMONTHLY', 'سه ماهه'),
     ]
- 
+
     id          = models.UUIDField(primary_key=True, default=uuid4, editable=False)
     superior    = models.ForeignKey(
         CustomUser, related_name='created_report_definitions',
@@ -694,24 +693,18 @@ class ReportDefinition(models.Model):
     )
     title       = models.CharField(max_length=255, verbose_name="عنوان کلی گزارش")
     report_type = models.CharField(max_length=20, choices=REPORT_TYPE_CHOICES, verbose_name="نوع گزارش")
- 
-    # فقط برای نوع RECURRING
     interval    = models.CharField(
         max_length=20, choices=INTERVAL_CHOICES,
         null=True, blank=True, verbose_name="دوره تکرار"
     )
-    # فقط برای نوع DEADLINE
     deadline    = models.DateTimeField(null=True, blank=True, verbose_name="مهلت انجام")
- 
-    # لیست عناوین/سوالاتی که زیردستی باید پاسخ دهد — آرایه‌ای از رشته
     questions   = models.JSONField(default=list, verbose_name="عناوین گزارش")
- 
     is_active   = models.BooleanField(default=True)
     created_at  = models.DateTimeField(auto_now_add=True)
- 
+
     class Meta:
         ordering = ['-created_at']
- 
+
     def __str__(self):
         return f"{self.title} — {self.subordinate.username}"
 
@@ -727,34 +720,29 @@ class ReportSubmission(models.Model):
         CustomUser, related_name='submitted_reports',
         on_delete=models.CASCADE, verbose_name="ارسال‌کننده"
     )
-    # دیکشنری از پاسخ‌ها: {"عنوان ۱": "پاسخ ۱", "عنوان ۲": "پاسخ ۲"}
     answers      = models.JSONField(default=dict, verbose_name="پاسخ‌ها")
     submitted_at = models.DateTimeField(auto_now_add=True)
- 
+
     class Meta:
         ordering = ['-submitted_at']
- 
+
     def __str__(self):
         return f"گزارش «{self.definition.title}» توسط {self.submitted_by.username}"
 
 
 # ── ReportImage (عکس‌های ضمیمه گزارش) ─────────────────────────────────────────
 class ReportImage(models.Model):
-    """
-    به جای ImageField از URLField استفاده می‌کنیم تا نیاز به Pillow و MEDIA_ROOT نباشد.
-    فرانت‌اند عکس را آپلود می‌کند و URL را ارسال می‌کند.
-    """
-    id           = models.UUIDField(primary_key=True, default=uuid4, editable=False)
-    submission   = models.ForeignKey(
+    id          = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    submission  = models.ForeignKey(
         ReportSubmission, related_name='images',
         on_delete=models.CASCADE, verbose_name="گزارش"
     )
-    image_url    = models.URLField(max_length=500, verbose_name="آدرس تصویر")
-    caption      = models.CharField(max_length=255, blank=True, null=True, verbose_name="توضیح تصویر")
-    uploaded_at  = models.DateTimeField(auto_now_add=True)
- 
+    image_url   = models.URLField(max_length=500, verbose_name="آدرس تصویر")
+    caption     = models.CharField(max_length=255, blank=True, null=True, verbose_name="توضیح تصویر")
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
     class Meta:
         ordering = ['uploaded_at']
- 
+
     def __str__(self):
         return f"تصویر گزارش {self.submission_id}"
