@@ -20,6 +20,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'corsheaders', # اضافه شدن پشتیبانی از CORS جهت دسترسی فرانت‌اند
     'core',
+    'drf_spectacular', # اضافه شدن پشتیبانی از مستندسازی API با OpenAPI
 ]
 
 MIDDLEWARE = [
@@ -68,6 +69,7 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
     ],
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
 }
 
 # تنظیمات CORS برای دسترسی امن فرانت‌اند در زمان توسعه و پروداکشن
