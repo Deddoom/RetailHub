@@ -4,6 +4,7 @@ import json
 from django.core.signing import TimestampSigner, SignatureExpired, BadSignature
 from rest_framework.authentication import BaseAuthentication
 from rest_framework.exceptions import AuthenticationFailed
+from drf_spectacular.extensions import OpenApiAuthenticationExtension
 
 # مدت اعتبار توکن: ۵ سال (به ثانیه)
 TOKEN_MAX_AGE = 60 * 60 * 24 * 365 * 5  # 157,680,000 seconds
@@ -57,3 +58,13 @@ class CustomStatelessAuthentication(BaseAuthentication):
             raise AuthenticationFailed('حساب کاربری غیرفعال است.')
 
         return (user, None)
+    
+class StatelessTokenAuthenticationScheme(OpenApiAuthenticationExtension):
+    target_class = 'core.authentication.CustomStatelessAuthentication'
+    name = 'BearerAuth'
+
+    def get_security_definition(self, auto_schema):
+        return {
+            'type': 'http',
+            'scheme': 'bearer',
+        }
