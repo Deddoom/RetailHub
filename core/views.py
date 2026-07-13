@@ -19,7 +19,7 @@ from core.models import (
     Checklist, Task,
     DepositOrder, DepositOrderItem,
     BRANCH_CHOICES, Mission, Role, ChecklistLog,
-    Claim, ClaimFollowUp,DamageRegistration, ReturnRequest,
+    Claim, ClaimFollowUp, DamageRegistration, ReturnRequest,
     ReportDefinition, ReportSubmission
 )
 from core.serializers import (
@@ -81,12 +81,11 @@ class AuthTokenView(APIView):
 
         access_token = StatelessTokenService.generate_token(user)
         roles = list(user.roles.values_list('code', flat=True))
-        
-        # خروجی کامل لاگین شامل UUID، نام، فامیل و وضعیت تکمیل پروفایل
+
         return Response(
             {
-                "access_token": access_token, 
-                "roles": roles, 
+                "access_token": access_token,
+                "roles": roles,
                 "branch": user.branch,
                 "id": str(user.id),
                 "first_name": user.first_name,
@@ -95,6 +94,7 @@ class AuthTokenView(APIView):
             },
             status=status.HTTP_200_OK
         )
+
 
 # ── Branches ──────────────────────────────────────────────────────────────────
 
@@ -109,53 +109,38 @@ class BranchListView(APIView):
 # ── Users ─────────────────────────────────────────────────────────────────────
 
 class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
-    queryset           = CustomUser.objects.all().order_by('-date_joined')
-    serializer_class   = UserSerializer
-    # خط permission_classes قبلی را حذف می‌کنیم و کنترل را به متد پایین می‌سپاریم
+    queryset         = CustomUser.objects.all().order_by('-date_joined')
+    serializer_class = UserSerializer
 
-    # ─── مدیریت پویای سطح دسترسی بر اساس اکشن‌ها ───
     def get_permissions(self):
-        # اکشن‌هایی که تمام کاربران لاگین شده باید به آن‌ها دسترسی داشته باشند
         public_actions = ['subordinates', 'update_branch', 'complete_profile']
-        
         if self.action in public_actions:
             return [permissions.IsAuthenticated()]
-            
-        # برای بقیه متدها (مثل لیست کل کاربران، ساخت، حذف و ویرایش) فقط ادمین مجاز است
         return [IsAdminUser()]
 
-    # ─── اکشن دریافت لیست کاربران زیردست ───
     @action(detail=False, methods=['get'], url_path='subordinates')
     def subordinates(self, request):
         current_user = request.user
-        
-        # اگر ادمین باشد، کل کاربران سامانه (غیر از خودش) را می‌بیند
+
         if current_user.is_superuser or any(r.code == 'ADMIN' for r in current_user.roles.all()):
             subordinate_users = CustomUser.objects.exclude(pk=current_user.pk).prefetch_related('roles', 'superiors')
         else:
-            # جستجوی درختی رو به پایین برای یافتن همه زیردستان مستقیم و غیرمستقیم
             subordinate_users_set = set()
-            # استخراج افرادی که مستقیماً این شخص را بالادستی خود معرفی کرده‌اند
             queue = list(current_user.subordinate_users.all())
-            
             while queue:
                 curr = queue.pop(0)
                 if curr not in subordinate_users_set:
                     subordinate_users_set.add(curr)
-                    # پیدا کردن زیردستان شخص فعلی و افزودن به صف
                     queue.extend(curr.subordinate_users.all())
-            
             subordinate_users = list(subordinate_users_set)
-        
+
         serializer = self.get_serializer(subordinate_users, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
-    # ─── اکشن آپدیت شعبه کاربری که لاگین کرده ───
     @action(detail=False, methods=['patch'], url_path='update-branch')
     def update_branch(self, request):
-        user = request.user
+        user       = request.user
         new_branch = request.data.get('branch')
-
         valid_branches = [branch[0] for branch in BRANCH_CHOICES]
 
         if not new_branch or new_branch not in valid_branches:
@@ -166,18 +151,16 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
 
         user.branch = new_branch
         user.save()
-
         return Response(
             {"message": "شعبه با موفقیت بروزرسانی شد.", "branch": user.branch},
             status=status.HTTP_200_OK
         )
 
-    # ─── اکشن تکمیل پروفایل (نام و نام‌خانوادگی) توسط خود کاربر در اولین ورود ───
     @action(detail=False, methods=['patch'], url_path='complete-profile')
     def complete_profile(self, request):
-        user = request.user
+        user       = request.user
         first_name = request.data.get('first_name')
-        last_name = request.data.get('last_name')
+        last_name  = request.data.get('last_name')
 
         if not first_name or not last_name:
             return Response(
@@ -185,8 +168,8 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        user.first_name = first_name
-        user.last_name = last_name
+        user.first_name          = first_name
+        user.last_name           = last_name
         user.is_profile_completed = True
         user.save()
 
@@ -376,8 +359,10 @@ class DepositOrderViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         customer = Customer.objects.select_for_update().get(pk=order.customer_id)
         customer.last_purchase_date    = date.today()
         customer.total_purchase_amount += net_amount
-        if debt_payment_method not in customer.purchase_types:
-            customer.purchase_types = customer.purchase_types + [debt_payment_method]
+
+        # ✅ باگ ۱ رفع شد: هر دو روش پرداخت (بیعانه و بدهی) ادغام می‌شوند
+        new_methods = [m for m in [order.deposit_payment_method, debt_payment_method] if m]
+        customer.purchase_types = list(set(customer.purchase_types + new_methods))
         customer.save()
 
         return Response(
@@ -395,19 +380,14 @@ class MissionViewSet(viewsets.ModelViewSet):
     search_fields      = ['title', 'description']
 
     def get_queryset(self):
-        user = self.request.user
+        user       = self.request.user
         user_roles = set(user.roles.values_list('code', flat=True))
 
-        # ۱. مشخص کردن مأموریت‌های مجاز اولیه برای کاربر
         if user.is_superuser or 'ADMIN' in user_roles:
             qs = Mission.objects.all()
         else:
-            all_users = CustomUser.objects.prefetch_related('roles').exclude(pk=user.pk)
-            
-            subordinate_ids = []
-            for u in all_users:
-                if user.is_superior_to(u):
-                    subordinate_ids.append(u.id)
+            all_users      = CustomUser.objects.prefetch_related('roles').exclude(pk=user.pk)
+            subordinate_ids = [u.id for u in all_users if user.is_superior_to(u)]
 
             qs = Mission.objects.filter(
                 Q(assigned_to=user) |
@@ -415,7 +395,6 @@ class MissionViewSet(viewsets.ModelViewSet):
                 Q(assigned_to_id__in=subordinate_ids)
             ).distinct()
 
-        # ─── حل مشکل اصلی: اعمال فیلتر اختصاصی بر اساس پارامتر ارسالی فرانت ───
         assigned_to_param = self.request.query_params.get('assigned_to')
         if assigned_to_param:
             qs = qs.filter(assigned_to_id=assigned_to_param)
@@ -424,7 +403,7 @@ class MissionViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
-    
+
     def perform_update(self, serializer):
         instance = self.get_object()
         user     = self.request.user
@@ -447,6 +426,7 @@ class MissionViewSet(viewsets.ModelViewSet):
         else:
             raise PermissionDenied("شما دسترسی به ویرایش این ماموریت را ندارید.")
 
+
 # ── Checklists ────────────────────────────────────────────────────────────────
 
 class ChecklistViewSet(viewsets.ModelViewSet):
@@ -454,14 +434,13 @@ class ChecklistViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, IsSuperiorUser]
 
     def get_queryset(self):
-        user = self.request.user
+        user       = self.request.user
         user_roles = set(user.roles.values_list('code', flat=True))
 
-        # ۱. مشخص کردن مجموعه اولیه چک‌لیست‌های مجاز برای این کاربر
         if user.is_superuser or 'ADMIN' in user_roles:
             qs = Checklist.objects.all()
         else:
-            all_users = CustomUser.objects.prefetch_related('roles').exclude(pk=user.pk)
+            all_users       = CustomUser.objects.prefetch_related('roles').exclude(pk=user.pk)
             subordinate_ids = [u.id for u in all_users if user.is_superior_to(u)]
 
             qs = Checklist.objects.filter(
@@ -470,7 +449,6 @@ class ChecklistViewSet(viewsets.ModelViewSet):
                 Q(assigned_to_id__in=subordinate_ids)
             ).distinct()
 
-        # ۲. اضافه کردن فیلتر اختصاصی بر اساس پارامتر ارسالی فرانت (مشکل اصلی اینجاست)
         assigned_to_param = self.request.query_params.get('assigned_to')
         if assigned_to_param:
             qs = qs.filter(assigned_to_id=assigned_to_param)
@@ -492,11 +470,9 @@ class TaskViewSet(viewsets.ModelViewSet):
             return True
         if task.checklist.created_by == user:
             return True
-        # FIX: اول چک کن assigned_to وجود داره
         if task.checklist.assigned_to is not None:
             return user.is_superior_to(task.checklist.assigned_to)
         return False
-
 
     def get_queryset(self):
         user = self.request.user
@@ -506,7 +482,7 @@ class TaskViewSet(viewsets.ModelViewSet):
                 'checklist', 'checklist__assigned_to', 'checklist__created_by'
             ).all()
 
-        all_users = CustomUser.objects.prefetch_related('roles').exclude(pk=user.pk)
+        all_users       = CustomUser.objects.prefetch_related('roles').exclude(pk=user.pk)
         subordinate_ids = [u.id for u in all_users if user.is_superior_to(u)]
 
         return Task.objects.filter(
@@ -535,7 +511,6 @@ class TaskViewSet(viewsets.ModelViewSet):
         if can_manage:
             _save_with_completion()
         elif is_owner:
-            # ─── حل مشکل: اضافه کردن completion_note به لیست فیلدهای مجاز ───
             forbidden_fields = {k for k in data if k not in ['is_completed', 'completion_note']}
             if forbidden_fields:
                 raise PermissionDenied(
@@ -554,19 +529,16 @@ class RoleViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class   = RoleSerializer
     permission_classes = [IsAdminUser]
 
+
+# ── ChecklistLog ──────────────────────────────────────────────────────────────
+
 class ChecklistLogViewSet(viewsets.ReadOnlyModelViewSet):
-    """
-    نمایش تاریخچه چک‌لیست‌ها.
-    مدیران ارشد همه را می‌بینند.
-    مدیران میانی لاگ‌های زیرمجموعه خود را می‌بینند.
-    کارمندان فقط لاگ‌های خودشان را می‌بینند.
-    """
-    serializer_class = ChecklistLogSerializer
+    serializer_class   = ChecklistLogSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
         user = self.request.user
-    
+
         if user.is_superuser or user.roles.filter(code='ADMIN').exists():
             qs = ChecklistLog.objects.all().prefetch_related('items')
         else:
@@ -580,180 +552,175 @@ class ChecklistLogViewSet(viewsets.ReadOnlyModelViewSet):
                 assigned_to_id__in=allowed_users
             ).prefetch_related('items')
 
-        # ── فیلترهای جدید ──────────────────────────────────
         assigned_to_param = self.request.query_params.get('assigned_to')
         frequency_param   = self.request.query_params.get('frequency')
         from_date_param   = self.request.query_params.get('from_date')
         to_date_param     = self.request.query_params.get('to_date')
 
-        if assigned_to_param:
-            qs = qs.filter(assigned_to_id=assigned_to_param)
-        if frequency_param:
-            qs = qs.filter(checklist_frequency=frequency_param)
-        if from_date_param:
-            qs = qs.filter(period_start__gte=from_date_param)
-        if to_date_param:
-            qs = qs.filter(period_end__lte=to_date_param)
+        if assigned_to_param: qs = qs.filter(assigned_to_id=assigned_to_param)
+        if frequency_param:   qs = qs.filter(checklist_frequency=frequency_param)
+        if from_date_param:   qs = qs.filter(period_start__gte=from_date_param)
+        if to_date_param:     qs = qs.filter(period_end__lte=to_date_param)
 
         return qs.order_by('-logged_at')
-    
+
+
 # ── Claims ────────────────────────────────────────────────────────────────────
 
 class ClaimViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
-    queryset           = Claim.objects.all().order_by('-created_at')
     serializer_class   = ClaimSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        qs = super().get_queryset()
-        
-        # فیلتر برای نمایش مطالبات پرداخت شده یا نشده در فرانت‌اند
-        status_param = self.request.query_params.get('status')
-        if status_param:
-            qs = qs.filter(status=status_param)
-            
-        # فیلتر برای گرفتن مطالباتی که فقط به این شخص سپرده شده
-        assigned_to = self.request.query_params.get('assigned_to')
-        if assigned_to:
-            qs = qs.filter(assigned_to_id=assigned_to)
+        user     = self.request.user
+        is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
+
+        # ✅ باگ ۲ رفع شد: فیلتر دسترسی بر اساس نقش
+        if is_admin:
+            qs = Claim.objects.all().order_by('-created_at')
+        else:
+            # کاربر عادی فقط مطالباتی می‌بیند که:
+            # خودش ساخته یا به او سپرده شده یا زیردستانش ساختن
+            all_users       = CustomUser.objects.exclude(pk=user.pk)
+            subordinate_ids = [u.id for u in all_users if user.is_superior_to(u)]
+
+            qs = Claim.objects.filter(
+                Q(created_by=user) |
+                Q(assigned_to=user) |
+                Q(created_by_id__in=subordinate_ids)
+            ).distinct().order_by('-created_at')
+
+        status_param   = self.request.query_params.get('status')
+        assigned_param = self.request.query_params.get('assigned_to')
+
+        if status_param:   qs = qs.filter(status=status_param)
+        if assigned_param: qs = qs.filter(assigned_to_id=assigned_param)
 
         return qs
 
-    # اکشن اختصاصی برای اضافه کردن یک پیگیری جدید به مطالبه
     @action(detail=True, methods=['post'], url_path='add-follow-up')
     def add_follow_up(self, request, pk=None):
-        claim = self.get_object()
+        claim          = self.get_object()
         follow_up_type = request.data.get('follow_up_type')
         description    = request.data.get('description')
 
         if not follow_up_type or not description:
             return Response(
-                {"error": "وارد کردن نوع پیگیری (follow_up_type) و توضیحات (description) الزامی است."}, 
+                {"error": "وارد کردن نوع پیگیری (follow_up_type) و توضیحات (description) الزامی است."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # ساخت رکورد پیگیری جدید و متصل کردنش به کاربر لاگین شده
         follow_up = ClaimFollowUp.objects.create(
             claim=claim,
             follower=request.user,
             follow_up_type=follow_up_type,
             description=description
         )
-        
+
         serializer = ClaimFollowUpSerializer(follow_up)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
-    
-# ── Damage Registration ViewSet ───────────────────────────────────────────────
+
+
+# ── Damage Registration ───────────────────────────────────────────────────────
+
 class DamageRegistrationViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     queryset           = DamageRegistration.objects.all().order_by('-created_at')
     serializer_class   = DamageRegistrationSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        qs = super().get_queryset()
+        qs   = super().get_queryset()
         user = self.request.user
-        
-        # کارمندان عادی فقط ثبت‌های خودشان را می‌بینند اما ادمین همه را می‌بیند
         if not (user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())):
             qs = qs.filter(created_by=user)
         return qs
 
 
-# ── Return Request ViewSet ────────────────────────────────────────────────────
+# ── Return Request ────────────────────────────────────────────────────────────
+
 class ReturnRequestViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     queryset           = ReturnRequest.objects.all().order_by('-created_at')
     serializer_class   = ReturnRequestSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        qs = super().get_queryset()
-        
-        # فیلتر اختصاصی فرانت برای تفکیک در انتظارها و واریز شده‌ها
-        # با ارسال پارامتر ?status=PENDING یا APPROVED یا COMPLETED
+        qs           = super().get_queryset()
         status_param = self.request.query_params.get('status')
         if status_param:
             qs = qs.filter(status=status_param)
-            
         return qs
 
-    # ۱. اکشن تایید توسط مدیریت
     @action(detail=True, methods=['post'], url_path='approve')
     def approve(self, request, pk=None):
         return_req = self.get_object()
-        user = request.user
-        
-        # بررسی دسترسی: فقط ادمین یا مدیر مالی مجاز به تایید است
-        has_permission = user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in user.roles.all())
+        user       = request.user
+
+        has_permission = user.is_superuser or any(
+            r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in user.roles.all()
+        )
         if not has_permission:
             return Response({"error": "شما دسترسی تایید برگشتی را ندارید."}, status=status.HTTP_403_FORBIDDEN)
-            
+
         if return_req.status != 'PENDING':
             return Response({"error": "این درخواست در وضعیت انتظار تایید مدیریت نیست."}, status=status.HTTP_400_BAD_REQUEST)
-            
+
         return_req.is_approved = True
-        return_req.status = 'APPROVED'
+        return_req.status      = 'APPROVED'
         return_req.save()
-        
+
         return Response({"message": "درخواست برگشتی با موفقیت تایید شد. در انتظار واریز."}, status=status.HTTP_200_OK)
 
-    # ۲. اکشن ثبت واریزی و تکمیل درخواست
     @action(detail=True, methods=['post'], url_path='finalize-refund')
     def finalize_refund(self, request, pk=None):
         return_req = self.get_object()
-        user = request.user
-        
-        # دسترسی: مدیران مالی و ادمین و صندوق‌دار
-        has_permission = user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER', 'CASHIER', 'ACCOUNTANT'] for r in user.roles.all())
+        user       = request.user
+
+        has_permission = user.is_superuser or any(
+            r.code in ['ADMIN', 'FINANCIAL_MANAGER', 'CASHIER', 'ACCOUNTANT'] for r in user.roles.all()
+        )
         if not has_permission:
             return Response({"error": "شما دسترسی ثبت واریزی را ندارید."}, status=status.HTTP_403_FORBIDDEN)
-            
+
         if return_req.status != 'APPROVED':
             return Response({"error": "این درخواست هنوز توسط مدیریت تایید نشده یا قبلاً واریز شده است."}, status=status.HTTP_400_BAD_REQUEST)
-            
+
         refund_date   = request.data.get('refund_date')
         refund_method = request.data.get('refund_method')
-        
+
         if not refund_date or not refund_method:
             return Response({"error": "ورود تاریخ واریز (refund_date) و روش واریز (refund_method) الزامی است."}, status=status.HTTP_400_BAD_REQUEST)
-            
+
         return_req.refund_date   = refund_date
         return_req.refund_method = refund_method
         return_req.status        = 'COMPLETED'
         return_req.save()
-        
+
         return Response({"message": "واریز ثبت شد و درخواست از لیست انتظار به لیست تکمیل‌شده‌ها منتقل شد."}, status=status.HTTP_200_OK)
-    
-# ── Report Definition ViewSet ─────────────────────────────────────────────────
+
+
+# ── Report Definition ─────────────────────────────────────────────────────────
 
 class ReportDefinitionViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
-    """
-    بالادستی گزارش تعریف می‌کند.
-    زیردستی فقط گزارش‌های اختصاص‌داده‌شده به خود را می‌بیند.
-    """
     serializer_class   = ReportDefinitionSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        user = self.request.user
+        user     = self.request.user
         is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
 
         if is_admin:
             qs = ReportDefinition.objects.all()
         else:
-            # بالادستی گزارش‌هایی که خودش ساخته + گزارش‌هایی که به او سپرده شده
             qs = ReportDefinition.objects.filter(
                 Q(superior=user) | Q(subordinate=user)
             ).distinct()
 
-        # فیلتر اختیاری
         subordinate_param = self.request.query_params.get('subordinate')
         report_type_param = self.request.query_params.get('report_type')
         is_active_param   = self.request.query_params.get('is_active')
 
-        if subordinate_param:
-            qs = qs.filter(subordinate_id=subordinate_param)
-        if report_type_param:
-            qs = qs.filter(report_type=report_type_param)
+        if subordinate_param: qs = qs.filter(subordinate_id=subordinate_param)
+        if report_type_param: qs = qs.filter(report_type=report_type_param)
         if is_active_param is not None:
             qs = qs.filter(is_active=(is_active_param.lower() == 'true'))
 
@@ -764,11 +731,9 @@ class ReportDefinitionViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['patch'], url_path='toggle-active')
     def toggle_active(self, request, pk=None):
-        """فعال/غیرفعال کردن گزارش"""
         definition = self.get_object()
-        user = request.user
+        user       = request.user
 
-        # فقط سازنده یا ادمین می‌تواند وضعیت را تغییر دهد
         is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
         if not is_admin and definition.superior != user:
             return Response(
@@ -787,18 +752,14 @@ class ReportDefinitionViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         )
 
 
-# ── Report Submission ViewSet ─────────────────────────────────────────────────
+# ── Report Submission ─────────────────────────────────────────────────────────
 
 class ReportSubmissionViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
-    """
-    زیردستی گزارش پر می‌کند.
-    بالادستی گزارش‌های ارسال‌شده برای خود را می‌بیند.
-    """
     serializer_class   = ReportSubmissionSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        user = self.request.user
+        user     = self.request.user
         is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
 
         if is_admin:
@@ -812,17 +773,13 @@ class ReportSubmissionViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
                 Q(definition__superior=user) | Q(submitted_by=user)
             ).distinct()
 
-        # فیلترها
         definition_param = self.request.query_params.get('definition')
         from_date_param  = self.request.query_params.get('from_date')
         to_date_param    = self.request.query_params.get('to_date')
 
-        if definition_param:
-            qs = qs.filter(definition_id=definition_param)
-        if from_date_param:
-            qs = qs.filter(submitted_at__date__gte=from_date_param)
-        if to_date_param:
-            qs = qs.filter(submitted_at__date__lte=to_date_param)
+        if definition_param: qs = qs.filter(definition_id=definition_param)
+        if from_date_param:  qs = qs.filter(submitted_at__date__gte=from_date_param)
+        if to_date_param:    qs = qs.filter(submitted_at__date__lte=to_date_param)
 
         return qs.order_by('-submitted_at')
 
@@ -830,19 +787,21 @@ class ReportSubmissionViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         serializer.save(submitted_by=self.request.user)
 
     def update(self, request, *args, **kwargs):
-        """فقط ارسال‌کننده می‌تواند گزارش خودش را ویرایش کند"""
         instance = self.get_object()
-        if instance.submitted_by != request.user:
+        user     = request.user
+        is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
+
+        # ✅ باگ ۵ رفع شد: ادمین هم می‌تواند ویرایش کند
+        if not is_admin and instance.submitted_by != user:
             return Response(
-                {"error": "فقط ارسال‌کننده گزارش می‌تواند آن را ویرایش کند."},
+                {"error": "فقط ارسال‌کننده گزارش یا مدیر سیستم می‌تواند آن را ویرایش کند."},
                 status=status.HTTP_403_FORBIDDEN
             )
         return super().update(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):
-        """فقط بالادستی یا ادمین می‌تواند گزارش را حذف کند"""
         instance = self.get_object()
-        user = request.user
+        user     = request.user
         is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
 
         if not is_admin and instance.definition.superior != user:
