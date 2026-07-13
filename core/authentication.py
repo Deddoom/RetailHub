@@ -1,12 +1,9 @@
 # -*- coding: utf-8 -*-
 import base64
 import json
-from django.contrib.auth import get_user_model
 from django.core.signing import TimestampSigner, SignatureExpired, BadSignature
 from rest_framework.authentication import BaseAuthentication
 from rest_framework.exceptions import AuthenticationFailed
-
-User = get_user_model()
 
 # مدت اعتبار توکن: ۵ سال (به ثانیه)
 TOKEN_MAX_AGE = 60 * 60 * 24 * 365 * 5  # 157,680,000 seconds
@@ -17,14 +14,14 @@ class StatelessTokenService:
 
     @classmethod
     def generate_token(cls, user):
-        payload = {'user_id': str(user.id), 'type': 'access'}
+        payload   = {'user_id': str(user.id), 'type': 'access'}
         token_str = base64.b64encode(cls.signer.sign(json.dumps(payload)).encode()).decode()
         return token_str
 
     @classmethod
     def verify_token(cls, token_b64):
         try:
-            raw_token = base64.b64decode(token_b64.encode()).decode()
+            raw_token    = base64.b64decode(token_b64.encode()).decode()
             payload_json = cls.signer.unsign(raw_token, max_age=TOKEN_MAX_AGE)
             return json.loads(payload_json)
         except (SignatureExpired, BadSignature, Exception):
@@ -48,9 +45,12 @@ class CustomStatelessAuthentication(BaseAuthentication):
         if not payload or payload.get('type') != 'access':
             raise AuthenticationFailed('توکن معتبر نمی‌باشد یا منقضی شده است.')
 
+        # ✅ باگ ۶ رفع شد: import lazy داخل تابع به جای سطح ماژول
+        # این از کرش collectstatic و app-loading جلوگیری می‌کند
+        from core.models import CustomUser
         try:
-            user = User.objects.get(id=payload['user_id'])
-        except User.DoesNotExist:
+            user = CustomUser.objects.get(id=payload['user_id'])
+        except CustomUser.DoesNotExist:
             raise AuthenticationFailed('کاربر یافت نشد.')
 
         if not user.is_active:
