@@ -11,22 +11,22 @@ DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 ALLOWED_HOSTS = ['*']
 
 INSTALLED_APPS = [
-    'django.contrib.admin', # اضافه شدن ادمین پیش‌فرض جنگو در صورت نیاز به مدیریت دستی
+    'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
-    'corsheaders', # اضافه شدن پشتیبانی از CORS جهت دسترسی فرانت‌اند
+    'corsheaders',
     'core',
-    'drf_spectacular', # اضافه شدن پشتیبانی از مستندسازی API با OpenAPI
+    'drf_spectacular',
 ]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
-    'corsheaders.middleware.CorsMiddleware', # باید بالای CommonMiddleware قرار بگیرد
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -36,7 +36,6 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = 'project.urls'
 
-# رفع باگ: اضافه کردن TEMPLATES که برای django.contrib.admin و MessageMiddleware الزامی است
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
@@ -72,9 +71,18 @@ REST_FRAMEWORK = {
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
 }
 
-# تنظیمات CORS برای دسترسی امن فرانت‌اند در زمان توسعه و پروداکشن
-CORS_ALLOW_ALL_ORIGINS = True # در پروداکشن واقعی باید به دامنه‌های مشخص محدود شود
-CORS_ALLOW_CREDENTIALS = True
+# ✅ باگ ۷ رفع شد:
+# قانون مرورگر: نمی‌توان همزمان ALLOW_ALL_ORIGINS=True و ALLOW_CREDENTIALS=True داشت.
+# اگر فرانت‌اند شما نیازی به ارسال کوکی یا هدر خاص ندارد (که ندارد، چون از Bearer Token استفاده می‌کند)،
+# CREDENTIALS را False می‌گذاریم تا با ALLOW_ALL_ORIGINS سازگار باشد.
+CORS_ALLOW_ALL_ORIGINS  = True   # همه origin ها مجازند
+CORS_ALLOW_CREDENTIALS = False   # کوکی ارسال نمی‌شود (Bearer Token جایگزین است)
+
+# اگر در آینده خواستید به دامنه‌های خاص محدود کنید، این دو خط را جایگزین بالایی‌ها کنید:
+# CORS_ALLOWED_ORIGINS = [
+#     "http://localhost:3000",
+#     "https://your-frontend-domain.com",
+# ]
 
 LANGUAGE_CODE = 'fa-ir'
 TIME_ZONE = 'Asia/Tehran'

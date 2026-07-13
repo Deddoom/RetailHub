@@ -1,6 +1,3 @@
-# -*- coding: utf-8 -*-
-from urllib import request
-
 from rest_framework import serializers
 from django.db import transaction
 from decimal import Decimal
@@ -10,10 +7,10 @@ from core.models import (
     CustomUser, Role, Seller, Customer,
     Sale, Payment, Cheque, DepositItem,
     Expense, DamageReport, ItemExit,
-    Checklist, Task, 
+    Checklist, Task,
     DepositOrder, DepositOrderItem,
     BRANCH_CHOICES, Mission, ChecklistLog, ChecklistLogItem,
-    Claim, ClaimItem, ClaimFollowUp,DamageRegistration, DamageItem, 
+    Claim, ClaimItem, ClaimFollowUp, DamageRegistration, DamageItem,
     ReturnRequest, ReturnItem, ExchangeItem,
     ReportDefinition, ReportSubmission, ReportImage
 )
@@ -30,14 +27,13 @@ class RoleSerializer(serializers.ModelSerializer):
 
 
 # ── Auth / User ───────────────────────────────────────────────────────────────
+
 class UserSerializer(serializers.ModelSerializer):
     roles    = RoleSerializer(many=True, read_only=True)
     role_ids = serializers.PrimaryKeyRelatedField(
         many=True, queryset=Role.objects.all(),
         source='roles', write_only=True, required=False
     )
-    
-    # ─── فیلدهای جدید مربوط به اشخاص بالادستی ───
     superior_ids = serializers.PrimaryKeyRelatedField(
         many=True, queryset=CustomUser.objects.all(),
         source='superiors', write_only=True, required=False
@@ -47,68 +43,67 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model        = CustomUser
         fields       = [
-            'id', 'username', 'first_name', 'last_name', 
-            'is_profile_completed', 'roles', 'role_ids', 
+            'id', 'username', 'first_name', 'last_name',
+            'is_profile_completed', 'roles', 'role_ids',
             'branch', 'is_active', 'password',
             'superiors_info', 'superior_ids'
-        ]   
+        ]
         read_only_fields = ['is_profile_completed']
         extra_kwargs = {
             'password': {'write_only': True, 'required': False},
         }
 
-    # تابع نمایش اطلاعات مدیران به صورت خوانا در خروجی JSON
     def get_superiors_info(self, obj):
         return [
             {
-                "id": sup.id, 
-                "username": sup.username, 
+                "id": sup.id,
+                "username": sup.username,
                 "name": f"{sup.first_name} {sup.last_name}".strip()
-            } 
+            }
             for sup in obj.superiors.all()
         ]
 
     def create(self, validated_data):
-        roles = validated_data.pop('roles', [])
-        superiors = validated_data.pop('superiors', []) # استخراج مدیران ارسالی
+        roles      = validated_data.pop('roles', [])
+        superiors  = validated_data.pop('superiors', [])
         first_name = validated_data.get('first_name', '')
-        last_name = validated_data.get('last_name', '')
-        
+        last_name  = validated_data.get('last_name', '')
+
         if first_name or last_name:
             validated_data['is_profile_completed'] = True
-            
-        user  = CustomUser.objects.create_user(**validated_data)
-        
+
+        user = CustomUser.objects.create_user(**validated_data)
+
         if roles:
             user.roles.set(roles)
         if superiors:
-            user.superiors.set(superiors) # متصل کردن مدیران
-            
+            user.superiors.set(superiors)
+
         return user
 
     def update(self, instance, validated_data):
-        roles    = validated_data.pop('roles', None)
-        superiors = validated_data.pop('superiors', None) # استخراج مدیران ارسالی
-        password = validated_data.pop('password', None)
+        roles      = validated_data.pop('roles', None)
+        superiors  = validated_data.pop('superiors', None)
+        password   = validated_data.pop('password', None)
         first_name = validated_data.get('first_name', instance.first_name)
-        last_name = validated_data.get('last_name', instance.last_name)
-        
+        last_name  = validated_data.get('last_name', instance.last_name)
+
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
-            
+
         if password:
             instance.set_password(password)
-            
+
         if first_name or last_name:
             instance.is_profile_completed = True
-            
+
         instance.save()
-        
+
         if roles is not None:
             instance.roles.set(roles)
         if superiors is not None:
-            instance.superiors.set(superiors) # بروزرسانی مدیران
-            
+            instance.superiors.set(superiors)
+
         return instance
 
 
@@ -129,7 +124,6 @@ class SellerLookupSerializer(serializers.ModelSerializer):
 # ── Customer ──────────────────────────────────────────────────────────────────
 
 class CustomerSerializer(serializers.ModelSerializer):
-    # FIX: نام فیلد باید purchase_types باشه (مطابق مدل)، نه purchase_type
     purchase_types = serializers.MultipleChoiceField(
         choices=[
             ('CASH',    'نقدی'),
@@ -139,13 +133,11 @@ class CustomerSerializer(serializers.ModelSerializer):
         ],
         required=False,
     )
- 
+
     class Meta:
         model            = Customer
         fields           = '__all__'
         read_only_fields = ['last_purchase_date', 'total_purchase_amount']
-
-
 
 
 # ── Cheque ────────────────────────────────────────────────────────────────────
@@ -208,7 +200,7 @@ class SaleSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         user    = request.user
 
-        payments_data = validated_data.pop('payments', [])
+        payments_data      = validated_data.pop('payments', [])
         deposit_items_data = validated_data.pop('deposit_items', [])
 
         total_paid   = sum(Decimal(str(p.get('amount', 0))) for p in payments_data)
@@ -224,9 +216,9 @@ class SaleSerializer(serializers.ModelSerializer):
 
             if payment_item.get('payment_method') in ['CHEQUE', 'COMBINED']:
                 for cheque_item in cheques_for_this_payment:
-                    customer_phone = cheque_item.pop('customer_phone',
+                    customer_phone   = cheque_item.pop('customer_phone',
                         sale.customer.phone if sale.customer else None)
-                    customer_name = cheque_item.pop('customer_name',
+                    customer_name    = cheque_item.pop('customer_name',
                         sale.customer.name if sale.customer else None)
                     cheque_image_url = cheque_item.pop('cheque_image_url', None)
 
@@ -247,16 +239,19 @@ class SaleSerializer(serializers.ModelSerializer):
             customer = Customer.objects.select_for_update().get(pk=sale.customer_id)
             customer.last_purchase_date    = date.today()
             customer.total_purchase_amount += total_amount
-            customer.purchase_types = list(set(
-                [p.get('payment_method') for p in payments_data if p.get('payment_method')]
-            ))
+
+            # ✅ باگ ۲ رفع شد: ادغام روش‌های پرداخت به جای جایگزینی
+            new_methods = [
+                p.get('payment_method') for p in payments_data if p.get('payment_method')
+            ]
+            customer.purchase_types = list(set(customer.purchase_types + new_methods))
             customer.save()
 
         return sale
 
 
 class SaleListSerializer(serializers.ModelSerializer):
-    seller_name    = serializers.CharField(source='seller.name',  read_only=True)
+    seller_name    = serializers.CharField(source='seller.name',    read_only=True)
     customer_name  = serializers.CharField(source='customer.name',  read_only=True, default=None)
     customer_phone = serializers.CharField(source='customer.phone', read_only=True, default=None)
     created_by     = serializers.StringRelatedField(read_only=True)
@@ -373,16 +368,29 @@ class DepositOrderSerializer(serializers.ModelSerializer):
         read_only_fields = ['created_at', 'created_by', 'remaining_debt', 'sale']
 
     def validate(self, attrs):
-        total    = Decimal(str(attrs.get('total_amount', 0)))
-        discount = Decimal(str(attrs.get('discount_amount', 0)))
-        paid     = Decimal(str(attrs.get('deposit_paid', 0)))
+        # ✅ باگ ۴ رفع شد: اعتبارسنجی items فقط در زمان ساخت (POST) انجام می‌شه
+        if not self.instance:
+            total    = Decimal(str(attrs.get('total_amount', 0)))
+            discount = Decimal(str(attrs.get('discount_amount', 0)))
+            paid     = Decimal(str(attrs.get('deposit_paid', 0)))
 
-        if discount > total:
-            raise serializers.ValidationError("تخفیف نمی‌تواند از مبلغ کل بیشتر باشد.")
-        if paid > (total - discount):
-            raise serializers.ValidationError("مبلغ بیعانه از مبلغ خالص سفارش (پس از تخفیف) بیشتر است.")
-        if not attrs.get('items'):
-            raise serializers.ValidationError("سفارش باید حداقل یک قلم کالا داشته باشد.")
+            if discount > total:
+                raise serializers.ValidationError("تخفیف نمی‌تواند از مبلغ کل بیشتر باشد.")
+            if paid > (total - discount):
+                raise serializers.ValidationError("مبلغ بیعانه از مبلغ خالص سفارش (پس از تخفیف) بیشتر است.")
+            if not attrs.get('items'):
+                raise serializers.ValidationError("سفارش باید حداقل یک قلم کالا داشته باشد.")
+        else:
+            # در PATCH فقط مقادیر موجود رو validate می‌کنیم
+            total    = Decimal(str(attrs.get('total_amount', self.instance.total_amount)))
+            discount = Decimal(str(attrs.get('discount_amount', self.instance.discount_amount)))
+            paid     = Decimal(str(attrs.get('deposit_paid', self.instance.deposit_paid)))
+
+            if discount > total:
+                raise serializers.ValidationError("تخفیف نمی‌تواند از مبلغ کل بیشتر باشد.")
+            if paid > (total - discount):
+                raise serializers.ValidationError("مبلغ بیعانه از مبلغ خالص سفارش (پس از تخفیف) بیشتر است.")
+
         return attrs
 
     @transaction.atomic
@@ -437,20 +445,12 @@ class BranchChoicesSerializer(serializers.Serializer):
 # ── Mission ───────────────────────────────────────────────────────────────────
 
 class MissionSerializer(serializers.ModelSerializer):
-    # ─── حل مشکل اصلی: اضافه کردن فیلدهای متنی ریلیشن‌ها به صورت Read Only ───
     assigned_to_username = serializers.CharField(source='assigned_to.username', read_only=True)
-    created_by_username  = serializers.CharField(source='created_by.username', read_only=True)
+    created_by_username  = serializers.CharField(source='created_by.username',  read_only=True)
 
     class Meta:
-        model  = Mission
-        fields = '__all__'
-        #fields = [
-        #    'id', 'title',
-        #    'assigned_to', 'assigned_to_username',
-        #    'created_by',  'created_by_username',
-        #    'start_date', 'end_date', 'status',
-        #    'description', 'created_at', 'updated_at',
-        #]
+        model            = Mission
+        fields           = '__all__'
         read_only_fields = ['id', 'created_by', 'created_at', 'updated_at']
 
     def validate(self, attrs):
@@ -510,36 +510,29 @@ class ChecklistSerializer(serializers.ModelSerializer):
         if not value.is_active:
             raise serializers.ValidationError("کاربر غیرفعال است.")
         if request and request.user:
-            user = request.user
-            # FIX: ادمین و superuser همیشه مجاز هستند
+            user     = request.user
             is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
             if not is_admin and not user.is_superior_to(value):
                 raise serializers.ValidationError("شما بالادست این کاربر نیستید.")
         return value
 
-
     def create(self, validated_data):
         tasks_data = validated_data.pop('tasks', [])
-        
-        # ۱. ابتدا نمونه چک‌لیست را بدون ذخیره نهایی در دیتابیس می‌سازیم (commit=False)
-        checklist = Checklist(**validated_data)
-        
-        # ۲. کاربر لاگین شده را به صورت مستقیم به ریلیشن مدل متصل می‌کنیم
+        checklist  = Checklist(**validated_data)
+
         request = self.context.get('request')
         if request and request.user:
             checklist.created_by = request.user
-        
-        # ۳. حالا چک‌لیست را به صورت امن در دیتابیس ذخیره می‌کنیم
+
         checklist.save()
-        
-        # ۴. ذخیره تسک‌های متصل به آن
+
         for task_data in tasks_data:
             Task.objects.create(
                 checklist=checklist,
                 title=task_data.get('title'),
                 description=task_data.get('description', '')
             )
-            
+
         return checklist
 
     @transaction.atomic
@@ -550,24 +543,49 @@ class ChecklistSerializer(serializers.ModelSerializer):
             setattr(instance, attr, value)
         instance.save()
 
+        # ✅ باگ ۱ رفع شد: به جای حذف کامل، هر تسک رو به صورت هوشمند بروزرسانی می‌کنیم
         if tasks_data is not None:
-            instance.tasks.all().delete()
+            existing_tasks = {str(t.id): t for t in instance.tasks.all()}
+            incoming_ids   = {str(t['id']) for t in tasks_data if 'id' in t}
+
+            # حذف تسک‌هایی که در لیست جدید نیستند
+            for tid, task_obj in existing_tasks.items():
+                if tid not in incoming_ids:
+                    task_obj.delete()
+
             for task_data in tasks_data:
-                Task.objects.create(checklist=instance, **task_data)
+                tid = str(task_data.get('id', ''))
+                if tid and tid in existing_tasks:
+                    # بروزرسانی تسک موجود — فقط title و description تغییر می‌کنند
+                    # is_completed، completed_by و completion_note دست نخورده می‌مانند
+                    task_obj = existing_tasks[tid]
+                    task_obj.title       = task_data.get('title', task_obj.title)
+                    task_obj.description = task_data.get('description', task_obj.description)
+                    task_obj.save()
+                else:
+                    # تسک جدید
+                    Task.objects.create(
+                        checklist=instance,
+                        title=task_data.get('title', ''),
+                        description=task_data.get('description', '')
+                    )
 
         return instance
-    
+
+
 class ChecklistLogItemSerializer(serializers.ModelSerializer):
     class Meta:
-        model = ChecklistLogItem
+        model  = ChecklistLogItem
         fields = '__all__'
+
 
 class ChecklistLogSerializer(serializers.ModelSerializer):
     items = ChecklistLogItemSerializer(many=True, read_only=True)
 
     class Meta:
-        model = ChecklistLog
+        model  = ChecklistLog
         fields = '__all__'
+
 
 # ── Claim Serializers ─────────────────────────────────────────────────────────
 
@@ -583,8 +601,8 @@ class ClaimFollowUpSerializer(serializers.ModelSerializer):
     follower_name = serializers.CharField(source='follower.username', read_only=True)
 
     class Meta:
-        model  = ClaimFollowUp
-        fields = ['id', 'follower', 'follower_name', 'follow_up_type', 'description', 'date']
+        model            = ClaimFollowUp
+        fields           = ['id', 'follower', 'follower_name', 'follow_up_type', 'description', 'date']
         read_only_fields = ['follower', 'date']
 
 
@@ -592,7 +610,6 @@ class ClaimSerializer(serializers.ModelSerializer):
     items            = ClaimItemSerializer(many=True)
     follow_ups       = ClaimFollowUpSerializer(many=True, read_only=True)
     created_by_name  = serializers.CharField(source='created_by.username', read_only=True)
-    # FIX: seller_name حذف شد چون seller الان CharField هست
     assigned_to_name = serializers.SerializerMethodField()
 
     def get_assigned_to_name(self, obj):
@@ -603,7 +620,7 @@ class ClaimSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'customer_name', 'customer_phone', 'total_debt_amount',
             'status', 'taken_date', 'payment_deadline',
-            'seller',                        # ← الان فقط یه رشته متنیه
+            'seller',
             'assigned_to', 'assigned_to_name',
             'created_by', 'created_by_name', 'description',
             'items', 'follow_ups', 'created_at', 'updated_at'
@@ -625,20 +642,38 @@ class ClaimSerializer(serializers.ModelSerializer):
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
+
+        # ✅ باگ ۱ (نمونه Claim): هوشمند بروزرسانی می‌کنیم
         if items_data is not None:
-            instance.items.all().delete()
-            for item in items_data:
-                ClaimItem.objects.create(claim=instance, **item)
+            existing = {str(i.id): i for i in instance.items.all()}
+            incoming_ids = {str(i['id']) for i in items_data if 'id' in i}
+
+            for iid, item_obj in existing.items():
+                if iid not in incoming_ids:
+                    item_obj.delete()
+
+            for item_data in items_data:
+                iid = str(item_data.get('id', ''))
+                if iid and iid in existing:
+                    item_obj = existing[iid]
+                    for attr, val in item_data.items():
+                        setattr(item_obj, attr, val)
+                    item_obj.save()
+                else:
+                    ClaimItem.objects.create(claim=instance, **item_data)
+
         return instance
 
-    
-# ── Damage Registration Serializers ─────────────────────────────────────────────
+
+# ── Damage Registration Serializers ──────────────────────────────────────────
+
 class DamageItemSerializer(serializers.ModelSerializer):
     total_price = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
 
     class Meta:
         model  = DamageItem
         fields = ['id', 'item_name', 'quantity', 'unit_price', 'total_price']
+
 
 class DamageRegistrationSerializer(serializers.ModelSerializer):
     items           = DamageItemSerializer(many=True)
@@ -656,7 +691,6 @@ class DamageRegistrationSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         items_data = validated_data.pop('items', [])
         validated_data['created_by'] = self.context['request'].user
-        
         registration = DamageRegistration.objects.create(**validated_data)
         for item in items_data:
             DamageItem.objects.create(registration=registration, **item)
@@ -677,6 +711,7 @@ class DamageRegistrationSerializer(serializers.ModelSerializer):
 
 
 # ── Return Request Serializers ────────────────────────────────────────────────
+
 class ReturnItemSerializer(serializers.ModelSerializer):
     total_price = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
 
@@ -684,12 +719,14 @@ class ReturnItemSerializer(serializers.ModelSerializer):
         model  = ReturnItem
         fields = ['id', 'item_name', 'quantity', 'unit_price', 'discount', 'total_price']
 
+
 class ExchangeItemSerializer(serializers.ModelSerializer):
     total_price = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
 
     class Meta:
         model  = ExchangeItem
         fields = ['id', 'item_name', 'quantity', 'unit_price', 'total_price']
+
 
 class ReturnRequestSerializer(serializers.ModelSerializer):
     return_items    = ReturnItemSerializer(many=True)
@@ -706,7 +743,6 @@ class ReturnRequestSerializer(serializers.ModelSerializer):
             'created_by', 'created_by_name',
             'return_items', 'exchange_items', 'created_at', 'updated_at'
         ]
-        # وضعیت و تایید باید منحصراً توسط Endpointهای مخصوص تغییر کنند
         read_only_fields = ['created_by', 'status', 'is_approved', 'created_at', 'updated_at']
 
     @transaction.atomic
@@ -714,44 +750,67 @@ class ReturnRequestSerializer(serializers.ModelSerializer):
         return_items_data   = validated_data.pop('return_items', [])
         exchange_items_data = validated_data.pop('exchange_items', [])
         validated_data['created_by'] = self.context['request'].user
-        
+
         return_request = ReturnRequest.objects.create(**validated_data)
-        
+
         for item in return_items_data:
             ReturnItem.objects.create(return_request=return_request, **item)
-            
         for item in exchange_items_data:
             ExchangeItem.objects.create(return_request=return_request, **item)
-            
+
         return return_request
 
     @transaction.atomic
     def update(self, instance, validated_data):
         return_items_data   = validated_data.pop('return_items', None)
         exchange_items_data = validated_data.pop('exchange_items', None)
-        
+
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
 
+        # ✅ باگ ۱ (نمونه ReturnRequest): هوشمند بروزرسانی می‌کنیم
         if return_items_data is not None:
-            instance.return_items.all().delete()
-            for item in return_items_data:
-                ReturnItem.objects.create(return_request=instance, **item)
-                
+            existing = {str(i.id): i for i in instance.return_items.all()}
+            incoming_ids = {str(i['id']) for i in return_items_data if 'id' in i}
+            for iid, item_obj in existing.items():
+                if iid not in incoming_ids:
+                    item_obj.delete()
+            for item_data in return_items_data:
+                iid = str(item_data.get('id', ''))
+                if iid and iid in existing:
+                    item_obj = existing[iid]
+                    for attr, val in item_data.items():
+                        setattr(item_obj, attr, val)
+                    item_obj.save()
+                else:
+                    ReturnItem.objects.create(return_request=instance, **item_data)
+
         if exchange_items_data is not None:
-            instance.exchange_items.all().delete()
-            for item in exchange_items_data:
-                ExchangeItem.objects.create(return_request=instance, **item)
-                
+            existing = {str(i.id): i for i in instance.exchange_items.all()}
+            incoming_ids = {str(i['id']) for i in exchange_items_data if 'id' in i}
+            for iid, item_obj in existing.items():
+                if iid not in incoming_ids:
+                    item_obj.delete()
+            for item_data in exchange_items_data:
+                iid = str(item_data.get('id', ''))
+                if iid and iid in existing:
+                    item_obj = existing[iid]
+                    for attr, val in item_data.items():
+                        setattr(item_obj, attr, val)
+                    item_obj.save()
+                else:
+                    ExchangeItem.objects.create(return_request=instance, **item_data)
+
         return instance
-    
-# ── Report Serializers ─────────────────────────────────────────────────────────
+
+
+# ── Report Serializers ────────────────────────────────────────────────────────
 
 class ReportImageSerializer(serializers.ModelSerializer):
     class Meta:
-        model  = ReportImage
-        fields = ['id', 'image_url', 'caption', 'uploaded_at']
+        model            = ReportImage
+        fields           = ['id', 'image_url', 'caption', 'uploaded_at']
         read_only_fields = ['uploaded_at']
 
 
@@ -786,8 +845,7 @@ class ReportDefinitionSerializer(serializers.ModelSerializer):
                 {"questions": "حداقل یک عنوان/سوال برای گزارش الزامی است."}
             )
 
-        # بررسی اینکه زیردستی واقعاً زیردست بالادستی هست
-        request = self.context.get('request')
+        request    = self.context.get('request')
         subordinate = data.get('subordinate')
         if request and subordinate:
             superior = request.user
@@ -800,10 +858,9 @@ class ReportDefinitionSerializer(serializers.ModelSerializer):
 
 
 class ReportSubmissionSerializer(serializers.ModelSerializer):
-    images               = ReportImageSerializer(many=True, read_only=True)
+    images                = ReportImageSerializer(many=True, read_only=True)
     submitted_by_username = serializers.CharField(source='submitted_by.username', read_only=True)
-    definition_title     = serializers.CharField(source='definition.title',      read_only=True)
-    # برای ارسال عکس‌ها به صورت لیستی از دیکشنری‌ها
+    definition_title      = serializers.CharField(source='definition.title',      read_only=True)
     image_urls = serializers.ListField(
         child=serializers.DictField(),
         write_only=True,
@@ -828,13 +885,11 @@ class ReportSubmissionSerializer(serializers.ModelSerializer):
         if not definition:
             return data
 
-        # فقط زیردستی که گزارش به او اختصاص داده شده می‌تواند ارسال کند
         if request and definition.subordinate != request.user:
             raise serializers.ValidationError(
                 "شما دسترسی ثبت پاسخ برای این گزارش را ندارید."
             )
 
-        # بررسی که همه سوال‌ها پاسخ داده شده‌اند
         answers   = data.get('answers', {})
         questions = definition.questions
         missing   = [q for q in questions if q not in answers]
@@ -858,3 +913,24 @@ class ReportSubmissionSerializer(serializers.ModelSerializer):
                 caption=img.get('caption', '')
             )
         return submission
+
+    # ✅ باگ ۶ رفع شد: متد update برای مدیریت تصاویر در ویرایش گزارش اضافه شد
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        image_urls_data = validated_data.pop('image_urls', None)
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        if image_urls_data is not None:
+            # حذف تصاویر قدیمی و جایگزینی با تصاویر جدید
+            instance.images.all().delete()
+            for img in image_urls_data:
+                ReportImage.objects.create(
+                    submission=instance,
+                    image_url=img.get('image_url', ''),
+                    caption=img.get('caption', '')
+                )
+
+        return instance
