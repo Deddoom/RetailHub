@@ -386,8 +386,8 @@ class MissionViewSet(viewsets.ModelViewSet):
         if user.is_superuser or 'ADMIN' in user_roles:
             qs = Mission.objects.all()
         else:
-            all_users      = CustomUser.objects.prefetch_related('roles').exclude(pk=user.pk)
-            subordinate_ids = [u.id for u in all_users if user.is_superior_to(u)]
+            # ✅ رفع N+1: یک بار BFS بالا‌به‌پایین به جای N بار is_superior_to
+            subordinate_ids = [u.id for u in user.get_all_subordinates()]
 
             qs = Mission.objects.filter(
                 Q(assigned_to=user) |
@@ -440,8 +440,8 @@ class ChecklistViewSet(viewsets.ModelViewSet):
         if user.is_superuser or 'ADMIN' in user_roles:
             qs = Checklist.objects.all()
         else:
-            all_users       = CustomUser.objects.prefetch_related('roles').exclude(pk=user.pk)
-            subordinate_ids = [u.id for u in all_users if user.is_superior_to(u)]
+            # ✅ رفع N+1: یک بار BFS بالا‌به‌پایین به جای N بار is_superior_to
+            subordinate_ids = [u.id for u in user.get_all_subordinates()]
 
             qs = Checklist.objects.filter(
                 Q(assigned_to=user) |
@@ -482,8 +482,8 @@ class TaskViewSet(viewsets.ModelViewSet):
                 'checklist', 'checklist__assigned_to', 'checklist__created_by'
             ).all()
 
-        all_users       = CustomUser.objects.prefetch_related('roles').exclude(pk=user.pk)
-        subordinate_ids = [u.id for u in all_users if user.is_superior_to(u)]
+        # ✅ رفع N+1: یک بار BFS بالا‌به‌پایین به جای N بار is_superior_to
+        subordinate_ids = [u.id for u in user.get_all_subordinates()]
 
         return Task.objects.filter(
             Q(checklist__assigned_to=user) |
@@ -542,12 +542,9 @@ class ChecklistLogViewSet(viewsets.ReadOnlyModelViewSet):
         if user.is_superuser or user.roles.filter(code='ADMIN').exists():
             qs = ChecklistLog.objects.all().prefetch_related('items')
         else:
-            subordinate_users = []
-            all_users = CustomUser.objects.exclude(id=user.id)
-            for u in all_users:
-                if user.is_superior_to(u):
-                    subordinate_users.append(u.id)
-            allowed_users = [user.id] + subordinate_users
+            # ✅ رفع N+1: یک بار BFS بالا‌به‌پایین به جای N بار is_superior_to
+            subordinate_ids = [u.id for u in user.get_all_subordinates()]
+            allowed_users   = [user.id] + subordinate_ids
             qs = ChecklistLog.objects.filter(
                 assigned_to_id__in=allowed_users
             ).prefetch_related('items')
@@ -575,14 +572,11 @@ class ClaimViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         user     = self.request.user
         is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
 
-        # ✅ باگ ۲ رفع شد: فیلتر دسترسی بر اساس نقش
         if is_admin:
             qs = Claim.objects.all().order_by('-created_at')
         else:
-            # کاربر عادی فقط مطالباتی می‌بیند که:
-            # خودش ساخته یا به او سپرده شده یا زیردستانش ساختن
-            all_users       = CustomUser.objects.exclude(pk=user.pk)
-            subordinate_ids = [u.id for u in all_users if user.is_superior_to(u)]
+            # ✅ رفع N+1: یک بار BFS بالا‌به‌پایین به جای N بار is_superior_to
+            subordinate_ids = [u.id for u in user.get_all_subordinates()]
 
             qs = Claim.objects.filter(
                 Q(created_by=user) |

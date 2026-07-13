@@ -114,6 +114,19 @@ class CustomUser(AbstractUser):
                     queue.append(sup)
                     
         return False
+    def get_all_subordinates(self):
+        """
+        پیمایش بالا‌به‌پایین (BFS) برای یافتن تمام زیردستان یک کاربر.
+        این متد از N+1 Query جلوگیری می‌کند.
+        """
+        subordinates = set()
+        queue = list(self.subordinate_users.all())
+        while queue:
+            curr = queue.pop(0)
+            if curr not in subordinates:
+                subordinates.add(curr)
+                queue.extend(curr.subordinate_users.all())
+        return subordinates
 
 
 # ── Mission ────────────────────────────────────────────────────────────────────
@@ -179,7 +192,7 @@ class Customer(models.Model):
     phone                 = models.CharField(max_length=15, unique=True)
     address               = models.TextField(blank=True, null=True)
     purchase_types        = models.JSONField(default=list, help_text="لیست روش‌های پرداخت انتخابی")
-    total_purchase_amount = models.DecimalField(max_digits=12, decimal_places=0, default=0)
+    total_purchase_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
     last_purchase_date    = models.DateField(auto_now_add=True) # تاریخ خرید مشتری
     primary_goods         = models.CharField(max_length=50, choices=PRIMARY_GOODS_CHOICES, default='OTHER')
     buying_for            = models.CharField(max_length=50, choices=BUYING_FOR_CHOICES,    default='OTHER')

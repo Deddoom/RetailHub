@@ -480,10 +480,12 @@ class MissionSerializer(serializers.ModelSerializer):
 # ── Task ──────────────────────────────────────────────────────────────────────
 
 class TaskSerializer(serializers.ModelSerializer):
+    id = serializers.UUIDField(required=False)  # برای پشتیبانی از ویرایش هوشمند
+
     class Meta:
         model            = Task
         fields           = ['id', 'checklist', 'title', 'is_completed', 'completed_by', 'completed_at', 'completion_note', 'description']
-        read_only_fields = ['id', 'checklist', 'completed_by', 'completed_at']
+        read_only_fields = ['checklist', 'completed_by', 'completed_at']
 
 
 # ── Checklist ─────────────────────────────────────────────────────────────────
@@ -590,6 +592,7 @@ class ChecklistLogSerializer(serializers.ModelSerializer):
 # ── Claim Serializers ─────────────────────────────────────────────────────────
 
 class ClaimItemSerializer(serializers.ModelSerializer):
+    id          = serializers.UUIDField(required=False)  # برای پشتیبانی از ویرایش هوشمند
     total_price = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
 
     class Meta:
@@ -668,6 +671,7 @@ class ClaimSerializer(serializers.ModelSerializer):
 # ── Damage Registration Serializers ──────────────────────────────────────────
 
 class DamageItemSerializer(serializers.ModelSerializer):
+    id          = serializers.UUIDField(required=False)  # برای پشتیبانی از ویرایش هوشمند
     total_price = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
 
     class Meta:
@@ -713,6 +717,7 @@ class DamageRegistrationSerializer(serializers.ModelSerializer):
 # ── Return Request Serializers ────────────────────────────────────────────────
 
 class ReturnItemSerializer(serializers.ModelSerializer):
+    id          = serializers.UUIDField(required=False)  # برای پشتیبانی از ویرایش هوشمند
     total_price = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
 
     class Meta:
@@ -721,6 +726,7 @@ class ReturnItemSerializer(serializers.ModelSerializer):
 
 
 class ExchangeItemSerializer(serializers.ModelSerializer):
+    id          = serializers.UUIDField(required=False)  # برای پشتیبانی از ویرایش هوشمند
     total_price = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
 
     class Meta:
