@@ -3,7 +3,6 @@ from django.db import models
 from django.contrib.auth.models import AbstractUser
 from uuid import uuid4
 from decimal import Decimal
-from django.contrib.auth import get_user_model
 
 # ── تعریف شعب ثابت سیستم ──────────────────────────────────────────────────
 BRANCH_CHOICES = [
