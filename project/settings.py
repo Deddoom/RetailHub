@@ -93,3 +93,26 @@ STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# ── تنظیمات drf-spectacular ──────────────────────────────────────────────────
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'RetailHub API',
+    'DESCRIPTION': 'سیستم مدیریت خرده‌فروشی RetailHub',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+
+    # رفع warning: UUID path parameters
+    'SCHEMA_PATH_PREFIX': r'/api/',
+
+    # رفع warning: enum naming collision برای فیلدهای status و frequency
+    'ENUM_NAME_OVERRIDES': {
+        'ChecklistFrequencyEnum': 'core.models.Checklist.FREQUENCY_CHOICES',
+        'MissionStatusEnum':      'core.models.Mission.STATUS_CHOICES',
+        'DepositOrderStatusEnum': 'core.models.DepositOrder.STATUS_CHOICES',
+        'ClaimStatusEnum':        'core.models.Claim.STATUS_CHOICES',
+        'ReturnRequestStatusEnum':'core.models.ReturnRequest.STATUS_CHOICES',
+    },
+
+    # رفع warning: type hint برای get_superiors_info
+    'COMPONENT_SPLIT_REQUEST': True,
+}
