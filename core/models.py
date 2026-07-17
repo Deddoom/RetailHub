@@ -15,14 +15,23 @@ BRANCH_CHOICES = [
 # ── درخت سلسله‌مراتب نقش‌ها ────────────────────────────────────────────────
 ROLE_TREE: dict[str, set[str]] = {
     'ADMIN':             {'FINANCIAL_MANAGER', 'EXECUTIVE_MANAGER', 'SUPERVISOR',
-                          'ACCOUNTANT', 'STATISTICIAN', 'CASHIER', 'USER'},
+                          'ACCOUNTANT', 'STATISTICIAN', 'CASHIER', 'USER',
+                          'SALES_MANAGER', 'SELLER_STAFF', 'IRRIGATOR',
+                          'GREEN_SPACE', 'ADVERTISING'},
     'FINANCIAL_MANAGER': {'ACCOUNTANT', 'STATISTICIAN', 'CASHIER', 'USER'},
-    'EXECUTIVE_MANAGER': {'SUPERVISOR', 'USER'},
-    'SUPERVISOR':        {'USER'},
+    'EXECUTIVE_MANAGER': {'SUPERVISOR', 'USER',
+                          'SALES_MANAGER', 'SELLER_STAFF', 'IRRIGATOR',
+                          'GREEN_SPACE', 'ADVERTISING'},
+    'SUPERVISOR':        {'USER', 'SELLER_STAFF', 'IRRIGATOR', 'GREEN_SPACE', 'ADVERTISING'},
+    'SALES_MANAGER':     {'SELLER_STAFF'},
     'ACCOUNTANT':        {'CASHIER', 'USER'},
     'STATISTICIAN':      set(),
     'CASHIER':           set(),
     'USER':              set(),
+    'SELLER_STAFF':      set(),
+    'IRRIGATOR':         set(),
+    'GREEN_SPACE':       set(),
+    'ADVERTISING':       set(),
 }
 
 
@@ -49,6 +58,12 @@ class Role(models.Model):
         ('STATISTICIAN',      'آمارگیر'),
         ('CASHIER',           'صندوق‌دار'),
         ('USER',              'کارکنان عادی'),
+        # ── نقش‌های جدید ──
+        ('SALES_MANAGER',     'مدیر فروش'),
+        ('SELLER_STAFF',      'فروشنده'),
+        ('IRRIGATOR',         'آبیار'),
+        ('GREEN_SPACE',       'نیرو فضای سبز'),
+        ('ADVERTISING',       'نیرو تبلیغات'),
     ]
     id   = models.UUIDField(primary_key=True, default=uuid4, editable=False)
     code = models.CharField(max_length=30, choices=ROLE_CHOICES, unique=True)
@@ -113,6 +128,7 @@ class CustomUser(AbstractUser):
                     queue.append(sup)
                     
         return False
+
     def get_all_subordinates(self):
         """
         پیمایش بالا‌به‌پایین (BFS) برای یافتن تمام زیردستان یک کاربر.
@@ -178,7 +194,6 @@ class Customer(models.Model):
         ('SHOP',   'مغازه'),
         ('OTHER',  'متفرقه'),
     ]
-    # گزینه‌های جدید برای فیلد چند-انتخابی (چک‌باکس)
     PAYMENT_METHOD_CHOICES = [
         ('CASH',    'نقدی'),
         ('CARD',    'کارتی'),
@@ -187,12 +202,12 @@ class Customer(models.Model):
     ]
 
     id                    = models.UUIDField(primary_key=True, default=uuid4, editable=False)
-    name                  = models.CharField(max_length=150) # نام و نام خانوادگی
+    name                  = models.CharField(max_length=150)
     phone                 = models.CharField(max_length=15, unique=True)
     address               = models.TextField(blank=True, null=True)
     purchase_types        = models.JSONField(default=list, help_text="لیست روش‌های پرداخت انتخابی")
     total_purchase_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
-    last_purchase_date    = models.DateField(auto_now_add=True) # تاریخ خرید مشتری
+    last_purchase_date    = models.DateField(auto_now_add=True)
     primary_goods         = models.CharField(max_length=50, choices=PRIMARY_GOODS_CHOICES, default='OTHER')
     buying_for            = models.CharField(max_length=50, choices=BUYING_FOR_CHOICES,    default='OTHER')
     description           = models.TextField(blank=True, null=True)
@@ -336,7 +351,6 @@ class Task(models.Model):
     is_completed    = models.BooleanField(default=False)
     completed_by    = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True)
     completed_at    = models.DateTimeField(null=True, blank=True)
-    # ── فیلد جدید: یادداشت کاربر هنگام تکمیل تسک ──
     completion_note = models.TextField(
         blank=True, null=True,
         help_text="توضیح اختیاری که کاربر هنگام تیک زدن تسک وارد می‌کند"
@@ -349,10 +363,6 @@ class Task(models.Model):
 
 # ── ChecklistLog ───────────────────────────────────────────────────────────────
 class ChecklistLog(models.Model):
-    """
-    Snapshot غیرقابل‌تغییر از وضعیت کامل یک چک‌لیست در پایان هر دوره.
-    این مدل هرگز از طریق API قابل ویرایش یا حذف نیست.
-    """
     FREQUENCY_CHOICES = [
         ('DAILY',   'روزانه'),
         ('WEEKLY',  'هفتگی'),
@@ -361,7 +371,6 @@ class ChecklistLog(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
 
-    # ─── اشاره به چک‌لیست اصلی (nullable تا حتی بعد از حذف چک‌لیست هم بماند) ───
     checklist           = models.ForeignKey(
         Checklist, on_delete=models.SET_NULL,
         null=True, blank=True, related_name='logs'
@@ -369,35 +378,29 @@ class ChecklistLog(models.Model):
     checklist_title     = models.CharField(max_length=150)
     checklist_frequency = models.CharField(max_length=20, choices=FREQUENCY_CHOICES)
 
-    # ─── اطلاعات flat شخص مسئول ───
     assigned_to          = models.ForeignKey(
         CustomUser, on_delete=models.SET_NULL,
         null=True, blank=True, related_name='checklist_logs_assigned'
     )
     assigned_to_username = models.CharField(max_length=150)
 
-    # ─── اطلاعات flat سازنده چک‌لیست ───
     created_by          = models.ForeignKey(
         CustomUser, on_delete=models.SET_NULL,
         null=True, blank=True, related_name='checklist_logs_created'
     )
     created_by_username = models.CharField(max_length=150)
 
-    # ─── بازه زمانی دوره ───
     period_start = models.DateField(help_text="شروع دوره‌ای که این لاگ برای آن ثبت شده")
     period_end   = models.DateField(help_text="پایان دوره‌ای که این لاگ برای آن ثبت شده")
 
-    # ─── زمان ثبت لاگ (auto — غیرقابل تغییر) ───
     logged_at = models.DateTimeField(auto_now_add=True)
 
-    # ─── کسی که دکمه ریست را فشار داده ───
     reset_by          = models.ForeignKey(
         CustomUser, on_delete=models.SET_NULL,
         null=True, blank=True, related_name='checklist_logs_reset'
     )
     reset_by_username = models.CharField(max_length=150, blank=True)
 
-    # ─── آمار خلاصه دوره ───
     total_tasks     = models.PositiveIntegerField(default=0)
     completed_tasks = models.PositiveIntegerField(default=0)
 
@@ -414,25 +417,18 @@ class ChecklistLog(models.Model):
 
 # ── ChecklistLogItem ───────────────────────────────────────────────────────────
 class ChecklistLogItem(models.Model):
-    """
-    یک آیتم غیرقابل‌تغییر از یک ChecklistLog.
-    معادل وضعیت یک Task در لحظه ریست.
-    """
     id  = models.UUIDField(primary_key=True, default=uuid4, editable=False)
     log = models.ForeignKey(ChecklistLog, on_delete=models.CASCADE, related_name='items')
 
-    # ─── اطلاعات flat تسک ───
     task_title       = models.CharField(max_length=150)
     task_description = models.TextField(blank=True, null=True)
 
-    # ─── وضعیت در زمان ریست ───
     is_completed    = models.BooleanField(default=False)
     completion_note = models.TextField(
         blank=True, null=True,
         help_text="یادداشتی که کاربر هنگام تیک زدن وارد کرده"
     )
 
-    # ─── اطلاعات flat تکمیل‌کننده ───
     completed_by          = models.ForeignKey(
         CustomUser, on_delete=models.SET_NULL,
         null=True, blank=True, related_name='checklist_log_items_completed'
@@ -681,7 +677,19 @@ class ExchangeItem(models.Model):
         self.total_price = Decimal(str(self.quantity)) * Decimal(str(self.unit_price))
         super().save(*args, **kwargs)
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  سیستم گزارش‌دهی (Report System)
+# ══════════════════════════════════════════════════════════════════════════════
+
 # ── ReportDefinition (تعریف گزارش توسط بالادستی) ──────────────────────────────
+#
+# فیلد questions:
+#   لیستی از آبجکت‌ها با ساختار:
+#   [{"id": "q1", "text": "متن سوال اول"}, {"id": "q2", "text": "متن سوال دوم"}]
+#   - id: یک شناسه یکتا (مثلاً "q1", "q2") برای اتصال پاسخ به سوال
+#   - text: متن سوال که به کاربر نمایش داده می‌شود
+#
 class ReportDefinition(models.Model):
     REPORT_TYPE_CHOICES = [
         ('RECURRING', 'تکراری'),
@@ -710,7 +718,10 @@ class ReportDefinition(models.Model):
         null=True, blank=True, verbose_name="دوره تکرار"
     )
     deadline    = models.DateTimeField(null=True, blank=True, verbose_name="مهلت انجام")
-    questions   = models.JSONField(default=list, verbose_name="عناوین گزارش")
+
+    # ساختار: [{"id": "q1", "text": "متن سوال"}, ...]
+    questions   = models.JSONField(default=list, verbose_name="سوالات گزارش")
+
     is_active   = models.BooleanField(default=True)
     created_at  = models.DateTimeField(auto_now_add=True)
 
@@ -722,6 +733,13 @@ class ReportDefinition(models.Model):
 
 
 # ── ReportSubmission (ارسال گزارش توسط زیردستی) ────────────────────────────────
+#
+# فیلد answers:
+#   لیستی از آبجکت‌ها با ساختار:
+#   [{"question_id": "q1", "answer": "متن پاسخ"}, {"question_id": "q2", "answer": "متن پاسخ"}]
+#   - question_id: باید با یکی از id های موجود در questions مطابقت داشته باشد
+#   - answer: متن پاسخ کاربر
+#
 class ReportSubmission(models.Model):
     id           = models.UUIDField(primary_key=True, default=uuid4, editable=False)
     definition   = models.ForeignKey(
@@ -732,7 +750,10 @@ class ReportSubmission(models.Model):
         CustomUser, related_name='submitted_reports',
         on_delete=models.CASCADE, verbose_name="ارسال‌کننده"
     )
-    answers      = models.JSONField(default=dict, verbose_name="پاسخ‌ها")
+
+    # ساختار: [{"question_id": "q1", "answer": "پاسخ"}, ...]
+    answers      = models.JSONField(default=list, verbose_name="پاسخ‌ها")
+
     submitted_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

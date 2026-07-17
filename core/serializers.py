@@ -240,7 +240,6 @@ class SaleSerializer(serializers.ModelSerializer):
             customer.last_purchase_date    = date.today()
             customer.total_purchase_amount += total_amount
 
-            # ✅ باگ ۲ رفع شد: ادغام روش‌های پرداخت به جای جایگزینی
             new_methods = [
                 p.get('payment_method') for p in payments_data if p.get('payment_method')
             ]
@@ -368,7 +367,6 @@ class DepositOrderSerializer(serializers.ModelSerializer):
         read_only_fields = ['created_at', 'created_by', 'remaining_debt', 'sale']
 
     def validate(self, attrs):
-        # ✅ باگ ۴ رفع شد: اعتبارسنجی items فقط در زمان ساخت (POST) انجام می‌شه
         if not self.instance:
             total    = Decimal(str(attrs.get('total_amount', 0)))
             discount = Decimal(str(attrs.get('discount_amount', 0)))
@@ -381,7 +379,6 @@ class DepositOrderSerializer(serializers.ModelSerializer):
             if not attrs.get('items'):
                 raise serializers.ValidationError("سفارش باید حداقل یک قلم کالا داشته باشد.")
         else:
-            # در PATCH فقط مقادیر موجود رو validate می‌کنیم
             total    = Decimal(str(attrs.get('total_amount', self.instance.total_amount)))
             discount = Decimal(str(attrs.get('discount_amount', self.instance.discount_amount)))
             paid     = Decimal(str(attrs.get('deposit_paid', self.instance.deposit_paid)))
@@ -480,7 +477,7 @@ class MissionSerializer(serializers.ModelSerializer):
 # ── Task ──────────────────────────────────────────────────────────────────────
 
 class TaskSerializer(serializers.ModelSerializer):
-    id = serializers.UUIDField(required=False)  # برای پشتیبانی از ویرایش هوشمند
+    id = serializers.UUIDField(required=False)
 
     class Meta:
         model            = Task
@@ -545,12 +542,10 @@ class ChecklistSerializer(serializers.ModelSerializer):
             setattr(instance, attr, value)
         instance.save()
 
-        # ✅ باگ ۱ رفع شد: به جای حذف کامل، هر تسک رو به صورت هوشمند بروزرسانی می‌کنیم
         if tasks_data is not None:
             existing_tasks = {str(t.id): t for t in instance.tasks.all()}
             incoming_ids   = {str(t['id']) for t in tasks_data if 'id' in t}
 
-            # حذف تسک‌هایی که در لیست جدید نیستند
             for tid, task_obj in existing_tasks.items():
                 if tid not in incoming_ids:
                     task_obj.delete()
@@ -558,14 +553,11 @@ class ChecklistSerializer(serializers.ModelSerializer):
             for task_data in tasks_data:
                 tid = str(task_data.get('id', ''))
                 if tid and tid in existing_tasks:
-                    # بروزرسانی تسک موجود — فقط title و description تغییر می‌کنند
-                    # is_completed، completed_by و completion_note دست نخورده می‌مانند
                     task_obj = existing_tasks[tid]
                     task_obj.title       = task_data.get('title', task_obj.title)
                     task_obj.description = task_data.get('description', task_obj.description)
                     task_obj.save()
                 else:
-                    # تسک جدید
                     Task.objects.create(
                         checklist=instance,
                         title=task_data.get('title', ''),
@@ -592,7 +584,7 @@ class ChecklistLogSerializer(serializers.ModelSerializer):
 # ── Claim Serializers ─────────────────────────────────────────────────────────
 
 class ClaimItemSerializer(serializers.ModelSerializer):
-    id          = serializers.UUIDField(required=False)  # برای پشتیبانی از ویرایش هوشمند
+    id          = serializers.UUIDField(required=False)
     total_price = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
 
     class Meta:
@@ -646,7 +638,6 @@ class ClaimSerializer(serializers.ModelSerializer):
             setattr(instance, attr, value)
         instance.save()
 
-        # ✅ باگ ۱ (نمونه Claim): هوشمند بروزرسانی می‌کنیم
         if items_data is not None:
             existing = {str(i.id): i for i in instance.items.all()}
             incoming_ids = {str(i['id']) for i in items_data if 'id' in i}
@@ -671,7 +662,7 @@ class ClaimSerializer(serializers.ModelSerializer):
 # ── Damage Registration Serializers ──────────────────────────────────────────
 
 class DamageItemSerializer(serializers.ModelSerializer):
-    id          = serializers.UUIDField(required=False)  # برای پشتیبانی از ویرایش هوشمند
+    id          = serializers.UUIDField(required=False)
     total_price = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
 
     class Meta:
@@ -717,7 +708,7 @@ class DamageRegistrationSerializer(serializers.ModelSerializer):
 # ── Return Request Serializers ────────────────────────────────────────────────
 
 class ReturnItemSerializer(serializers.ModelSerializer):
-    id          = serializers.UUIDField(required=False)  # برای پشتیبانی از ویرایش هوشمند
+    id          = serializers.UUIDField(required=False)
     total_price = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
 
     class Meta:
@@ -726,7 +717,7 @@ class ReturnItemSerializer(serializers.ModelSerializer):
 
 
 class ExchangeItemSerializer(serializers.ModelSerializer):
-    id          = serializers.UUIDField(required=False)  # برای پشتیبانی از ویرایش هوشمند
+    id          = serializers.UUIDField(required=False)
     total_price = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
 
     class Meta:
@@ -775,7 +766,6 @@ class ReturnRequestSerializer(serializers.ModelSerializer):
             setattr(instance, attr, value)
         instance.save()
 
-        # ✅ باگ ۱ (نمونه ReturnRequest): هوشمند بروزرسانی می‌کنیم
         if return_items_data is not None:
             existing = {str(i.id): i for i in instance.return_items.all()}
             incoming_ids = {str(i['id']) for i in return_items_data if 'id' in i}
@@ -811,7 +801,9 @@ class ReturnRequestSerializer(serializers.ModelSerializer):
         return instance
 
 
-# ── Report Serializers ────────────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════════════════
+#  سریالایزرهای سیستم گزارش‌دهی
+# ════════════════════════════════════════════════════════════════════════════
 
 class ReportImageSerializer(serializers.ModelSerializer):
     class Meta:
@@ -821,6 +813,15 @@ class ReportImageSerializer(serializers.ModelSerializer):
 
 
 class ReportDefinitionSerializer(serializers.ModelSerializer):
+    """
+    فیلد questions:
+      ورودی و خروجی به صورت لیست آبجکت با ساختار:
+      [{"id": "q1", "text": "متن سوال اول"}, {"id": "q2", "text": "متن سوال دوم"}]
+
+    اعتبارسنجی:
+      - هر آیتم باید دارای کلید "id" و "text" باشد
+      - مقدار "id" در داخل یک definition باید یکتا باشد
+    """
     superior_username    = serializers.CharField(source='superior.username',    read_only=True)
     subordinate_username = serializers.CharField(source='subordinate.username', read_only=True)
 
@@ -835,6 +836,40 @@ class ReportDefinitionSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'superior', 'created_at']
 
+    def validate_questions(self, value):
+        """
+        اعتبارسنجی ساختار questions:
+        باید لیستی از {"id": "...", "text": "..."} باشد.
+        """
+        if not isinstance(value, list) or len(value) == 0:
+            raise serializers.ValidationError(
+                "سوالات باید به صورت لیست غیرخالی ارسال شوند."
+            )
+
+        seen_ids = set()
+        for idx, item in enumerate(value):
+            if not isinstance(item, dict):
+                raise serializers.ValidationError(
+                    f"سوال شماره {idx + 1}: باید آبجکت باشد "
+                    f'(مثال: {{"id": "q1", "text": "متن سوال"}}).'
+                )
+            if 'id' not in item or not str(item['id']).strip():
+                raise serializers.ValidationError(
+                    f"سوال شماره {idx + 1}: فیلد «id» الزامی است."
+                )
+            if 'text' not in item or not str(item['text']).strip():
+                raise serializers.ValidationError(
+                    f"سوال شماره {idx + 1}: فیلد «text» الزامی است."
+                )
+            q_id = str(item['id']).strip()
+            if q_id in seen_ids:
+                raise serializers.ValidationError(
+                    f"شناسه سوال «{q_id}» تکراری است. هر سوال باید id یکتا داشته باشد."
+                )
+            seen_ids.add(q_id)
+
+        return value
+
     def validate(self, data):
         report_type = data.get('report_type') or (self.instance.report_type if self.instance else None)
 
@@ -845,10 +880,6 @@ class ReportDefinitionSerializer(serializers.ModelSerializer):
         if report_type == 'DEADLINE' and not data.get('deadline'):
             raise serializers.ValidationError(
                 {"deadline": "برای گزارش‌های مهلت‌دار، تعیین تاریخ مهلت (deadline) الزامی است."}
-            )
-        if not data.get('questions') and not (self.instance and self.instance.questions):
-            raise serializers.ValidationError(
-                {"questions": "حداقل یک عنوان/سوال برای گزارش الزامی است."}
             )
 
         request    = self.context.get('request')
@@ -864,9 +895,21 @@ class ReportDefinitionSerializer(serializers.ModelSerializer):
 
 
 class ReportSubmissionSerializer(serializers.ModelSerializer):
+    """
+    فیلد answers:
+      ورودی و خروجی به صورت لیست آبجکت با ساختار:
+      [{"question_id": "q1", "answer": "متن پاسخ"}, {"question_id": "q2", "answer": "متن پاسخ"}]
+
+    اعتبارسنجی:
+      - هر آیتم باید دارای "question_id" و "answer" باشد
+      - هر question_id باید در لیست سوالات definition وجود داشته باشد
+      - تمام سوالات definition باید پاسخ داشته باشند
+    """
     images                = ReportImageSerializer(many=True, read_only=True)
     submitted_by_username = serializers.CharField(source='submitted_by.username', read_only=True)
     definition_title      = serializers.CharField(source='definition.title',      read_only=True)
+
+    # فیلد نوشتنی برای ارسال تصاویر
     image_urls = serializers.ListField(
         child=serializers.DictField(),
         write_only=True,
@@ -884,6 +927,33 @@ class ReportSubmissionSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'submitted_by', 'submitted_at']
 
+    def validate_answers(self, value):
+        """
+        اعتبارسنجی ساختار answers:
+        باید لیستی از {"question_id": "...", "answer": "..."} باشد.
+        """
+        if not isinstance(value, list):
+            raise serializers.ValidationError(
+                "پاسخ‌ها باید به صورت لیست ارسال شوند."
+            )
+
+        for idx, item in enumerate(value):
+            if not isinstance(item, dict):
+                raise serializers.ValidationError(
+                    f"پاسخ شماره {idx + 1}: باید آبجکت باشد "
+                    f'(مثال: {{"question_id": "q1", "answer": "متن پاسخ"}}).'
+                )
+            if 'question_id' not in item or not str(item.get('question_id', '')).strip():
+                raise serializers.ValidationError(
+                    f"پاسخ شماره {idx + 1}: فیلد «question_id» الزامی است."
+                )
+            if 'answer' not in item:
+                raise serializers.ValidationError(
+                    f"پاسخ شماره {idx + 1}: فیلد «answer» الزامی است."
+                )
+
+        return value
+
     def validate(self, data):
         request    = self.context.get('request')
         definition = data.get('definition') or (self.instance.definition if self.instance else None)
@@ -891,24 +961,63 @@ class ReportSubmissionSerializer(serializers.ModelSerializer):
         if not definition:
             return data
 
+        # بررسی اینکه زیردستی مجاز باشد
         if request and definition.subordinate != request.user:
-            raise serializers.ValidationError(
-                "شما دسترسی ثبت پاسخ برای این گزارش را ندارید."
+            is_admin = request.user.is_superuser or any(
+                r.code == 'ADMIN' for r in request.user.roles.all()
             )
+            if not is_admin:
+                raise serializers.ValidationError(
+                    "شما دسترسی ثبت پاسخ برای این گزارش را ندارید."
+                )
 
-        answers   = data.get('answers', {})
-        questions = definition.questions
-        missing   = [q for q in questions if q not in answers]
-        if missing:
-            raise serializers.ValidationError(
-                {"answers": f"پاسخ این عناوین ارسال نشده: {', '.join(missing)}"}
-            )
+        # اعتبارسنجی اینکه پاسخ همه سوالات ارسال شده باشد
+        answers = data.get('answers', [])
+        if answers is not None:
+            # استخراج id های سوالات موجود
+            valid_question_ids = {str(q['id']) for q in definition.questions}
+            answered_ids       = {str(a['question_id']) for a in answers}
+
+            # بررسی question_id های نامعتبر
+            invalid_ids = answered_ids - valid_question_ids
+            if invalid_ids:
+                raise serializers.ValidationError(
+                    {"answers": f"شناسه‌های سوال نامعتبر: {', '.join(sorted(invalid_ids))}"}
+                )
+
+            # بررسی سوالات بی‌پاسخ
+            missing_ids = valid_question_ids - answered_ids
+            if missing_ids:
+                # پیدا کردن متن سوالات بی‌پاسخ برای پیام خطا
+                missing_texts = [
+                    q['text'] for q in definition.questions
+                    if str(q['id']) in missing_ids
+                ]
+                raise serializers.ValidationError(
+                    {"answers": f"پاسخ این سوالات ارسال نشده: {', '.join(missing_texts)}"}
+                )
+
         return data
+
+    def _validate_image_urls(self, image_urls_data):
+        """اعتبارسنجی ساختار image_urls"""
+        for idx, img in enumerate(image_urls_data):
+            if not isinstance(img, dict):
+                raise serializers.ValidationError(
+                    f"تصویر شماره {idx + 1}: باید آبجکت باشد "
+                    f'(مثال: {{"image_url": "https://...", "caption": "توضیح"}}).'
+                )
+            if 'image_url' not in img or not str(img.get('image_url', '')).strip():
+                raise serializers.ValidationError(
+                    f"تصویر شماره {idx + 1}: فیلد «image_url» الزامی است."
+                )
 
     @transaction.atomic
     def create(self, validated_data):
         image_urls_data = validated_data.pop('image_urls', [])
         validated_data['submitted_by'] = self.context['request'].user
+
+        self._validate_image_urls(image_urls_data)
 
         submission = ReportSubmission.objects.create(**validated_data)
 
@@ -920,7 +1029,6 @@ class ReportSubmissionSerializer(serializers.ModelSerializer):
             )
         return submission
 
-    # ✅ باگ ۶ رفع شد: متد update برای مدیریت تصاویر در ویرایش گزارش اضافه شد
     @transaction.atomic
     def update(self, instance, validated_data):
         image_urls_data = validated_data.pop('image_urls', None)
@@ -930,7 +1038,7 @@ class ReportSubmissionSerializer(serializers.ModelSerializer):
         instance.save()
 
         if image_urls_data is not None:
-            # حذف تصاویر قدیمی و جایگزینی با تصاویر جدید
+            self._validate_image_urls(image_urls_data)
             instance.images.all().delete()
             for img in image_urls_data:
                 ReportImage.objects.create(

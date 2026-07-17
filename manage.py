@@ -15,32 +15,38 @@ def main():
         django.setup()
         
         from django.core.management import call_command
-        from core.models import CustomUser, Seller, Customer, Role # انتقال ایمپورت به بعد از ستاپ
+        from core.models import CustomUser, Seller, Customer, Role
 
         print("[!] Preparing database tables (Migrating)...")
         call_command('migrate', run_syncdb=True, interactive=False)
 
         print("[!] Seeding initial data rows into database...")
     
-        # ساخت نقش‌ها
         role_codes = [
-            'ADMIN', 'CASHIER', 'FINANCIAL_MANAGER', 'EXECUTIVE_MANAGER', 
-            'SUPERVISOR', 'ACCOUNTANT', 'STATISTICIAN', 'USER'
+            'ADMIN', 'CASHIER', 'FINANCIAL_MANAGER', 'EXECUTIVE_MANAGER',
+            'SUPERVISOR', 'ACCOUNTANT', 'STATISTICIAN', 'USER',
+            'SALES_MANAGER', 'SELLER_STAFF', 'IRRIGATOR', 'GREEN_SPACE', 'ADVERTISING',
         ]
         roles = {}
         for code in role_codes:
             roles[code], _ = Role.objects.get_or_create(code=code)
 
-        # دیتای کاربران تستی (username, password, branch, role_obj, is_superuser)
+        # ─── کاربران تستی اصلی ───────────────────────────────────────
+        # فرمت: (username, password, branch, role_obj, is_superuser)
         seed_users = [
-            ('admin', 'admin1234', 'شعبه بهشتی', roles['ADMIN'], True),
-            ('cashier', 'cashier1234', 'شعبه مدرس', roles['CASHIER'], False),
-            ('fin_manager', 'fin1234', 'شعبه بهشتی', roles['FINANCIAL_MANAGER'], False),
-            ('exec_manager', 'exec1234', 'شعبه مدرس', roles['EXECUTIVE_MANAGER'], False),
-            ('supervisor', 'super1234', 'شعبه سپیده', roles['SUPERVISOR'], False),
-            ('accountant', 'acc1234', 'شعبه بهشتی', roles['ACCOUNTANT'], False),
-            ('statistician', 'stat1234', 'شعبه کاجستان', roles['STATISTICIAN'], False),
-            ('normal_user', 'user1234', 'شعبه مدرس', roles['USER'], False),
+            ('admin',        'admin1234',    'شعبه بهشتی',  roles['ADMIN'],             True),
+            ('cashier',      'cashier1234',  'شعبه مدرس',   roles['CASHIER'],            False),
+            ('fin_manager',  'fin1234',      'شعبه بهشتی',  roles['FINANCIAL_MANAGER'],  False),
+            ('exec_manager', 'exec1234',     'شعبه مدرس',   roles['EXECUTIVE_MANAGER'],  False),
+            ('supervisor',   'super1234',    'شعبه سپیده',  roles['SUPERVISOR'],         False),
+            ('accountant',   'acc1234',      'شعبه بهشتی',  roles['ACCOUNTANT'],         False),
+            ('statistician', 'stat1234',     'شعبه کاجستان',roles['STATISTICIAN'],       False),
+            ('normal_user',  'user1234',     'شعبه مدرس',   roles['USER'],               False),
+            ('sales_manager','smgr1234',     'شعبه بهشتی',  roles['SALES_MANAGER'],      False),
+            ('seller1',      'seller1234',   'شعبه مدرس',   roles['SELLER_STAFF'],        False),
+            ('irrigator1',   'irrig1234',    'شعبه سپیده',  roles['IRRIGATOR'],           False),
+            ('green_space1', 'green1234',    'شعبه کاجستان',roles['GREEN_SPACE'],         False),
+            ('advertising1', 'adv1234',      'شعبه بهشتی',  roles['ADVERTISING'],         False),
         ]
 
         for username, password, branch, role_obj, is_super in seed_users:
