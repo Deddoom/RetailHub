@@ -6,7 +6,9 @@ from core.views import (
     SaleViewSet, ExpenseViewSet, DamageReportViewSet,
     ItemExitViewSet, ChecklistViewSet, TaskViewSet, DepositOrderViewSet,
     BranchListView, MissionViewSet, RoleViewSet, ChecklistLogViewSet, ClaimViewSet,
-    DamageRegistrationViewSet, ReturnRequestViewSet, ReportDefinitionViewSet, ReportSubmissionViewSet
+    DamageRegistrationViewSet, ReturnRequestViewSet, ReportDefinitionViewSet, ReportSubmissionViewSet,
+    BranchTransferViewSet, WasteReportViewSet,
+
 )
 
 router = DefaultRouter()
@@ -28,6 +30,9 @@ router.register(r'damage-registrations', DamageRegistrationViewSet, basename='da
 router.register(r'return-requests', ReturnRequestViewSet, basename='return-request')
 router.register(r'report-definitions', ReportDefinitionViewSet, basename='report-definition')
 router.register(r'report-submissions', ReportSubmissionViewSet, basename='report-submission')
+router.register(r'transfers',          BranchTransferViewSet,    basename='branch-transfer')
+router.register(r'waste-reports',      WasteReportViewSet,       basename='waste-report')
+
 
 urlpatterns = [
     path('auth/token/', AuthTokenView.as_view(), name='auth_token_login'),

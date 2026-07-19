@@ -58,12 +58,12 @@ class Role(models.Model):
         ('STATISTICIAN',      'آمارگیر'),
         ('CASHIER',           'صندوق‌دار'),
         ('USER',              'کارکنان عادی'),
-        # ── نقش‌های جدید ──
         ('SALES_MANAGER',     'مدیر فروش'),
         ('SELLER_STAFF',      'فروشنده'),
         ('IRRIGATOR',         'آبیار'),
         ('GREEN_SPACE',       'نیرو فضای سبز'),
         ('ADVERTISING',       'نیرو تبلیغات'),
+        ('WAREHOUSE',         'انباردار'),
     ]
     id   = models.UUIDField(primary_key=True, default=uuid4, editable=False)
     code = models.CharField(max_length=30, choices=ROLE_CHOICES, unique=True)
@@ -779,3 +779,149 @@ class ReportImage(models.Model):
 
     def __str__(self):
         return f"تصویر گزارش {self.submission_id}"
+    
+# ── BranchTransfer (انتقال بین شعب) ──────────────────────────────────────────
+class BranchTransfer(models.Model):
+    STATUS_CHOICES = [
+        ('PENDING_SENDER',   'در انتظار تایید سرپرست مبدا'),
+        ('PENDING_RECEIVER', 'در انتظار تایید سرپرست مقصد'),
+        ('APPROVED',         'تایید نهایی'),
+        ('REJECTED',         'رد شده'),
+    ]
+ 
+    id                  = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    source_cashier      = models.ForeignKey(
+        CustomUser, on_delete=models.PROTECT,
+        related_name='initiated_transfers',
+        verbose_name='صندوق‌دار مبدا (ثبت‌کننده)',
+    )
+    source_branch       = models.CharField(max_length=50, choices=BRANCH_CHOICES, verbose_name='شعبه مبدا')
+    destination_branch  = models.CharField(max_length=50, choices=BRANCH_CHOICES, verbose_name='شعبه مقصد')
+    sender_supervisor   = models.ForeignKey(
+        CustomUser, on_delete=models.PROTECT,
+        related_name='sender_supervised_transfers',
+        verbose_name='سرپرست فرستنده',
+    )
+    receiver_supervisor = models.ForeignKey(
+        CustomUser, on_delete=models.PROTECT,
+        related_name='receiver_supervised_transfers',
+        verbose_name='سرپرست گیرنده',
+    )
+    transfer_date       = models.DateField(verbose_name='تاریخ ارسال')
+    driver_name         = models.CharField(max_length=150, verbose_name='نام راننده')
+    description         = models.TextField(blank=True, null=True, verbose_name='توضیحات')
+ 
+    # وضعیت و تاریخچه تصمیم‌ها
+    status           = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING_SENDER', verbose_name='وضعیت')
+    rejection_reason = models.TextField(blank=True, null=True, verbose_name='دلیل عدم تایید')
+    sender_note      = models.TextField(blank=True, null=True, verbose_name='توضیحات فرستنده هنگام تایید')
+    receiver_note    = models.TextField(blank=True, null=True, verbose_name='توضیحات گیرنده هنگام تایید')
+ 
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+ 
+    class Meta:
+        ordering = ['-created_at']
+ 
+    def __str__(self):
+        return f"انتقال {self.source_branch} ← {self.destination_branch} ({self.get_status_display()})"
+ 
+ 
+# ── TransferItem (اقلام انتقال) ───────────────────────────────────────────────
+class TransferItem(models.Model):
+    id        = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    transfer  = models.ForeignKey(BranchTransfer, on_delete=models.CASCADE, related_name='items')
+    item_name = models.CharField(max_length=150, verbose_name='نام جنس')
+    quantity  = models.PositiveIntegerField(verbose_name='تعداد')
+    price     = models.DecimalField(max_digits=12, decimal_places=2, verbose_name='قیمت واحد')
+ 
+    def __str__(self):
+        return f"{self.item_name} × {self.quantity}"
+ 
+ 
+# ── TransferLog (لاگ مراحل انتقال) ────────────────────────────────────────────
+class TransferLog(models.Model):
+    id         = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    transfer   = models.ForeignKey(BranchTransfer, on_delete=models.CASCADE, related_name='logs')
+    message    = models.TextField(verbose_name='متن لاگ')
+    created_by = models.ForeignKey(
+        CustomUser, on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='transfer_logs_created',
+        verbose_name='کاربر ثبت‌کننده لاگ',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+ 
+    class Meta:
+        ordering = ['created_at']
+ 
+    def __str__(self):
+        return f"[{self.created_at.date()}] {self.message[:60]}"
+ 
+ 
+# ── WasteReport (گزارش ضایعات) ────────────────────────────────────────────────
+class WasteReport(models.Model):
+    STATUS_CHOICES = [
+        ('PENDING',               'در انتظار بررسی انباردار'),
+        ('APPROVED_BY_WAREHOUSE', 'تایید انباردار — در انتظار مدیریت'),
+        ('REJECTED_BY_WAREHOUSE', 'رد شده توسط انباردار'),
+        ('CLOSED',                'تعیین تکلیف توسط مدیریت'),
+    ]
+ 
+    id         = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    reporter   = models.ForeignKey(
+        CustomUser, on_delete=models.PROTECT,
+        related_name='reported_wastes',
+        verbose_name='اعلام‌کننده (سرپرست)',
+    )
+    waste_date  = models.DateField(verbose_name='تاریخ ضایع شدن')
+    branch      = models.CharField(max_length=50, choices=BRANCH_CHOICES, verbose_name='شعبه')
+    description = models.TextField(blank=True, null=True, verbose_name='توضیحات')
+ 
+    # افراد دخیل — چندین کاربر قابل انتخاب
+    involved_users = models.ManyToManyField(
+        CustomUser,
+        related_name='involved_in_wastes',
+        blank=True,
+        verbose_name='افراد دخیل',
+    )
+ 
+    # مرحله انباردار
+    status             = models.CharField(max_length=30, choices=STATUS_CHOICES, default='PENDING', verbose_name='وضعیت')
+    warehouse_reviewer = models.ForeignKey(
+        CustomUser, on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='reviewed_wastes',
+        verbose_name='انباردار بررسی‌کننده',
+    )
+    warehouse_comment  = models.TextField(blank=True, null=True, verbose_name='توضیحات انباردار')
+ 
+    # مرحله مدیریت
+    admin_reviewer    = models.ForeignKey(
+        CustomUser, on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='admin_reviewed_wastes',
+        verbose_name='مدیر تعیین‌تکلیف‌کننده',
+    )
+    admin_instruction = models.TextField(blank=True, null=True, verbose_name='دستور مدیریت')
+ 
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+ 
+    class Meta:
+        ordering = ['-created_at']
+ 
+    def __str__(self):
+        return f"ضایعات {self.branch} — {self.waste_date} ({self.get_status_display()})"
+ 
+ 
+# ── WasteItem (اقلام ضایعات) ──────────────────────────────────────────────────
+class WasteItem(models.Model):
+    id           = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    waste_report = models.ForeignKey(WasteReport, on_delete=models.CASCADE, related_name='items')
+    item_name    = models.CharField(max_length=150, verbose_name='نام جنس')
+    quantity     = models.PositiveIntegerField(verbose_name='تعداد')
+    price        = models.DecimalField(max_digits=12, decimal_places=2, verbose_name='قیمت واحد')
+ 
+    def __str__(self):
+        return f"{self.item_name} × {self.quantity}"

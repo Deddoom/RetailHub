@@ -26,6 +26,7 @@ def main():
             'ADMIN', 'CASHIER', 'FINANCIAL_MANAGER', 'EXECUTIVE_MANAGER',
             'SUPERVISOR', 'ACCOUNTANT', 'STATISTICIAN', 'USER',
             'SALES_MANAGER', 'SELLER_STAFF', 'IRRIGATOR', 'GREEN_SPACE', 'ADVERTISING',
+            'WAREHOUSE',
         ]
         roles = {}
         for code in role_codes:
@@ -47,6 +48,7 @@ def main():
             ('irrigator1',   'irrig1234',    'شعبه سپیده',  roles['IRRIGATOR'],           False),
             ('green_space1', 'green1234',    'شعبه کاجستان',roles['GREEN_SPACE'],         False),
             ('advertising1', 'adv1234',      'شعبه بهشتی',  roles['ADVERTISING'],         False),
+            ('warehouse1',   'ware1234',     'شعبه مدرس',   roles['WAREHOUSE'],           False),
         ]
 
         for username, password, branch, role_obj, is_super in seed_users:

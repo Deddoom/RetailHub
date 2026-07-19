@@ -12,7 +12,9 @@ from core.models import (
     BRANCH_CHOICES, Mission, ChecklistLog, ChecklistLogItem,
     Claim, ClaimItem, ClaimFollowUp, DamageRegistration, DamageItem,
     ReturnRequest, ReturnItem, ExchangeItem,
-    ReportDefinition, ReportSubmission, ReportImage
+    ReportDefinition, ReportSubmission, ReportImage,
+    BranchTransfer, TransferItem, TransferLog,
+    WasteReport, WasteItem,
 )
 
 
@@ -1048,3 +1050,249 @@ class ReportSubmissionSerializer(serializers.ModelSerializer):
                 )
 
         return instance
+    
+# ── Transfer Serializers ──────────────────────────────────────────────────────
+ 
+class TransferItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = TransferItem
+        fields = ['id', 'item_name', 'quantity', 'price']
+ 
+ 
+class TransferLogSerializer(serializers.ModelSerializer):
+    created_by_username = serializers.CharField(
+        source='created_by.username', read_only=True, default=''
+    )
+ 
+    class Meta:
+        model  = TransferLog
+        fields = ['id', 'message', 'created_by_username', 'created_at']
+ 
+ 
+class BranchTransferSerializer(serializers.ModelSerializer):
+    """سریالایزر کامل برای ایجاد/ویرایش/جزئیات انتقال"""
+    items = TransferItemSerializer(many=True)
+    logs  = TransferLogSerializer(many=True, read_only=True)
+ 
+    source_cashier_name      = serializers.CharField(
+        source='source_cashier.get_full_name', read_only=True
+    )
+    sender_supervisor_name   = serializers.CharField(
+        source='sender_supervisor.get_full_name', read_only=True
+    )
+    receiver_supervisor_name = serializers.CharField(
+        source='receiver_supervisor.get_full_name', read_only=True
+    )
+ 
+    class Meta:
+        model  = BranchTransfer
+        fields = [
+            'id',
+            'source_cashier',      'source_cashier_name',
+            'source_branch',       'destination_branch',
+            'sender_supervisor',   'sender_supervisor_name',
+            'receiver_supervisor', 'receiver_supervisor_name',
+            'transfer_date',       'driver_name',
+            'description',
+            'status',
+            'rejection_reason',
+            'sender_note',
+            'receiver_note',
+            'items',
+            'logs',
+            'created_at',          'updated_at',
+        ]
+        read_only_fields = [
+            'status', 'rejection_reason',
+            'sender_note', 'receiver_note',
+            'created_at', 'updated_at',
+        ]
+ 
+    def validate(self, data):
+        src = data.get('source_branch',      getattr(self.instance, 'source_branch',      None))
+        dst = data.get('destination_branch', getattr(self.instance, 'destination_branch', None))
+        if src and dst and src == dst:
+            raise serializers.ValidationError(
+                {"destination_branch": "شعبه مبدا و مقصد نمی‌توانند یکسان باشند."}
+            )
+        if not data.get('items') and not self.instance:
+            raise serializers.ValidationError(
+                {"items": "انتقال باید حداقل یک قلم کالا داشته باشد."}
+            )
+        return data
+ 
+    @transaction.atomic
+    def create(self, validated_data):
+        items_data = validated_data.pop('items')
+        transfer   = BranchTransfer.objects.create(**validated_data)
+        for item in items_data:
+            TransferItem.objects.create(transfer=transfer, **item)
+ 
+        # لاگ اولیه ثبت درخواست
+        TransferLog.objects.create(
+            transfer=transfer,
+            created_by=transfer.source_cashier,
+            message=(
+                f"درخواست انتقال توسط {transfer.source_cashier.get_full_name() or transfer.source_cashier.username} "
+                f"از {transfer.source_branch} به {transfer.destination_branch} ثبت شد و "
+                f"در انتظار تایید سرپرست مبدا ({transfer.sender_supervisor.get_full_name() or transfer.sender_supervisor.username}) است."
+            ),
+        )
+        return transfer
+ 
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        items_data = validated_data.pop('items', None)
+ 
+        # اگر قبلاً رد شده بود و الان ویرایش می‌شود، برمی‌گردد به انتظار تایید
+        if instance.status == 'REJECTED':
+            instance.status          = 'PENDING_SENDER'
+            instance.rejection_reason = None
+ 
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+ 
+        if items_data is not None:
+            instance.items.all().delete()
+            for item in items_data:
+                TransferItem.objects.create(transfer=instance, **item)
+ 
+        request = self.context.get('request')
+        user    = request.user if request else None
+        TransferLog.objects.create(
+            transfer=instance,
+            created_by=user,
+            message="اطلاعات انتقال ویرایش شد و مجدداً در انتظار تایید سرپرست مبدا قرار گرفت.",
+        )
+        return instance
+ 
+ 
+class BranchTransferListSerializer(serializers.ModelSerializer):
+    """سریالایزر سبک برای لیست"""
+    source_cashier_name      = serializers.CharField(source='source_cashier.get_full_name',      read_only=True)
+    sender_supervisor_name   = serializers.CharField(source='sender_supervisor.get_full_name',   read_only=True)
+    receiver_supervisor_name = serializers.CharField(source='receiver_supervisor.get_full_name', read_only=True)
+    items_count              = serializers.SerializerMethodField()
+ 
+    def get_items_count(self, obj):
+        return obj.items.count()
+ 
+    class Meta:
+        model  = BranchTransfer
+        fields = [
+            'id',
+            'source_cashier',      'source_cashier_name',
+            'source_branch',       'destination_branch',
+            'sender_supervisor',   'sender_supervisor_name',
+            'receiver_supervisor', 'receiver_supervisor_name',
+            'transfer_date',       'driver_name',
+            'status',              'items_count',
+            'created_at',
+        ]
+ 
+ 
+# ── Waste Report Serializers ──────────────────────────────────────────────────
+ 
+class WasteItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = WasteItem
+        fields = ['id', 'item_name', 'quantity', 'price']
+ 
+ 
+class WasteReportSerializer(serializers.ModelSerializer):
+    """سریالایزر کامل برای ایجاد/ویرایش/جزئیات گزارش ضایعات"""
+    items                  = WasteItemSerializer(many=True)
+    reporter_name          = serializers.CharField(
+        source='reporter.get_full_name', read_only=True
+    )
+    warehouse_reviewer_name = serializers.CharField(
+        source='warehouse_reviewer.get_full_name', read_only=True, default=None
+    )
+    admin_reviewer_name    = serializers.CharField(
+        source='admin_reviewer.get_full_name', read_only=True, default=None
+    )
+    involved_users_detail  = serializers.SerializerMethodField(read_only=True)
+ 
+    def get_involved_users_detail(self, obj):
+        return [
+            {
+                "id":       str(u.id),
+                "username": u.username,
+                "name":     u.get_full_name() or u.username,
+            }
+            for u in obj.involved_users.all()
+        ]
+ 
+    class Meta:
+        model  = WasteReport
+        fields = [
+            'id',
+            'reporter',                'reporter_name',
+            'waste_date',              'branch',
+            'description',
+            'involved_users',          'involved_users_detail',
+            'status',
+            'warehouse_reviewer',      'warehouse_reviewer_name',
+            'warehouse_comment',
+            'admin_reviewer',          'admin_reviewer_name',
+            'admin_instruction',
+            'items',
+            'created_at',              'updated_at',
+        ]
+        read_only_fields = [
+            'reporter',
+            'status',
+            'warehouse_reviewer', 'warehouse_comment',
+            'admin_reviewer',     'admin_instruction',
+            'created_at',         'updated_at',
+        ]
+ 
+    @transaction.atomic
+    def create(self, validated_data):
+        items_data         = validated_data.pop('items')
+        involved_users     = validated_data.pop('involved_users', [])
+        validated_data['reporter'] = self.context['request'].user
+ 
+        waste_report = WasteReport.objects.create(**validated_data)
+        waste_report.involved_users.set(involved_users)
+ 
+        for item in items_data:
+            WasteItem.objects.create(waste_report=waste_report, **item)
+        return waste_report
+ 
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        items_data     = validated_data.pop('items', None)
+        involved_users = validated_data.pop('involved_users', None)
+ 
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+ 
+        if involved_users is not None:
+            instance.involved_users.set(involved_users)
+ 
+        if items_data is not None:
+            instance.items.all().delete()
+            for item in items_data:
+                WasteItem.objects.create(waste_report=instance, **item)
+        return instance
+ 
+ 
+class WasteReportListSerializer(serializers.ModelSerializer):
+    """سریالایزر سبک برای لیست"""
+    reporter_name = serializers.CharField(source='reporter.get_full_name', read_only=True)
+    items_count   = serializers.SerializerMethodField()
+ 
+    def get_items_count(self, obj):
+        return obj.items.count()
+ 
+    class Meta:
+        model  = WasteReport
+        fields = [
+            'id', 'reporter', 'reporter_name',
+            'waste_date', 'branch',
+            'status', 'items_count',
+            'created_at',
+        ]

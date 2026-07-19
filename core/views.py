@@ -20,7 +20,9 @@ from core.models import (
     DepositOrder, DepositOrderItem,
     BRANCH_CHOICES, Mission, Role, ChecklistLog,
     Claim, ClaimFollowUp, DamageRegistration, ReturnRequest,
-    ReportDefinition, ReportSubmission
+    ReportDefinition, ReportSubmission,
+    BranchTransfer, TransferItem, TransferLog,
+    WasteReport, WasteItem,
 )
 from core.serializers import (
     UserSerializer,
@@ -34,7 +36,9 @@ from core.serializers import (
     MissionSerializer, RoleSerializer, ChecklistLogSerializer,
     ClaimSerializer, ClaimFollowUpSerializer,
     DamageRegistrationSerializer, ReturnRequestSerializer,
-    ReportDefinitionSerializer, ReportSubmissionSerializer, ReportImageSerializer
+    ReportDefinitionSerializer, ReportSubmissionSerializer, ReportImageSerializer,
+    BranchTransferSerializer, BranchTransferListSerializer,
+    WasteReportSerializer, WasteReportListSerializer,
 )
 from core.authentication import StatelessTokenService
 from core.permissions import IsAdminUser, IsOwnerOrAdminOnly, IsSuperiorUser
@@ -804,3 +808,408 @@ class ReportSubmissionViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
         return super().destroy(request, *args, **kwargs)
+    
+# ── BranchTransfer ────────────────────────────────────────────────────────────
+ 
+class BranchTransferViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
+    """
+    انتقال بین شعب
+ 
+    وضعیت‌ها:
+      PENDING_SENDER   → ثبت درخواست توسط صندوقدار
+      PENDING_RECEIVER → تایید سرپرست مبدا، در انتظار گیرنده
+      APPROVED         → تایید هر دو سرپرست
+      REJECTED         → رد شده (قابل ویرایش و بازارسال)
+ 
+    اکشن‌ها:
+      POST /transfers/{id}/approve_sender/  — تایید توسط سرپرست مبدا
+      POST /transfers/{id}/reject_sender/   — رد توسط سرپرست مبدا
+      POST /transfers/{id}/approve_receiver/— تایید توسط سرپرست مقصد
+      POST /transfers/{id}/reject_receiver/ — رد توسط سرپرست مقصد
+    """
+    permission_classes = [permissions.IsAuthenticated]
+ 
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return BranchTransferListSerializer
+        return BranchTransferSerializer
+ 
+    def get_queryset(self):
+        user = self.request.user
+        is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
+ 
+        if is_admin:
+            qs = BranchTransfer.objects.all()
+        else:
+            qs = BranchTransfer.objects.filter(
+                Q(source_cashier=user) |
+                Q(sender_supervisor=user) |
+                Q(receiver_supervisor=user)
+            ).distinct()
+ 
+        # فیلترهای اختیاری
+        status_param = self.request.query_params.get('status')
+        src_branch   = self.request.query_params.get('source_branch')
+        dst_branch   = self.request.query_params.get('destination_branch')
+        from_date    = self.request.query_params.get('from_date')
+        to_date      = self.request.query_params.get('to_date')
+ 
+        if status_param: qs = qs.filter(status=status_param)
+        if src_branch:   qs = qs.filter(source_branch=src_branch)
+        if dst_branch:   qs = qs.filter(destination_branch=dst_branch)
+        if from_date:    qs = qs.filter(transfer_date__gte=from_date)
+        if to_date:      qs = qs.filter(transfer_date__lte=to_date)
+ 
+        return qs.select_related(
+            'source_cashier', 'sender_supervisor', 'receiver_supervisor'
+        ).prefetch_related('items', 'logs').order_by('-created_at')
+ 
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        # فقط درخواست‌های رد شده یا در انتظار تایید مبدا قابل ویرایش‌اند
+        if instance.status not in ['PENDING_SENDER', 'REJECTED']:
+            return Response(
+                {"error": "فقط انتقال‌هایی که در وضعیت 'رد شده' یا 'در انتظار تایید مبدا' هستند قابل ویرایش‌اند."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        return super().update(request, *args, **kwargs)
+ 
+    @action(detail=True, methods=['post'], url_path='approve-sender')
+    @transaction.atomic
+    def approve_sender(self, request, pk=None):
+        """تایید انتقال توسط سرپرست مبدا"""
+        transfer = self.get_object()
+ 
+        if transfer.status != 'PENDING_SENDER':
+            return Response(
+                {"error": "این انتقال در وضعیت 'در انتظار تایید مبدا' نیست."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if transfer.sender_supervisor != request.user and not (
+            request.user.is_superuser or any(r.code == 'ADMIN' for r in request.user.roles.all())
+        ):
+            return Response(
+                {"error": "فقط سرپرست مبدا یا ادمین می‌تواند این انتقال را تایید کند."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+ 
+        note = request.data.get('note', '')
+        transfer.status      = 'PENDING_RECEIVER'
+        transfer.sender_note = note
+        transfer.save()
+ 
+        TransferLog.objects.create(
+            transfer=transfer,
+            created_by=request.user,
+            message=(
+                f"انتقال توسط سرپرست مبدا ({request.user.get_full_name() or request.user.username}) تایید شد "
+                f"و برای سرپرست مقصد ({transfer.receiver_supervisor.get_full_name() or transfer.receiver_supervisor.username}) ارسال گردید."
+                + (f" توضیحات: {note}" if note else "")
+            ),
+        )
+        return Response(
+            {"message": "انتقال با موفقیت تایید شد و برای سرپرست مقصد ارسال گردید."},
+            status=status.HTTP_200_OK
+        )
+ 
+    @action(detail=True, methods=['post'], url_path='reject-sender')
+    @transaction.atomic
+    def reject_sender(self, request, pk=None):
+        """رد انتقال توسط سرپرست مبدا"""
+        transfer = self.get_object()
+ 
+        if transfer.status != 'PENDING_SENDER':
+            return Response(
+                {"error": "این انتقال در وضعیت 'در انتظار تایید مبدا' نیست."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if transfer.sender_supervisor != request.user and not (
+            request.user.is_superuser or any(r.code == 'ADMIN' for r in request.user.roles.all())
+        ):
+            return Response(
+                {"error": "فقط سرپرست مبدا یا ادمین می‌تواند این انتقال را رد کند."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+ 
+        reason = request.data.get('reason', '').strip()
+        if not reason:
+            return Response(
+                {"error": "ارسال دلیل عدم تایید (reason) الزامی است."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+ 
+        transfer.status           = 'REJECTED'
+        transfer.rejection_reason = reason
+        transfer.save()
+ 
+        TransferLog.objects.create(
+            transfer=transfer,
+            created_by=request.user,
+            message=(
+                f"انتقال توسط سرپرست مبدا ({request.user.get_full_name() or request.user.username}) رد شد. "
+                f"دلیل: {reason}"
+            ),
+        )
+        return Response(
+            {"message": "انتقال رد شد. صندوقدار می‌تواند پس از اصلاح، مجدداً ارسال کند."},
+            status=status.HTTP_200_OK
+        )
+ 
+    @action(detail=True, methods=['post'], url_path='approve-receiver')
+    @transaction.atomic
+    def approve_receiver(self, request, pk=None):
+        """تایید نهایی انتقال توسط سرپرست مقصد"""
+        transfer = self.get_object()
+ 
+        if transfer.status != 'PENDING_RECEIVER':
+            return Response(
+                {"error": "این انتقال در وضعیت 'در انتظار تایید مقصد' نیست."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if transfer.receiver_supervisor != request.user and not (
+            request.user.is_superuser or any(r.code == 'ADMIN' for r in request.user.roles.all())
+        ):
+            return Response(
+                {"error": "فقط سرپرست مقصد یا ادمین می‌تواند این انتقال را تایید کند."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+ 
+        note = request.data.get('note', '')
+        transfer.status        = 'APPROVED'
+        transfer.receiver_note = note
+        transfer.save()
+ 
+        # ساخت لاگ نهایی با تمام اطلاعات
+        from django.utils import timezone as tz
+        items_summary = ", ".join(
+            f"{item.item_name} ({item.quantity} عدد)"
+            for item in transfer.items.all()
+        )
+        TransferLog.objects.create(
+            transfer=transfer,
+            created_by=request.user,
+            message=(
+                f"در تاریخ {tz.now().strftime('%Y-%m-%d %H:%M')} انتقال با شناسه {transfer.id} "
+                f"از شعبه {transfer.source_branch} به شعبه {transfer.destination_branch} "
+                f"با راننده {transfer.driver_name} ثبت نهایی گردید. "
+                f"اقلام: {items_summary}."
+                + (f" توضیحات گیرنده: {note}" if note else "")
+            ),
+        )
+        return Response(
+            {"message": "فرایند انتقال با موفقیت ثبت نهایی شد."},
+            status=status.HTTP_200_OK
+        )
+ 
+    @action(detail=True, methods=['post'], url_path='reject-receiver')
+    @transaction.atomic
+    def reject_receiver(self, request, pk=None):
+        """رد انتقال توسط سرپرست مقصد"""
+        transfer = self.get_object()
+ 
+        if transfer.status != 'PENDING_RECEIVER':
+            return Response(
+                {"error": "این انتقال در وضعیت 'در انتظار تایید مقصد' نیست."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if transfer.receiver_supervisor != request.user and not (
+            request.user.is_superuser or any(r.code == 'ADMIN' for r in request.user.roles.all())
+        ):
+            return Response(
+                {"error": "فقط سرپرست مقصد یا ادمین می‌تواند این انتقال را رد کند."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+ 
+        reason = request.data.get('reason', '').strip()
+        if not reason:
+            return Response(
+                {"error": "ارسال دلیل عدم تایید (reason) الزامی است."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+ 
+        transfer.status           = 'REJECTED'
+        transfer.rejection_reason = reason
+        transfer.save()
+ 
+        TransferLog.objects.create(
+            transfer=transfer,
+            created_by=request.user,
+            message=(
+                f"انتقال توسط سرپرست مقصد ({request.user.get_full_name() or request.user.username}) رد شد. "
+                f"دلیل: {reason}"
+            ),
+        )
+        return Response(
+            {"message": "انتقال رد شد. صندوقدار می‌تواند پس از اصلاح، مجدداً ارسال کند."},
+            status=status.HTTP_200_OK
+        )
+ 
+ 
+# ── WasteReport ───────────────────────────────────────────────────────────────
+ 
+class WasteReportViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
+    """
+    گزارش ضایعات (جایگزین DamageRegistration)
+ 
+    وضعیت‌ها:
+      PENDING                → ثبت توسط سرپرست، در انتظار انباردار
+      APPROVED_BY_WAREHOUSE  → تایید انباردار، در انتظار مدیریت
+      REJECTED_BY_WAREHOUSE  → رد توسط انباردار
+      CLOSED                 → تعیین تکلیف توسط ادمین
+ 
+    اکشن‌ها:
+      POST /waste-reports/{id}/warehouse-review/ — بررسی انباردار
+      POST /waste-reports/{id}/admin-decision/   — دستور مدیریت
+    """
+    permission_classes = [permissions.IsAuthenticated]
+ 
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return WasteReportListSerializer
+        return WasteReportSerializer
+ 
+    def get_queryset(self):
+        user     = self.request.user
+        is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
+        is_warehouse = any(r.code == 'WAREHOUSE' for r in user.roles.all())
+ 
+        if is_admin:
+            # ادمین همه را می‌بیند
+            qs = WasteReport.objects.all()
+        elif is_warehouse:
+            # انباردار همه گزارش‌ها را برای بررسی می‌بیند
+            qs = WasteReport.objects.all()
+        else:
+            # سرپرست: گزارش‌های خودش + گزارش‌هایی که در آن‌ها دخیل بوده
+            qs = WasteReport.objects.filter(
+                Q(reporter=user) | Q(involved_users=user)
+            ).distinct()
+ 
+        # فیلترهای اختیاری
+        status_param = self.request.query_params.get('status')
+        branch_param = self.request.query_params.get('branch')
+        from_date    = self.request.query_params.get('from_date')
+        to_date      = self.request.query_params.get('to_date')
+ 
+        if status_param: qs = qs.filter(status=status_param)
+        if branch_param: qs = qs.filter(branch=branch_param)
+        if from_date:    qs = qs.filter(waste_date__gte=from_date)
+        if to_date:      qs = qs.filter(waste_date__lte=to_date)
+ 
+        return qs.select_related(
+            'reporter', 'warehouse_reviewer', 'admin_reviewer'
+        ).prefetch_related('items', 'involved_users').order_by('-created_at')
+ 
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        # فقط گزارش‌های در انتظار یا رد شده توسط انباردار قابل ویرایش توسط سرپرست هستند
+        is_admin = request.user.is_superuser or any(r.code == 'ADMIN' for r in request.user.roles.all())
+        if not is_admin and instance.status not in ['PENDING', 'REJECTED_BY_WAREHOUSE']:
+            return Response(
+                {"error": "گزارش پس از تایید انباردار قابل ویرایش نیست."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        return super().update(request, *args, **kwargs)
+ 
+    @action(detail=True, methods=['post'], url_path='warehouse-review')
+    @transaction.atomic
+    def warehouse_review(self, request, pk=None):
+        """
+        بررسی انباردار: تایید یا رد گزارش ضایعات
+ 
+        body:
+          action  : 'approve' | 'reject'
+          comment : توضیحات (اجباری برای رد، اختیاری برای تایید)
+        """
+        waste = self.get_object()
+ 
+        is_admin     = request.user.is_superuser or any(r.code == 'ADMIN' for r in request.user.roles.all())
+        is_warehouse = any(r.code == 'WAREHOUSE' for r in request.user.roles.all())
+        if not is_admin and not is_warehouse:
+            return Response(
+                {"error": "فقط انباردار یا ادمین می‌تواند این عملیات را انجام دهد."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+ 
+        if waste.status != 'PENDING':
+            return Response(
+                {"error": "این گزارش قبلاً بررسی شده است."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+ 
+        action_type = request.data.get('action', '').strip()
+        comment     = request.data.get('comment', '').strip()
+ 
+        if action_type not in ['approve', 'reject']:
+            return Response(
+                {"error": "مقدار action باید 'approve' یا 'reject' باشد."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if action_type == 'reject' and not comment:
+            return Response(
+                {"error": "برای رد گزارش، ارسال توضیحات (comment) الزامی است."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+ 
+        waste.warehouse_reviewer = request.user
+        waste.warehouse_comment  = comment
+        waste.status = (
+            'APPROVED_BY_WAREHOUSE' if action_type == 'approve'
+            else 'REJECTED_BY_WAREHOUSE'
+        )
+        waste.save()
+ 
+        if action_type == 'approve':
+            msg = (
+                f"گزارش ضایعات توسط انباردار ({request.user.get_full_name() or request.user.username}) تایید شد "
+                f"و به مدیریت ارسال گردید."
+                + (f" توضیحات: {comment}" if comment else "")
+            )
+        else:
+            msg = (
+                f"گزارش ضایعات توسط انباردار ({request.user.get_full_name() or request.user.username}) رد شد. "
+                f"دلیل: {comment}"
+            )
+ 
+        return Response({"message": msg}, status=status.HTTP_200_OK)
+ 
+    @action(detail=True, methods=['post'], url_path='admin-decision')
+    @transaction.atomic
+    def admin_decision(self, request, pk=None):
+        """
+        تعیین تکلیف توسط مدیریت (ادمین)
+ 
+        body:
+          instruction : دستور/توضیحات مدیریت (اجباری)
+        """
+        waste = self.get_object()
+ 
+        is_admin = request.user.is_superuser or any(r.code == 'ADMIN' for r in request.user.roles.all())
+        if not is_admin:
+            return Response(
+                {"error": "فقط ادمین می‌تواند دستور مدیریت صادر کند."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+ 
+        if waste.status != 'APPROVED_BY_WAREHOUSE':
+            return Response(
+                {"error": "این گزارش هنوز توسط انباردار تایید نشده یا قبلاً تعیین تکلیف شده است."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+ 
+        instruction = request.data.get('instruction', '').strip()
+        if not instruction:
+            return Response(
+                {"error": "ارسال دستور مدیریت (instruction) الزامی است."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+ 
+        waste.admin_reviewer    = request.user
+        waste.admin_instruction = instruction
+        waste.status            = 'CLOSED'
+        waste.save()
+ 
+        return Response(
+            {"message": "دستور مدیریت ثبت شد و فرایند رسیدگی به ضایعات مختومه گردید."},
+            status=status.HTTP_200_OK
+        )
