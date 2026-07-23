@@ -898,25 +898,28 @@ class ReportDefinitionSerializer(serializers.ModelSerializer):
 
 class ReportSubmissionSerializer(serializers.ModelSerializer):
     """
-    فیلد answers:
-      ورودی و خروجی به صورت لیست آبجکت با ساختار:
-      [{"question_id": "q1", "answer": "متن پاسخ"}, {"question_id": "q2", "answer": "متن پاسخ"}]
-
-    اعتبارسنجی:
-      - هر آیتم باید دارای "question_id" و "answer" باشد
-      - هر question_id باید در لیست سوالات definition وجود داشته باشد
-      - تمام سوالات definition باید پاسخ داشته باشند
+    سریالایزر ارسال پاسخ و ثبت نهایی گزارش توسط زیردستی.
+    این سریالایزر وظیفه ثبت تاریخچه (لاگ) و غیرفعال‌سازی خودکار گزارشات مهلت‌دار را بر عهده دارد.
     """
     images                = ReportImageSerializer(many=True, read_only=True)
     submitted_by_username = serializers.CharField(source='submitted_by.username', read_only=True)
     definition_title      = serializers.CharField(source='definition.title',      read_only=True)
 
-    # فیلد نوشتنی برای ارسال تصاویر
+    # فیلد نوشتنی برای ارسال تصاویر به همراه گزارش (نمایش دقیق در Swagger)
     image_urls = serializers.ListField(
         child=serializers.DictField(),
         write_only=True,
         required=False,
-        help_text='لیستی از {"image_url": "...", "caption": "..."}'
+        help_text=(
+            'لیستی از تصاویر برای ضمیمه شدن به گزارش.\n\n'
+            'نمونه ساختار ارسالی:\n'
+            '```json\n'
+            '[\n'
+            '  {"image_url": "[https://example.com/img1.jpg](https://example.com/img1.jpg)", "caption": "توضیح عکس اول"},\n'
+            '  {"image_url": "[https://example.com/img2.jpg](https://example.com/img2.jpg)", "caption": "توضیح عکس دوم"}\n'
+            ']\n'
+            '```'
+        )
     )
 
     class Meta:
@@ -928,86 +931,106 @@ class ReportSubmissionSerializer(serializers.ModelSerializer):
             'images', 'image_urls',
         ]
         read_only_fields = ['id', 'submitted_by', 'submitted_at']
+        extra_kwargs = {
+            'answers': {
+                'help_text': (
+                    'آرایه‌ای از پاسخ‌ها برای سوالات مشخص شده در تعریف گزارش.\n\n'
+                    'نمونه ساختار ارسالی (فرانت‌اند فقط id و answer را می‌فرستد):\n'
+                    '```json\n'
+                    '[\n'
+                    '  {"question_id": "q1", "answer": "پاسخ اول"},\n'
+                    '  {"question_id": "q2", "answer": "پاسخ دوم"}\n'
+                    ']\n'
+                    '```\n'
+                    '**نکته لاگ‌گیری:** هنگام ذخیره در دیتابیس، بک‌اند به صورت خودکار متن دقیق سوال (`question_text`) را نیز به این JSON اضافه می‌کند تا تاریخچه گزارش همیشه و بدون وابستگی به سوالات اولیه خوانا بماند.'
+                )
+            }
+        }
 
     def validate_answers(self, value):
         """
-        اعتبارسنجی ساختار answers:
-        باید لیستی از {"question_id": "...", "answer": "..."} باشد.
+        بررسی اولیه ساختار فیلد answers (آرایه بودن و داشتن کلیدهای ضروری)
         """
         if not isinstance(value, list):
-            raise serializers.ValidationError(
-                "پاسخ‌ها باید به صورت لیست ارسال شوند."
-            )
+            raise serializers.ValidationError("پاسخ‌ها باید به صورت یک آرایه (لیست) ارسال شوند.")
 
         for idx, item in enumerate(value):
             if not isinstance(item, dict):
                 raise serializers.ValidationError(
-                    f"پاسخ شماره {idx + 1}: باید آبجکت باشد "
-                    f'(مثال: {{"question_id": "q1", "answer": "متن پاسخ"}}).'
+                    f"پاسخ شماره {idx + 1}: باید یک آبجکت (JSON) باشد."
                 )
             if 'question_id' not in item or not str(item.get('question_id', '')).strip():
                 raise serializers.ValidationError(
-                    f"پاسخ شماره {idx + 1}: فیلد «question_id» الزامی است."
+                    f"پاسخ شماره {idx + 1}: ارسال کلید «question_id» الزامی است."
                 )
             if 'answer' not in item:
                 raise serializers.ValidationError(
-                    f"پاسخ شماره {idx + 1}: فیلد «answer» الزامی است."
+                    f"پاسخ شماره {idx + 1}: ارسال کلید «answer» الزامی است."
                 )
 
         return value
 
     def validate(self, data):
+        """
+        بررسی لاجیک تجاری:
+        ۱. آیا کاربر دسترسی دارد؟
+        ۲. آیا به همه سوالات پاسخ داده شده است؟
+        ۳. تزریق متن سوال به پاسخ برای ایجاد لاگ دائمی و غیرقابل تغییر.
+        """
         request    = self.context.get('request')
         definition = data.get('definition') or (self.instance.definition if self.instance else None)
 
         if not definition:
             return data
 
-        # بررسی اینکه زیردستی مجاز باشد
+        # بررسی اینکه آیا کاربر ارسال کننده، همان زیردستی هدف است یا خیر (ادمین مستثنی است)
         if request and definition.subordinate != request.user:
             is_admin = request.user.is_superuser or any(
                 r.code == 'ADMIN' for r in request.user.roles.all()
             )
             if not is_admin:
                 raise serializers.ValidationError(
-                    "شما دسترسی ثبت پاسخ برای این گزارش را ندارید."
+                    "شما دسترسی ثبت پاسخ برای این گزارش را ندارید. این گزارش به کاربر دیگری ارجاع داده شده است."
                 )
 
-        # اعتبارسنجی اینکه پاسخ همه سوالات ارسال شده باشد
+        # اعتبارسنجی تطابق سوالات و پاسخ‌ها
         answers = data.get('answers', [])
         if answers is not None:
-            # استخراج id های سوالات موجود
-            valid_question_ids = {str(q['id']) for q in definition.questions}
-            answered_ids       = {str(a['question_id']) for a in answers}
+            # استخراج آیدی و متن سوالات اصلی برای مقایسه و تزریق
+            valid_questions = {str(q['id']): q['text'] for q in definition.questions}
+            answered_ids    = {str(a['question_id']) for a in answers}
 
-            # بررسی question_id های نامعتبر
-            invalid_ids = answered_ids - valid_question_ids
+            # ۱. بررسی question_id هایی که در فرم اصلی وجود ندارند
+            invalid_ids = answered_ids - set(valid_questions.keys())
             if invalid_ids:
                 raise serializers.ValidationError(
-                    {"answers": f"شناسه‌های سوال نامعتبر: {', '.join(sorted(invalid_ids))}"}
+                    {"answers": f"شناسه‌های سوال نامعتبر ارسال شده است: {', '.join(sorted(invalid_ids))}"}
                 )
 
-            # بررسی سوالات بی‌پاسخ
-            missing_ids = valid_question_ids - answered_ids
+            # ۲. بررسی سوالاتی که زیردستی به آن‌ها پاسخ نداده است
+            missing_ids = set(valid_questions.keys()) - answered_ids
             if missing_ids:
-                # پیدا کردن متن سوالات بی‌پاسخ برای پیام خطا
-                missing_texts = [
-                    q['text'] for q in definition.questions
-                    if str(q['id']) in missing_ids
-                ]
+                # پیدا کردن متن سوالات بی‌پاسخ برای نمایش بهتر خطای فارسی
+                missing_texts = [valid_questions[qid] for qid in missing_ids]
                 raise serializers.ValidationError(
-                    {"answers": f"پاسخ این سوالات ارسال نشده: {', '.join(missing_texts)}"}
+                    {"answers": f"شما به این سوالات پاسخ نداده‌اید: {', '.join(missing_texts)}"}
                 )
+
+            # 🔥 ۳. پیاده‌سازی لاگ دائمی:
+            # تزریق متن دقیق سوال به آبجکت پاسخ‌ها.
+            # با این کار اگر در آینده بالادستی نام سوال را در Definition عوض کرد، لاگ این گزارش قدیمی دست‌نخورده می‌ماند.
+            for a in answers:
+                # کلید جدیدی به نام question_text به JSON پاسخ در دیتابیس اضافه می‌شود
+                a['question_text'] = valid_questions[str(a['question_id'])]
 
         return data
 
     def _validate_image_urls(self, image_urls_data):
-        """اعتبارسنجی ساختار image_urls"""
+        """اعتبارسنجی ساختار لیست تصاویر"""
         for idx, img in enumerate(image_urls_data):
             if not isinstance(img, dict):
                 raise serializers.ValidationError(
-                    f"تصویر شماره {idx + 1}: باید آبجکت باشد "
-                    f'(مثال: {{"image_url": "https://...", "caption": "توضیح"}}).'
+                    f"تصویر شماره {idx + 1}: باید یک آبجکت باشد."
                 )
             if 'image_url' not in img or not str(img.get('image_url', '')).strip():
                 raise serializers.ValidationError(
@@ -1021,14 +1044,25 @@ class ReportSubmissionSerializer(serializers.ModelSerializer):
 
         self._validate_image_urls(image_urls_data)
 
+        # ساخت رکورد گزارش با پاسخ‌هایی که در متد validate دارای question_text شده‌اند
         submission = ReportSubmission.objects.create(**validated_data)
 
+        # ثبت عکس‌های ضمیمه
         for img in image_urls_data:
             ReportImage.objects.create(
                 submission=submission,
                 image_url=img.get('image_url', ''),
                 caption=img.get('caption', '')
             )
+            
+        # 🔥 بایگانی خودکار (Archiving)
+        # اگر گزارش از نوع مهلت‌دار (یک‌بار مصرف) است، پس از ارسال گزارش توسط زیردستی،
+        # گزارش اصلی (Definition) به صورت خودکار غیرفعال می‌شود تا از کارتابل زیردستی خارج شود،
+        # اما لاگ‌های آن در سیستم باقی می‌مانند.
+        if submission.definition.report_type == 'DEADLINE':
+            submission.definition.is_active = False
+            submission.definition.save()
+
         return submission
 
     @transaction.atomic
@@ -1039,6 +1073,7 @@ class ReportSubmissionSerializer(serializers.ModelSerializer):
             setattr(instance, attr, value)
         instance.save()
 
+        # بروزرسانی عکس‌های گزارش
         if image_urls_data is not None:
             self._validate_image_urls(image_urls_data)
             instance.images.all().delete()

@@ -757,6 +757,54 @@ class ReportDefinitionViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
             status=status.HTTP_200_OK
         )
 
+    @action(detail=True, methods=['post'], url_path='duplicate')
+    @transaction.atomic
+    def duplicate(self, request, pk=None):
+        """
+        ایجاد یک گزارش جدید (فعال) از روی لاگ گزارش قدیمی (استفاده مجدد از موضوع)
+        """
+        original_definition = self.get_object()
+        user = request.user
+
+        is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
+        if not is_admin and original_definition.superior != user:
+            return Response(
+                {"error": "شما دسترسی تکرار این گزارش را ندارید."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # امکان تغییر فرد زیردستی و مهلت در زمان کپی گرفتن وجود دارد
+        new_subordinate_id = request.data.get('subordinate', original_definition.subordinate_id)
+        new_deadline       = request.data.get('deadline')
+        new_title          = request.data.get('title', original_definition.title)
+
+        from core.models import CustomUser
+        try:
+            new_subordinate = CustomUser.objects.get(id=new_subordinate_id)
+        except CustomUser.DoesNotExist:
+            return Response({"error": "کاربر زیردستی یافت نشد."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not is_admin and not user.is_superior_to(new_subordinate):
+            return Response({"error": "شما بالادست کاربر انتخاب شده نیستید."}, status=status.HTTP_403_FORBIDDEN)
+
+        # ساخت گزارش جدید از روی الگوی قبلی
+        new_definition = ReportDefinition.objects.create(
+            superior=user,
+            subordinate=new_subordinate,
+            title=new_title,
+            report_type=original_definition.report_type,
+            interval=original_definition.interval,
+            deadline=new_deadline,
+            questions=original_definition.questions,
+            is_active=True # گزارش جدید فوراً فعال و در کارتابل زیردستی قرار می‌گیرد
+        )
+
+        serializer = self.get_serializer(new_definition)
+        return Response({
+            "message": "گزارش با موفقیت مجدداً ایجاد و به زیردستی ارجاع داده شد.",
+            "report": serializer.data
+        }, status=status.HTTP_201_CREATED)
+
 
 # ── Report Submission ─────────────────────────────────────────────────────────
 
