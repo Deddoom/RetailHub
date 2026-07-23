@@ -6,7 +6,7 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.db import transaction
-from django.db.models import ProtectedError, Q
+from django.db.models import ProtectedError, Q , F
 from django.utils import timezone
 from decimal import Decimal
 from datetime import date
@@ -117,7 +117,7 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     serializer_class = UserSerializer
 
     def get_permissions(self):
-        public_actions = ['subordinates', 'update_branch', 'complete_profile', 'supervisors']
+        public_actions = ['subordinates', 'update_branch', 'complete_profile', 'supervisors' , 'performance']
         if self.action in public_actions:
             return [permissions.IsAuthenticated()]
         return [IsAdminUser()]
@@ -193,6 +193,93 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         supervisors = CustomUser.objects.filter(roles__code='SUPERVISOR', is_active=True).distinct()
         serializer = self.get_serializer(supervisors, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['get'], url_path='performance')
+    def performance(self, request, pk=None):
+        """
+        دریافت آمار عملکرد کاربر (چک‌لیست‌ها، ماموریت‌ها و گزارش‌ها)
+        پارامتر period می‌تواند یکی از مقادیر daily, weekly, monthly باشد. (پیش‌فرض: daily)
+        """
+        user = self.get_object()
+        period = request.query_params.get('period', 'daily').lower()
+
+        now = timezone.now()
+        
+        # تعیین بازه زمانی بر اساس درخواست
+        if period == 'daily':
+            start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        elif period == 'weekly':
+            start_date = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=7)
+        elif period == 'monthly':
+            start_date = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=30)
+        else:
+            return Response(
+                {"error": "بازه زمانی نامعتبر است. مقادیر مجاز: daily, weekly, monthly"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        end_date = now + timedelta(days=1)
+
+        # ── ۱. آمار ماموریت‌ها (Missions) ──
+        total_missions = Mission.objects.filter(
+            assigned_to=user, 
+            created_at__gte=start_date, 
+            created_at__lte=end_date
+        ).count()
+        
+        completed_missions = Mission.objects.filter(
+            assigned_to=user, 
+            status='COMPLETED', 
+            updated_at__gte=start_date, 
+            updated_at__lte=end_date
+        ).count()
+
+        # ── ۲. آمار چک‌لیست‌ها (Checklists) ──
+        # از روی لاگ‌های ثبت شده بررسی می‌شود که آیا کل تسک‌های آن لاگ برابر با تسک‌های انجام شده است یا خیر
+        logs = ChecklistLog.objects.filter(
+            assigned_to=user, 
+            logged_at__gte=start_date, 
+            logged_at__lte=end_date
+        )
+        total_checklists = logs.count()
+        completed_checklists = logs.filter(
+            total_tasks=F('completed_tasks'), 
+            total_tasks__gt=0
+        ).count()
+
+        # ── ۳. آمار گزارش‌ها (Reports) ──
+        total_reports = ReportDefinition.objects.filter(
+            subordinate=user, 
+            created_at__gte=start_date, 
+            created_at__lte=end_date
+        ).count()
+        
+        submitted_reports = ReportSubmission.objects.filter(
+            submitted_by=user, 
+            submitted_at__gte=start_date, 
+            submitted_at__lte=end_date
+        ).count()
+
+        # ── خروجی نهایی ──
+        return Response({
+            "user_id": str(user.id),
+            "name": user.get_full_name() or user.username,
+            "period": period,
+            "stats": {
+                "missions": {
+                    "total": total_missions,
+                    "completed": completed_missions
+                },
+                "checklists": {
+                    "total": total_checklists,
+                    "completed": completed_checklists
+                },
+                "reports": {
+                    "total": total_reports,
+                    "submitted": submitted_reports
+                }
+            }
+        }, status=status.HTTP_200_OK)
 
 # ── Sellers ───────────────────────────────────────────────────────────────────
 
