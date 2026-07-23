@@ -696,6 +696,7 @@ class ReportDefinition(models.Model):
         ('DEADLINE',  'مهلت‌دار'),
     ]
     INTERVAL_CHOICES = [
+        ('DAILY',      'روزانه'),
         ('WEEKLY',     'هفتگی'),
         ('MONTHLY',    'ماهانه'),
         ('BIMONTHLY',  'دو ماهه'),
