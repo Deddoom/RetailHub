@@ -1124,6 +1124,7 @@ class BranchTransferSerializer(serializers.ModelSerializer):
     @transaction.atomic
     def create(self, validated_data):
         items_data = validated_data.pop('items')
+        validated_data['source_cashier'] = self.context['request'].user
         transfer   = BranchTransfer.objects.create(**validated_data)
         for item in items_data:
             TransferItem.objects.create(transfer=transfer, **item)

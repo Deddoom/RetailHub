@@ -117,7 +117,7 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     serializer_class = UserSerializer
 
     def get_permissions(self):
-        public_actions = ['subordinates', 'update_branch', 'complete_profile']
+        public_actions = ['subordinates', 'update_branch', 'complete_profile', 'supervisors']
         if self.action in public_actions:
             return [permissions.IsAuthenticated()]
         return [IsAdminUser()]
@@ -185,7 +185,14 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
             },
             status=status.HTTP_200_OK
         )
-
+    @action(detail=False, methods=['get'], url_path='supervisors')
+    def supervisors(self, request):
+        """
+        دریافت لیست تمامی کاربرانی که نقش سرپرست (SUPERVISOR) دارند
+        """
+        supervisors = CustomUser.objects.filter(roles__code='SUPERVISOR', is_active=True).distinct()
+        serializer = self.get_serializer(supervisors, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 # ── Sellers ───────────────────────────────────────────────────────────────────
 
@@ -585,7 +592,8 @@ class ClaimViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
             qs = Claim.objects.filter(
                 Q(created_by=user) |
                 Q(assigned_to=user) |
-                Q(created_by_id__in=subordinate_ids)
+                Q(created_by_id__in=subordinate_ids) |
+                Q(assigned_to_id__in=subordinate_ids)
             ).distinct().order_by('-created_at')
 
         status_param   = self.request.query_params.get('status')

@@ -13,19 +13,30 @@ class IsOwnerOrAdminOnly(permissions.BasePermission):
     def has_permission(self, request, view):
         return request.user and request.user.is_authenticated
 
-    def _is_admin(self, user):
-        return user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
+    def _is_admin_or_manager(self, user):
+        # اضافه شدن مدیران برای دسترسی خواندن
+        return user.is_superuser or any(
+            r.code in ['ADMIN', 'FINANCIAL_MANAGER', 'EXECUTIVE_MANAGER', 'SUPERVISOR'] 
+            for r in user.roles.all()
+        )
 
     def _is_cashier(self, user):
         return any(r.code == 'CASHIER' for r in user.roles.all())
 
     def has_object_permission(self, request, view, obj):
-        if self._is_admin(request.user):
-            return True
+        if self._is_admin_or_manager(request.user):
+            # مدیران فقط اجازه دیدن (SAFE_METHODS) دارند، مگر اینکه ادمین کل باشند
+            if request.method in permissions.SAFE_METHODS or any(r.code == 'ADMIN' for r in request.user.roles.all()):
+                return True
+
         if self._is_cashier(request.user):
             if request.method in permissions.SAFE_METHODS:
                 return True
+            # اجازه تسویه بیعانه به تمامی صندوقداران، اما ویرایش فرم‌های دیگر فقط توسط سازنده
+            if getattr(view, 'action', None) == 'settle':
+                return True
             return getattr(obj, 'created_by', None) == request.user
+            
         return False
 
 class IsSuperiorUser(permissions.BasePermission):
