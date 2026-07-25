@@ -917,10 +917,12 @@ class ReportSubmissionViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         definition_param = self.request.query_params.get('definition')
         from_date_param  = self.request.query_params.get('from_date')
         to_date_param    = self.request.query_params.get('to_date')
+        submitted_by_param = self.request.query_params.get('submitted_by')
 
         if definition_param: qs = qs.filter(definition_id=definition_param)
         if from_date_param:  qs = qs.filter(submitted_at__date__gte=from_date_param)
         if to_date_param:    qs = qs.filter(submitted_at__date__lte=to_date_param)
+        if submitted_by_param: qs = qs.filter(submitted_by_id=submitted_by_param)
 
         return qs.order_by('-submitted_at')
 
