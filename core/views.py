@@ -286,51 +286,79 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     def all_users_status(self, request):
         """
         لیست همه کاربران فعال سیستم با اطلاعات پایه و آمار عملکرد
-        قابل دسترس برای همه کاربران لاگین‌شده
+        امکان فیلتر بر اساس بازه زمانی (daily, weekly, monthly)
         """
         from django.db.models import Count, Q as DQ
+        from django.utils import timezone
+        from datetime import timedelta
 
+        # --- ۱. مدیریت پارامتر بازه زمانی ---
+        period = request.query_params.get('period')
+        now = timezone.now()
+        start_date = None
+        end_date = now + timedelta(days=1)
+
+        if period == 'daily':
+            start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        elif period == 'weekly':
+            start_date = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=7)
+        elif period == 'monthly':
+            start_date = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=30)
+        elif period:
+            return Response(
+                {"error": "بازه زمانی نامعتبر است. مقادیر مجاز: daily, weekly, monthly"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # --- ۲. ساخت شروط (Q Objects) برای فیلتر کردن آمارها در زمان مدنظر ---
+        mission_q = DQ()
+        completed_mission_q = DQ(missions__status='COMPLETED')
+        
+        task_q = DQ()
+        completed_task_q = DQ(assigned_checklists__tasks__is_completed=True)
+        
+        report_q = DQ()
+        submitted_report_q = DQ()
+
+        # اگر بازه زمانی ارسال شده بود، فیلترهای زمانی را به شرط‌ها اضافه می‌کنیم
+        if start_date:
+            mission_q &= DQ(missions__created_at__gte=start_date, missions__created_at__lte=end_date)
+            completed_mission_q &= DQ(missions__updated_at__gte=start_date, missions__updated_at__lte=end_date)
+            
+            task_q &= DQ(assigned_checklists__created_at__gte=start_date, assigned_checklists__created_at__lte=end_date)
+            completed_task_q &= DQ(assigned_checklists__tasks__completed_at__gte=start_date, assigned_checklists__tasks__completed_at__lte=end_date)
+            
+            report_q &= DQ(assigned_report_definitions__created_at__gte=start_date, assigned_report_definitions__created_at__lte=end_date)
+            submitted_report_q &= DQ(submitted_reports__submitted_at__gte=start_date, submitted_reports__submitted_at__lte=end_date)
+
+        # --- ۳. کوئری دیتابیس با استفاده از annotate ---
         users = (
             CustomUser.objects
             .filter(is_active=True)
             .prefetch_related('roles')
             .annotate(
-                total_missions=Count(
-                    'missions',
-                    distinct=True
-                ),
-                completed_missions=Count(
-                    'missions',
-                    filter=DQ(missions__status='COMPLETED'),
-                    distinct=True
-                ),
-                total_tasks=Count(
-                    'assigned_checklists__tasks',
-                    distinct=True
-                ),
-                completed_tasks=Count(
-                    'assigned_checklists__tasks',
-                    filter=DQ(assigned_checklists__tasks__is_completed=True),
-                    distinct=True
-                ),
-                total_reports=Count(
-                    'assigned_report_definitions',
-                    distinct=True
-                ),
-                submitted_reports=Count(
-                    'submitted_reports',
-                    distinct=True
-                ),
+                total_missions=Count('missions', filter=mission_q, distinct=True),
+                completed_missions=Count('missions', filter=completed_mission_q, distinct=True),
+                
+                total_tasks=Count('assigned_checklists__tasks', filter=task_q, distinct=True),
+                completed_tasks=Count('assigned_checklists__tasks', filter=completed_task_q, distinct=True),
+                
+                total_reports=Count('assigned_report_definitions', filter=report_q, distinct=True),
+                submitted_reports=Count('submitted_reports', filter=submitted_report_q, distinct=True),
             )
             .order_by('branch', 'first_name')
         )
 
+        # --- ۴. فیلترهای شعبه و نقش ---
         branch_param = request.query_params.get('branch')
         role_param   = request.query_params.get('role')
 
-        if branch_param: users = users.filter(branch=branch_param)
-        if role_param:   users = users.filter(roles__code=role_param).distinct()
+        if branch_param: 
+            users = users.filter(branch=branch_param)
+        if role_param:   
+            users = users.filter(roles__code=role_param).distinct()
 
+        # --- ۵. آماده‌سازی خروجی JSON ---
         data = [
             {
                 "id":         str(u.id),
