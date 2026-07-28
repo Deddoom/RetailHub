@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import datetime
+from datetime import timedelta
 from rest_framework import viewsets, status, permissions, filters
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
@@ -908,21 +909,26 @@ class ReportSubmissionViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
                 'definition', 'submitted_by'
             ).prefetch_related('images').all()
         else:
+            # بالادستی می‌تونه گزارش‌های همه زیردستانش رو ببینه
+            subordinate_ids = [u.id for u in user.get_all_subordinates()]
+
             qs = ReportSubmission.objects.select_related(
                 'definition', 'submitted_by'
             ).prefetch_related('images').filter(
-                Q(definition__superior=user) | Q(submitted_by=user)
+                Q(definition__superior=user) |
+                Q(submitted_by=user) |
+                Q(submitted_by_id__in=subordinate_ids)
             ).distinct()
 
-        definition_param = self.request.query_params.get('definition')
-        from_date_param  = self.request.query_params.get('from_date')
-        to_date_param    = self.request.query_params.get('to_date')
+        definition_param   = self.request.query_params.get('definition')
+        from_date_param    = self.request.query_params.get('from_date')
+        to_date_param      = self.request.query_params.get('to_date')
         submitted_by_param = self.request.query_params.get('submitted_by')
 
-        if definition_param: qs = qs.filter(definition_id=definition_param)
-        if from_date_param:  qs = qs.filter(submitted_at__date__gte=from_date_param)
-        if to_date_param:    qs = qs.filter(submitted_at__date__lte=to_date_param)
-        if submitted_by_param: qs = qs.filter(submitted_by_id=submitted_by_param)
+        if definition_param:    qs = qs.filter(definition_id=definition_param)
+        if from_date_param:     qs = qs.filter(submitted_at__date__gte=from_date_param)
+        if to_date_param:       qs = qs.filter(submitted_at__date__lte=to_date_param)
+        if submitted_by_param:  qs = qs.filter(submitted_by_id=submitted_by_param)
 
         return qs.order_by('-submitted_at')
 
