@@ -118,7 +118,7 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     serializer_class = UserSerializer
 
     def get_permissions(self):
-        public_actions = ['subordinates', 'update_branch', 'complete_profile', 'supervisors' , 'performance']
+        public_actions = ['subordinates', 'update_branch', 'complete_profile', 'supervisors' , 'performance' , 'all_users_status']
         if self.action in public_actions:
             return [permissions.IsAuthenticated()]
         return [IsAdminUser()]
@@ -281,6 +281,84 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
                 }
             }
         }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], url_path='all-users-status')
+    def all_users_status(self, request):
+        """
+        لیست همه کاربران فعال سیستم با اطلاعات پایه و آمار عملکرد
+        قابل دسترس برای همه کاربران لاگین‌شده
+        """
+        from django.db.models import Count, Q as DQ
+
+        users = (
+            CustomUser.objects
+            .filter(is_active=True)
+            .prefetch_related('roles')
+            .annotate(
+                total_missions=Count(
+                    'missions',
+                    distinct=True
+                ),
+                completed_missions=Count(
+                    'missions',
+                    filter=DQ(missions__status='COMPLETED'),
+                    distinct=True
+                ),
+                total_tasks=Count(
+                    'assigned_checklists__tasks',
+                    distinct=True
+                ),
+                completed_tasks=Count(
+                    'assigned_checklists__tasks',
+                    filter=DQ(assigned_checklists__tasks__is_completed=True),
+                    distinct=True
+                ),
+                total_reports=Count(
+                    'assigned_report_definitions',
+                    distinct=True
+                ),
+                submitted_reports=Count(
+                    'submitted_reports',
+                    distinct=True
+                ),
+            )
+            .order_by('branch', 'first_name')
+        )
+
+        branch_param = request.query_params.get('branch')
+        role_param   = request.query_params.get('role')
+
+        if branch_param: users = users.filter(branch=branch_param)
+        if role_param:   users = users.filter(roles__code=role_param).distinct()
+
+        data = [
+            {
+                "id":         str(u.id),
+                "username":   u.username,
+                "first_name": u.first_name,
+                "last_name":  u.last_name,
+                "full_name":  u.get_full_name() or u.username,
+                "branch":     u.branch,
+                "roles":      [{"code": r.code, "display": r.get_code_display()} for r in u.roles.all()],
+                "is_active":  u.is_active,
+                "stats": {
+                    "missions": {
+                        "total":     u.total_missions,
+                        "completed": u.completed_missions,
+                    },
+                    "tasks": {
+                        "total":     u.total_tasks,
+                        "completed": u.completed_tasks,
+                    },
+                    "reports": {
+                        "total":     u.total_reports,
+                        "submitted": u.submitted_reports,
+                    },
+                },
+            }
+            for u in users
+        ]
+        return Response(data, status=status.HTTP_200_OK)
 
 # ── Sellers ───────────────────────────────────────────────────────────────────
 
