@@ -23,7 +23,7 @@ from core.models import (
     Claim, ClaimFollowUp, DamageRegistration, ReturnRequest,
     ReportDefinition, ReportSubmission,
     BranchTransfer, TransferItem, TransferLog,
-    WasteReport, WasteItem,
+    WasteReport, WasteItem, UserOnlineLog,
 )
 from core.serializers import (
     UserSerializer,
@@ -282,20 +282,52 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
             }
         }, status=status.HTTP_200_OK)
 
+    @action(detail=False, methods=['post'], url_path='mark-online')
+    def mark_online(self, request):
+        """
+        API برای اعلام آنلاین شدن کاربر در اپلیکیشن
+        فرانت‌اند باید بدنه زیر را POST کند: {"status": 1}
+        """
+        status_val = request.data.get('status')
+        if str(status_val) != '1':
+            return Response(
+                {"error": "برای ثبت حضور، فیلد status باید مقدار 1 داشته باشد."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        from django.utils import timezone
+        now = timezone.now()
+        today = now.date()
+
+        # get_or_create: اگر رکوردی برای امروز این کاربر نبود، می‌سازد. 
+        # اگر بود، فقط آپدیتش می‌کند (به کمک last_seen که auto_now است).
+        log, created = UserOnlineLog.objects.get_or_create(
+            user=request.user,
+            date=today,
+            defaults={'first_seen': now}
+        )
+        
+        # اگر رکورد از قبل وجود داشت (کاربر امروز قبلا هم آنلاین شده بود)، ساعت آخرین بازدید را آپدیت می‌کنیم
+        if not created:
+            log.save() # فیلد last_seen به صورت خودکار به لحظه فعلی آپدیت می‌شود
+
+        return Response(
+            {"message": "وضعیت آنلاین شما برای امروز ثبت شد.", "date": str(today), "time": now.strftime("%H:%M")},
+            status=status.HTTP_200_OK
+        )
+
     @action(detail=False, methods=['get'], url_path='all-users-status')
     def all_users_status(self, request):
         """
-        لیست همه کاربران فعال سیستم با اطلاعات پایه و آمار عملکرد
-        امکان فیلتر بر اساس بازه زمانی (daily, weekly, monthly)
-        رفع قطعی ارور ۵۰۰ با استفاده از معماری Data Stitching به جای JOINهای تو در تو
+        لیست همه کاربران فعال سیستم با اطلاعات پایه، آمار عملکرد و وضعیت آنلاین بودن
         """
         from django.db.models import Count, F
         from django.utils import timezone
         from datetime import timedelta
 
-        # --- ۱. مدیریت پارامتر بازه زمانی ---
         period = request.query_params.get('period')
         now = timezone.now()
+        today_date = now.date()
         start_date = None
         end_date = now + timedelta(days=1)
 
@@ -306,65 +338,88 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         elif period == 'monthly':
             start_date = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=30)
         elif period:
-            return Response(
-                {"error": "بازه زمانی نامعتبر است. مقادیر مجاز: daily, weekly, monthly"}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({"error": "بازه زمانی نامعتبر است."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # --- ۲. گرفتن لیست کاربران با فیلتر نقش و شعبه ---
         users_qs = CustomUser.objects.filter(is_active=True).prefetch_related('roles').order_by('branch', 'first_name')
         
         branch_param = request.query_params.get('branch')
         role_param   = request.query_params.get('role')
 
-        if branch_param: 
-            users_qs = users_qs.filter(branch=branch_param)
-        if role_param:   
-            users_qs = users_qs.filter(roles__code=role_param).distinct()
+        if branch_param: users_qs = users_qs.filter(branch=branch_param)
+        if role_param:   users_qs = users_qs.filter(roles__code=role_param).distinct()
 
-        # استخراج آیدی تمامی کاربران یافت‌شده
         users = list(users_qs)
         user_ids = [u.id for u in users]
 
         if not user_ids:
             return Response([], status=status.HTTP_200_OK)
 
-        # --- ۳. ساخت کوئری‌های خام و سبک برای شمارش (جلوگیری از Cartesian Product) ---
         missions_tot_qs = Mission.objects.filter(assigned_to_id__in=user_ids)
         missions_com_qs = Mission.objects.filter(assigned_to_id__in=user_ids, status='COMPLETED')
-        
         checklists_tot_qs = ChecklistLog.objects.filter(assigned_to_id__in=user_ids)
         checklists_com_qs = ChecklistLog.objects.filter(assigned_to_id__in=user_ids, total_tasks=F('completed_tasks'), total_tasks__gt=0)
-        
         reports_tot_qs = ReportDefinition.objects.filter(subordinate_id__in=user_ids)
         reports_sub_qs = ReportSubmission.objects.filter(submitted_by_id__in=user_ids)
 
-        # اعمال فیلترهای زمانی (در صورت وجود)
         if start_date:
             missions_tot_qs = missions_tot_qs.filter(created_at__gte=start_date, created_at__lte=end_date)
             missions_com_qs = missions_com_qs.filter(updated_at__gte=start_date, updated_at__lte=end_date)
-            
             checklists_tot_qs = checklists_tot_qs.filter(logged_at__gte=start_date, logged_at__lte=end_date)
             checklists_com_qs = checklists_com_qs.filter(logged_at__gte=start_date, logged_at__lte=end_date)
-            
             reports_tot_qs = reports_tot_qs.filter(created_at__gte=start_date, created_at__lte=end_date)
             reports_sub_qs = reports_sub_qs.filter(submitted_at__gte=start_date, submitted_at__lte=end_date)
 
-        # --- ۴. اجرای گروپ‌بای در دیتابیس و تبدیل سریع به دیکشنری {user_id: count} ---
-        # نکته حیاتی: .order_by() خالی الزامی است تا دیفالت‌اوردرِ مدل‌ها (مثل لاگ‌ها) باعث خراب شدن نتیجه و شمارش نشود
-        missions_total     = dict(missions_tot_qs.order_by().values_list('assigned_to_id').annotate(c=Count('id')))
+        missions_total = dict(missions_tot_qs.order_by().values_list('assigned_to_id').annotate(c=Count('id')))
         missions_completed = dict(missions_com_qs.order_by().values_list('assigned_to_id').annotate(c=Count('id')))
-        
-        checklists_total     = dict(checklists_tot_qs.order_by().values_list('assigned_to_id').annotate(c=Count('id')))
+        checklists_total = dict(checklists_tot_qs.order_by().values_list('assigned_to_id').annotate(c=Count('id')))
         checklists_completed = dict(checklists_com_qs.order_by().values_list('assigned_to_id').annotate(c=Count('id')))
-        
-        reports_total     = dict(reports_tot_qs.order_by().values_list('subordinate_id').annotate(c=Count('id')))
+        reports_total = dict(reports_tot_qs.order_by().values_list('subordinate_id').annotate(c=Count('id')))
         reports_submitted = dict(reports_sub_qs.order_by().values_list('submitted_by_id').annotate(c=Count('id')))
 
-        # --- ۵. چسباندن داده‌ها به هر کاربر در پایتون (سریع‌ترین حالت) ---
+        # --- واکشی لاگ آنلاین بودن کاربران در ۷ روز گذشته ---
+        seven_days_ago = today_date - timedelta(days=6)
+        online_logs_qs = UserOnlineLog.objects.filter(
+            user_id__in=user_ids,
+            date__gte=seven_days_ago,
+            date__lte=today_date
+        ).values('user_id', 'date', 'last_seen')
+
+        from collections import defaultdict
+        user_online_logs = defaultdict(dict)
+        for log in online_logs_qs:
+            user_online_logs[log['user_id']][log['date']] = log['last_seen']
+
+        # ساخت لیست ۷ روز اخیر (از امروز به سمت گذشته)
+        last_7_days = [today_date - timedelta(days=i) for i in range(7)]
+
         data = []
         for u in users:
             uid = u.id
+            u_logs = user_online_logs.get(uid, {})
+            
+            # --- محاسبه وضعیت حضور غیاب ۷ روزه ---
+            weekly_log = []
+            online_count = 0
+            is_online_today = False
+            
+            for d in last_7_days:
+                if d in u_logs:
+                    local_time = timezone.localtime(u_logs[d])
+                    weekly_log.append({
+                        "date": str(d),
+                        "status": "آنلاین",
+                        "time": local_time.strftime("%H:%M") # زمان دقیق آنلاین شدن در آن روز
+                    })
+                    online_count += 1
+                    if d == today_date:
+                        is_online_today = True
+                else:
+                    weekly_log.append({
+                        "date": str(d),
+                        "status": "آفلاین",
+                        "time": None
+                    })
+
             data.append({
                 "id":         str(uid),
                 "username":   u.username,
@@ -374,6 +429,12 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
                 "branch":     u.branch,
                 "roles":      [{"code": r.code, "display": r.get_code_display()} for r in u.roles.all()],
                 "is_active":  u.is_active,
+                "attendance": {
+                    "is_online_today": is_online_today,
+                    "status_text": "امروز آنلاین شده" if is_online_today else "امروز آنلاین نشده",
+                    "weekly_score": f"{online_count}/7",
+                    "weekly_log": weekly_log
+                },
                 "stats": {
                     "missions": {
                         "total":     missions_total.get(uid, 0),

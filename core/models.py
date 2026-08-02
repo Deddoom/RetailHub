@@ -926,3 +926,20 @@ class WasteItem(models.Model):
  
     def __str__(self):
         return f"{self.item_name} × {self.quantity}"
+
+# ── UserOnlineLog (لاگ آنلاین شدن کاربران) ────────────────────────────────────
+class UserOnlineLog(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    user = models.ForeignKey(
+        CustomUser, on_delete=models.CASCADE, related_name='online_logs', verbose_name="کاربر"
+    )
+    date = models.DateField(verbose_name="تاریخ")
+    first_seen = models.DateTimeField(auto_now_add=True, verbose_name="اولین بازدید روز")
+    last_seen = models.DateTimeField(auto_now=True, verbose_name="آخرین بازدید روز")
+
+    class Meta:
+        unique_together = ('user', 'date') # هر کاربر در هر روز فقط یک رکورد دارد
+        ordering = ['-date']
+
+    def __str__(self):
+        return f"{self.user.username} - {self.date}"
