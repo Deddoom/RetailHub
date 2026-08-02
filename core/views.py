@@ -340,51 +340,59 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
             return Response({"error": "بازه زمانی نامعتبر است."}, status=status.HTTP_400_BAD_REQUEST)
 
         users_qs = CustomUser.objects.filter(is_active=True).prefetch_related('roles').order_by('branch', 'first_name')
-    
+
         branch_param = request.query_params.get('branch')
         role_param   = request.query_params.get('role')
 
         if branch_param: users_qs = users_qs.filter(branch=branch_param)
         if role_param:   users_qs = users_qs.filter(roles__code=role_param).distinct()
 
-        users = list(users_qs)
+        users    = list(users_qs)
         user_ids = [u.id for u in users]
 
         if not user_ids:
             return Response([], status=status.HTTP_200_OK)
 
-        # ── Querysetهای پایه ──
+        # ── تابع کمکی برای aggregation صحیح ──────────────────────────────────
+        def _agg(qs, group_field):
+            return {
+                str(x[group_field]): x['c']
+                for x in qs.order_by().values(group_field).annotate(c=Count('id'))
+                if x[group_field] is not None
+            }
+
+        # ── Querysetهای پایه ──────────────────────────────────────────────────
         missions_tot_qs    = Mission.objects.filter(assigned_to_id__in=user_ids)
         missions_com_qs    = Mission.objects.filter(assigned_to_id__in=user_ids, status='COMPLETED')
         checklists_tot_qs  = ChecklistLog.objects.filter(assigned_to_id__in=user_ids)
-        checklists_com_qs  = ChecklistLog.objects.filter(assigned_to_id__in=user_ids, total_tasks=F('completed_tasks'), total_tasks__gt=0)
-        reports_tot_qs     = ReportSubmission.objects.filter(submitted_by_id__in=user_ids)  # ✅ اصلاح شد
+        checklists_com_qs  = ChecklistLog.objects.filter(
+            assigned_to_id__in=user_ids,
+            total_tasks=F('completed_tasks'),
+            total_tasks__gt=0
+        )
+        # reports: تعداد تعریف‌های فعال برای هر کاربر (باید ارسال میکرد)
+        reports_def_qs     = ReportDefinition.objects.filter(subordinate_id__in=user_ids, is_active=True)
+        # reports: تعداد گزارش‌هایی که واقعاً ارسال شده
         reports_sub_qs     = ReportSubmission.objects.filter(submitted_by_id__in=user_ids)
 
-        # ── اعمال فیلتر زمانی ──
+        # ── اعمال فیلتر زمانی ────────────────────────────────────────────────
         if start_date:
-            missions_tot_qs   = missions_tot_qs.filter(created_at__gte=start_date, created_at__lte=end_date)
-            missions_com_qs   = missions_com_qs.filter(updated_at__gte=start_date, updated_at__lte=end_date)
+            missions_tot_qs   = missions_tot_qs.filter(created_at__gte=start_date,  created_at__lte=end_date)
+            missions_com_qs   = missions_com_qs.filter(updated_at__gte=start_date,  updated_at__lte=end_date)
             checklists_tot_qs = checklists_tot_qs.filter(logged_at__gte=start_date, logged_at__lte=end_date)
             checklists_com_qs = checklists_com_qs.filter(logged_at__gte=start_date, logged_at__lte=end_date)
-            reports_tot_qs    = reports_tot_qs.filter(submitted_at__gte=start_date, submitted_at__lte=end_date)
+            reports_def_qs    = reports_def_qs.filter(created_at__gte=start_date,   created_at__lte=end_date)
             reports_sub_qs    = reports_sub_qs.filter(submitted_at__gte=start_date, submitted_at__lte=end_date)
 
-        # ✅ باگ اصلی رفع شد: استفاده از values() + dict comprehension به جای values_list() + annotate()
-        def _agg(qs, group_field):
-            return {
-                x[group_field]: x['c']
-                for x in qs.order_by().values(group_field).annotate(c=Count('id'))
-            }
+        # ── ساخت dictهای آمار با str(uuid) به عنوان key ──────────────────────
+        missions_total       = _agg(missions_tot_qs,   'assigned_to_id')
+        missions_completed   = _agg(missions_com_qs,   'assigned_to_id')
+        checklists_total     = _agg(checklists_tot_qs,  'assigned_to_id')
+        checklists_completed = _agg(checklists_com_qs,  'assigned_to_id')
+        reports_total        = _agg(reports_def_qs,     'subordinate_id')
+        reports_submitted    = _agg(reports_sub_qs,     'submitted_by_id')
 
-        missions_total      = _agg(missions_tot_qs,   'assigned_to_id')
-        missions_completed  = _agg(missions_com_qs,   'assigned_to_id')
-        checklists_total    = _agg(checklists_tot_qs,  'assigned_to_id')
-        checklists_completed= _agg(checklists_com_qs,  'assigned_to_id')
-        reports_total       = _agg(reports_tot_qs,     'submitted_by_id')  # ✅ اصلاح شد
-        reports_submitted   = _agg(reports_sub_qs,     'submitted_by_id')
-
-        # ── لاگ آنلاین بودن (۷ روز گذشته) ──
+        # ── لاگ آنلاین بودن (۷ روز گذشته) ───────────────────────────────────
         seven_days_ago = today_date - timedelta(days=6)
         online_logs_qs = UserOnlineLog.objects.filter(
             user_id__in=user_ids,
@@ -400,10 +408,11 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
 
         data = []
         for u in users:
-            uid   = u.id
-            u_logs = user_online_logs.get(uid, {})
+            uid     = u.id
+            uid_str = str(uid)
+            u_logs  = user_online_logs.get(uid, {})
 
-            weekly_log = []
+            weekly_log      = []
             online_count    = 0
             is_online_today = False
 
@@ -422,7 +431,7 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
                     weekly_log.append({"date": str(d), "status": "آفلاین", "time": None})
 
             data.append({
-                "id":         str(uid),
+                "id":         uid_str,
                 "username":   u.username,
                 "first_name": u.first_name,
                 "last_name":  u.last_name,
@@ -438,16 +447,16 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
                 },
                 "stats": {
                     "missions": {
-                        "total":     missions_total.get(uid, 0),
-                        "completed": missions_completed.get(uid, 0),
+                        "total":     missions_total.get(uid_str, 0),
+                        "completed": missions_completed.get(uid_str, 0),
                     },
                     "checklists": {
-                        "total":     checklists_total.get(uid, 0),
-                        "completed": checklists_completed.get(uid, 0),
+                        "total":     checklists_total.get(uid_str, 0),
+                        "completed": checklists_completed.get(uid_str, 0),
                     },
                     "reports": {
-                        "total":     reports_total.get(uid, 0),
-                        "submitted": reports_submitted.get(uid, 0),
+                        "total":     reports_total.get(uid_str, 0),
+                        "submitted": reports_submitted.get(uid_str, 0),
                     },
                 },
             })
