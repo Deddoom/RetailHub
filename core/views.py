@@ -287,10 +287,12 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         """
         لیست همه کاربران فعال سیستم با اطلاعات پایه و آمار عملکرد
         امکان فیلتر بر اساس بازه زمانی (daily, weekly, monthly)
+        رفع باگ تکثیر Join با استفاده از ChecklistLog
         """
-        from django.db.models import Count, Q as DQ
+        from django.db.models import Count, F
         from django.utils import timezone
         from datetime import timedelta
+        # توجه: شیء Q قبلاً در بالای فایل views.py ایمپورت شده است
 
         # --- ۱. مدیریت پارامتر بازه زمانی ---
         period = request.query_params.get('period')
@@ -310,26 +312,30 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # --- ۲. ساخت شروط (Q Objects) برای فیلتر کردن آمارها در زمان مدنظر ---
-        mission_q = DQ()
-        completed_mission_q = DQ(missions__status='COMPLETED')
+        # --- ۲. ساخت شروط (Q Objects) ---
+        mission_q = Q()
+        completed_mission_q = Q(missions__status='COMPLETED')
         
-        task_q = DQ()
-        completed_task_q = DQ(assigned_checklists__tasks__is_completed=True)
+        # استفاده از ChecklistLog (با related_name='checklist_logs_assigned')
+        checklist_q = Q()
+        completed_checklist_q = Q(
+            checklist_logs_assigned__total_tasks=F('checklist_logs_assigned__completed_tasks'),
+            checklist_logs_assigned__total_tasks__gt=0
+        )
         
-        report_q = DQ()
-        submitted_report_q = DQ()
+        report_q = Q()
+        submitted_report_q = Q()
 
-        # اگر بازه زمانی ارسال شده بود، فیلترهای زمانی را به شرط‌ها اضافه می‌کنیم
+        # اعمال فیلتر زمانی در صورت وجود
         if start_date:
-            mission_q &= DQ(missions__created_at__gte=start_date, missions__created_at__lte=end_date)
-            completed_mission_q &= DQ(missions__updated_at__gte=start_date, missions__updated_at__lte=end_date)
+            mission_q &= Q(missions__created_at__gte=start_date, missions__created_at__lte=end_date)
+            completed_mission_q &= Q(missions__updated_at__gte=start_date, missions__updated_at__lte=end_date)
             
-            task_q &= DQ(assigned_checklists__created_at__gte=start_date, assigned_checklists__created_at__lte=end_date)
-            completed_task_q &= DQ(assigned_checklists__tasks__completed_at__gte=start_date, assigned_checklists__tasks__completed_at__lte=end_date)
+            checklist_q &= Q(checklist_logs_assigned__logged_at__gte=start_date, checklist_logs_assigned__logged_at__lte=end_date)
+            completed_checklist_q &= Q(checklist_logs_assigned__logged_at__gte=start_date, checklist_logs_assigned__logged_at__lte=end_date)
             
-            report_q &= DQ(assigned_report_definitions__created_at__gte=start_date, assigned_report_definitions__created_at__lte=end_date)
-            submitted_report_q &= DQ(submitted_reports__submitted_at__gte=start_date, submitted_reports__submitted_at__lte=end_date)
+            report_q &= Q(assigned_report_definitions__created_at__gte=start_date, assigned_report_definitions__created_at__lte=end_date)
+            submitted_report_q &= Q(submitted_reports__submitted_at__gte=start_date, submitted_reports__submitted_at__lte=end_date)
 
         # --- ۳. کوئری دیتابیس با استفاده از annotate ---
         users = (
@@ -340,8 +346,9 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
                 total_missions=Count('missions', filter=mission_q, distinct=True),
                 completed_missions=Count('missions', filter=completed_mission_q, distinct=True),
                 
-                total_tasks=Count('assigned_checklists__tasks', filter=task_q, distinct=True),
-                completed_tasks=Count('assigned_checklists__tasks', filter=completed_task_q, distinct=True),
+                # خواندن آمار چک‌لیست‌ها از روی لاگ‌های تکمیل‌شده
+                total_checklists=Count('checklist_logs_assigned', filter=checklist_q, distinct=True),
+                completed_checklists=Count('checklist_logs_assigned', filter=completed_checklist_q, distinct=True),
                 
                 total_reports=Count('assigned_report_definitions', filter=report_q, distinct=True),
                 submitted_reports=Count('submitted_reports', filter=submitted_report_q, distinct=True),
@@ -374,9 +381,9 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
                         "total":     u.total_missions,
                         "completed": u.completed_missions,
                     },
-                    "tasks": {
-                        "total":     u.total_tasks,
-                        "completed": u.completed_tasks,
+                    "checklists": {
+                        "total":     u.total_checklists,
+                        "completed": u.completed_checklists,
                     },
                     "reports": {
                         "total":     u.total_reports,
