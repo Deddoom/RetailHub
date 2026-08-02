@@ -287,12 +287,11 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         """
         لیست همه کاربران فعال سیستم با اطلاعات پایه و آمار عملکرد
         امکان فیلتر بر اساس بازه زمانی (daily, weekly, monthly)
-        رفع باگ تکثیر Join با استفاده از ChecklistLog
+        رفع قطعی ارور ۵۰۰ با استفاده از معماری Data Stitching به جای JOINهای تو در تو
         """
         from django.db.models import Count, F
         from django.utils import timezone
         from datetime import timedelta
-        # توجه: شیء Q قبلاً در بالای فایل views.py ایمپورت شده است
 
         # --- ۱. مدیریت پارامتر بازه زمانی ---
         period = request.query_params.get('period')
@@ -312,63 +311,62 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # --- ۲. ساخت شروط (Q Objects) ---
-        mission_q = Q()
-        completed_mission_q = Q(missions__status='COMPLETED')
+        # --- ۲. گرفتن لیست کاربران با فیلتر نقش و شعبه ---
+        users_qs = CustomUser.objects.filter(is_active=True).prefetch_related('roles').order_by('branch', 'first_name')
         
-        # استفاده از ChecklistLog (با related_name='checklist_logs_assigned')
-        checklist_q = Q()
-        completed_checklist_q = Q(
-            checklist_logs_assigned__total_tasks=F('checklist_logs_assigned__completed_tasks'),
-            checklist_logs_assigned__total_tasks__gt=0
-        )
-        
-        report_q = Q()
-        submitted_report_q = Q()
-
-        # اعمال فیلتر زمانی در صورت وجود
-        if start_date:
-            mission_q &= Q(missions__created_at__gte=start_date, missions__created_at__lte=end_date)
-            completed_mission_q &= Q(missions__updated_at__gte=start_date, missions__updated_at__lte=end_date)
-            
-            checklist_q &= Q(checklist_logs_assigned__logged_at__gte=start_date, checklist_logs_assigned__logged_at__lte=end_date)
-            completed_checklist_q &= Q(checklist_logs_assigned__logged_at__gte=start_date, checklist_logs_assigned__logged_at__lte=end_date)
-            
-            report_q &= Q(assigned_report_definitions__created_at__gte=start_date, assigned_report_definitions__created_at__lte=end_date)
-            submitted_report_q &= Q(submitted_reports__submitted_at__gte=start_date, submitted_reports__submitted_at__lte=end_date)
-
-        # --- ۳. کوئری دیتابیس با استفاده از annotate ---
-        users = (
-            CustomUser.objects
-            .filter(is_active=True)
-            .prefetch_related('roles')
-            .annotate(
-                total_missions=Count('missions', filter=mission_q, distinct=True),
-                completed_missions=Count('missions', filter=completed_mission_q, distinct=True),
-                
-                # خواندن آمار چک‌لیست‌ها از روی لاگ‌های تکمیل‌شده
-                total_checklists=Count('checklist_logs_assigned', filter=checklist_q, distinct=True),
-                completed_checklists=Count('checklist_logs_assigned', filter=completed_checklist_q, distinct=True),
-                
-                total_reports=Count('assigned_report_definitions', filter=report_q, distinct=True),
-                submitted_reports=Count('submitted_reports', filter=submitted_report_q, distinct=True),
-            )
-            .order_by('branch', 'first_name')
-        )
-
-        # --- ۴. فیلترهای شعبه و نقش ---
         branch_param = request.query_params.get('branch')
         role_param   = request.query_params.get('role')
 
         if branch_param: 
-            users = users.filter(branch=branch_param)
+            users_qs = users_qs.filter(branch=branch_param)
         if role_param:   
-            users = users.filter(roles__code=role_param).distinct()
+            users_qs = users_qs.filter(roles__code=role_param).distinct()
 
-        # --- ۵. آماده‌سازی خروجی JSON ---
-        data = [
-            {
-                "id":         str(u.id),
+        # استخراج آیدی تمامی کاربران یافت‌شده
+        users = list(users_qs)
+        user_ids = [u.id for u in users]
+
+        if not user_ids:
+            return Response([], status=status.HTTP_200_OK)
+
+        # --- ۳. ساخت کوئری‌های خام و سبک برای شمارش (جلوگیری از Cartesian Product) ---
+        missions_tot_qs = Mission.objects.filter(assigned_to_id__in=user_ids)
+        missions_com_qs = Mission.objects.filter(assigned_to_id__in=user_ids, status='COMPLETED')
+        
+        checklists_tot_qs = ChecklistLog.objects.filter(assigned_to_id__in=user_ids)
+        checklists_com_qs = ChecklistLog.objects.filter(assigned_to_id__in=user_ids, total_tasks=F('completed_tasks'), total_tasks__gt=0)
+        
+        reports_tot_qs = ReportDefinition.objects.filter(subordinate_id__in=user_ids)
+        reports_sub_qs = ReportSubmission.objects.filter(submitted_by_id__in=user_ids)
+
+        # اعمال فیلترهای زمانی (در صورت وجود)
+        if start_date:
+            missions_tot_qs = missions_tot_qs.filter(created_at__gte=start_date, created_at__lte=end_date)
+            missions_com_qs = missions_com_qs.filter(updated_at__gte=start_date, updated_at__lte=end_date)
+            
+            checklists_tot_qs = checklists_tot_qs.filter(logged_at__gte=start_date, logged_at__lte=end_date)
+            checklists_com_qs = checklists_com_qs.filter(logged_at__gte=start_date, logged_at__lte=end_date)
+            
+            reports_tot_qs = reports_tot_qs.filter(created_at__gte=start_date, created_at__lte=end_date)
+            reports_sub_qs = reports_sub_qs.filter(submitted_at__gte=start_date, submitted_at__lte=end_date)
+
+        # --- ۴. اجرای گروپ‌بای در دیتابیس و تبدیل سریع به دیکشنری {user_id: count} ---
+        # نکته حیاتی: .order_by() خالی الزامی است تا دیفالت‌اوردرِ مدل‌ها (مثل لاگ‌ها) باعث خراب شدن نتیجه و شمارش نشود
+        missions_total     = dict(missions_tot_qs.order_by().values_list('assigned_to_id').annotate(c=Count('id')))
+        missions_completed = dict(missions_com_qs.order_by().values_list('assigned_to_id').annotate(c=Count('id')))
+        
+        checklists_total     = dict(checklists_tot_qs.order_by().values_list('assigned_to_id').annotate(c=Count('id')))
+        checklists_completed = dict(checklists_com_qs.order_by().values_list('assigned_to_id').annotate(c=Count('id')))
+        
+        reports_total     = dict(reports_tot_qs.order_by().values_list('subordinate_id').annotate(c=Count('id')))
+        reports_submitted = dict(reports_sub_qs.order_by().values_list('submitted_by_id').annotate(c=Count('id')))
+
+        # --- ۵. چسباندن داده‌ها به هر کاربر در پایتون (سریع‌ترین حالت) ---
+        data = []
+        for u in users:
+            uid = u.id
+            data.append({
+                "id":         str(uid),
                 "username":   u.username,
                 "first_name": u.first_name,
                 "last_name":  u.last_name,
@@ -378,21 +376,20 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
                 "is_active":  u.is_active,
                 "stats": {
                     "missions": {
-                        "total":     u.total_missions,
-                        "completed": u.completed_missions,
+                        "total":     missions_total.get(uid, 0),
+                        "completed": missions_completed.get(uid, 0),
                     },
                     "checklists": {
-                        "total":     u.total_checklists,
-                        "completed": u.completed_checklists,
+                        "total":     checklists_total.get(uid, 0),
+                        "completed": checklists_completed.get(uid, 0),
                     },
                     "reports": {
-                        "total":     u.total_reports,
-                        "submitted": u.submitted_reports,
+                        "total":     reports_total.get(uid, 0),
+                        "submitted": reports_submitted.get(uid, 0),
                     },
                 },
-            }
-            for u in users
-        ]
+            })
+
         return Response(data, status=status.HTTP_200_OK)
 
 # ── Sellers ───────────────────────────────────────────────────────────────────
