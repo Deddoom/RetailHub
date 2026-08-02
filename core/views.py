@@ -23,7 +23,7 @@ from core.models import (
     Claim, ClaimFollowUp, DamageRegistration, ReturnRequest,
     ReportDefinition, ReportSubmission,
     BranchTransfer, TransferItem, TransferLog,
-    WasteReport, WasteItem, UserOnlineLog,
+    WasteReport, WasteItem, UserOnlineLog, AdvanceRequest, AdvanceRequestLog,
 )
 from core.serializers import (
     UserSerializer,
@@ -40,6 +40,7 @@ from core.serializers import (
     ReportDefinitionSerializer, ReportSubmissionSerializer, ReportImageSerializer,
     BranchTransferSerializer, BranchTransferListSerializer,
     WasteReportSerializer, WasteReportListSerializer,
+    AdvanceRequestSerializer, AdvanceRequestListSerializer,
 )
 from core.authentication import StatelessTokenService
 from core.permissions import IsAdminUser, IsOwnerOrAdminOnly, IsSuperiorUser
@@ -1535,3 +1536,159 @@ class WasteReportViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
             {"message": "دستور مدیریت ثبت شد و فرایند رسیدگی به ضایعات مختومه گردید."},
             status=status.HTTP_200_OK
         )
+
+
+# ── AdvanceRequest (درخواست مساعده) ──────────────────────────────────────────
+
+class AdvanceRequestViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return AdvanceRequestListSerializer
+        return AdvanceRequestSerializer
+
+    def get_queryset(self):
+        user = self.request.user
+        
+        is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
+        is_finance = any(r.code == 'FINANCIAL_MANAGER' for r in user.roles.all())
+
+        # ادمین و مدیر مالی همه درخواست‌ها را می‌بینند
+        if is_admin or is_finance:
+            qs = AdvanceRequest.objects.all()
+        else:
+            # افراد عادی درخواست‌های خودشان، و سرپرستان درخواست‌های زیردستانشان را می‌بینند
+            subordinate_ids = [u.id for u in user.get_all_subordinates()]
+            qs = AdvanceRequest.objects.filter(
+                Q(requester=user) | Q(requester_id__in=subordinate_ids)
+            ).distinct()
+
+        # فیلترهای اختیاری وضعیت و تاریخ
+        status_param = self.request.query_params.get('status')
+        from_date = self.request.query_params.get('from_date')
+        to_date = self.request.query_params.get('to_date')
+
+        if status_param: qs = qs.filter(status=status_param)
+        if from_date:    qs = qs.filter(created_at__date__gte=from_date)
+        if to_date:      qs = qs.filter(created_at__date__lte=to_date)
+
+        return qs.select_related('requester').prefetch_related('logs').order_by('-created_at')
+
+    @transaction.atomic
+    def perform_create(self, serializer):
+        user = self.request.user
+        
+        # اگر کاربر بالادستی نداشته باشد، مستقیم می‌رود برای تایید ادمین
+        initial_status = 'PENDING_SUPERIOR' if user.superiors.exists() else 'PENDING_ADMIN'
+        
+        advance = serializer.save(requester=user, status=initial_status)
+        
+        log_msg = f"درخواست مساعده به مبلغ {advance.amount} ثبت شد."
+        if initial_status == 'PENDING_ADMIN':
+            log_msg += " (ارسال مستقیم به ادمین به دلیل نداشتن بالادستی)"
+            
+        AdvanceRequestLog.objects.create(
+            advance_request=advance, actor=user, action=log_msg
+        )
+
+    # --- ۱. بررسی بالادستی ---
+    @action(detail=True, methods=['post'], url_path='superior-review')
+    @transaction.atomic
+    def superior_review(self, request, pk=None):
+        advance = self.get_object()
+        user = request.user
+        
+        if advance.status != 'PENDING_SUPERIOR':
+            return Response({"error": "این درخواست در وضعیت انتظار تایید بالادستی نیست."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
+        if not is_admin and not user.is_superior_to(advance.requester):
+            return Response({"error": "شما بالادست این کاربر نیستید."}, status=status.HTTP_403_FORBIDDEN)
+
+        action_type = request.data.get('action') # 'approve' or 'reject'
+        note = request.data.get('note', '')
+
+        if action_type not in ['approve', 'reject']:
+            return Response({"error": "فیلد action باید approve یا reject باشد."}, status=status.HTTP_400_BAD_REQUEST)
+        if action_type == 'reject' and not note:
+            return Response({"error": "برای رد درخواست، نوشتن توضیحات (note) الزامی است."}, status=status.HTTP_400_BAD_REQUEST)
+
+        advance.superior_reviewer = user
+        advance.superior_note = note
+        advance.status = 'PENDING_ADMIN' if action_type == 'approve' else 'REJECTED_BY_SUPERIOR'
+        advance.save()
+
+        action_text = "تایید شد و به ادمین ارجاع داده شد." if action_type == 'approve' else f"رد شد. دلیل: {note}"
+        AdvanceRequestLog.objects.create(
+            advance_request=advance, actor=user, action=f"بررسی بالادستی: {action_text}"
+        )
+
+        return Response({"message": "عملیات با موفقیت ثبت شد."}, status=status.HTTP_200_OK)
+
+    # --- ۲. بررسی ادمین ---
+    @action(detail=True, methods=['post'], url_path='admin-review')
+    @transaction.atomic
+    def admin_review(self, request, pk=None):
+        advance = self.get_object()
+        user = request.user
+        
+        if advance.status != 'PENDING_ADMIN':
+            return Response({"error": "این درخواست در وضعیت انتظار تایید ادمین نیست."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
+        if not is_admin:
+            return Response({"error": "فقط ادمین سیستم به این بخش دسترسی دارد."}, status=status.HTTP_403_FORBIDDEN)
+
+        action_type = request.data.get('action')
+        note = request.data.get('note', '')
+
+        if action_type not in ['approve', 'reject']:
+            return Response({"error": "فیلد action باید approve یا reject باشد."}, status=status.HTTP_400_BAD_REQUEST)
+        if action_type == 'reject' and not note:
+            return Response({"error": "برای رد درخواست، نوشتن توضیحات الزامی است."}, status=status.HTTP_400_BAD_REQUEST)
+
+        advance.admin_reviewer = user
+        advance.admin_note = note
+        advance.status = 'PENDING_FINANCE' if action_type == 'approve' else 'REJECTED_BY_ADMIN'
+        advance.save()
+
+        action_text = "تایید شد و به مدیر مالی ارجاع داده شد." if action_type == 'approve' else f"رد شد. دلیل: {note}"
+        AdvanceRequestLog.objects.create(
+            advance_request=advance, actor=user, action=f"بررسی ادمین: {action_text}"
+        )
+
+        return Response({"message": "عملیات ادمین با موفقیت ثبت شد."}, status=status.HTTP_200_OK)
+
+    # --- ۳. پرداخت توسط مدیر مالی ---
+    @action(detail=True, methods=['post'], url_path='finance-pay')
+    @transaction.atomic
+    def finance_pay(self, request, pk=None):
+        advance = self.get_object()
+        user = request.user
+        
+        if advance.status != 'PENDING_FINANCE':
+            return Response({"error": "این درخواست در وضعیت انتظار پرداخت نیست."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        is_finance = user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in user.roles.all())
+        if not is_finance:
+            return Response({"error": "فقط مدیر مالی یا ادمین به این بخش دسترسی دارد."}, status=status.HTTP_403_FORBIDDEN)
+
+        payment_date = request.data.get('payment_date')
+        note = request.data.get('note', '')
+
+        if not payment_date:
+            return Response({"error": "وارد کردن تاریخ پرداخت (payment_date) الزامی است."}, status=status.HTTP_400_BAD_REQUEST)
+
+        advance.finance_reviewer = user
+        advance.finance_note = note
+        advance.payment_date = payment_date
+        advance.status = 'PAID'
+        advance.save()
+
+        AdvanceRequestLog.objects.create(
+            advance_request=advance, actor=user, 
+            action=f"مدیر مالی پرداخت را در تاریخ {payment_date} ثبت کرد." + (f" توضیحات: {note}" if note else "")
+        )
+
+        return Response({"message": "وضعیت پرداخت با موفقیت ثبت شد."}, status=status.HTTP_200_OK)

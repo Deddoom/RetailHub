@@ -943,3 +943,55 @@ class UserOnlineLog(models.Model):
 
     def __str__(self):
         return f"{self.user.username} - {self.date}"
+
+# ── AdvanceRequest (درخواست مساعده) ──────────────────────────────────────────
+class AdvanceRequest(models.Model):
+    STATUS_CHOICES = [
+        ('PENDING_SUPERIOR',     'در انتظار تایید بالادستی'),
+        ('REJECTED_BY_SUPERIOR', 'رد شده توسط بالادستی'),
+        ('PENDING_ADMIN',        'در انتظار تایید ادمین'),
+        ('REJECTED_BY_ADMIN',    'رد شده توسط ادمین'),
+        ('PENDING_FINANCE',      'در انتظار پرداخت (مدیر مالی)'),
+        ('PAID',                 'پرداخت شده'),
+    ]
+    
+    id          = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    requester   = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='advance_requests', verbose_name='درخواست‌کننده')
+    amount      = models.DecimalField(max_digits=12, decimal_places=2, verbose_name='مبلغ درخواستی')
+    description = models.TextField(verbose_name='توضیحات کاربر')
+    
+    status      = models.CharField(max_length=30, choices=STATUS_CHOICES, default='PENDING_SUPERIOR', verbose_name='وضعیت')
+    
+    # مرحله بالادستی
+    superior_reviewer = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='reviewed_advances_as_superior')
+    superior_note     = models.TextField(blank=True, null=True, verbose_name='توضیحات بالادستی')
+    
+    # مرحله ادمین
+    admin_reviewer    = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='reviewed_advances_as_admin')
+    admin_note        = models.TextField(blank=True, null=True, verbose_name='توضیحات ادمین')
+    
+    # مرحله مدیر مالی
+    finance_reviewer  = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='paid_advances_as_finance')
+    payment_date      = models.DateField(null=True, blank=True, verbose_name='تاریخ پرداخت')
+    finance_note      = models.TextField(blank=True, null=True, verbose_name='توضیحات مدیر مالی')
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"مساعده {self.amount} برای {self.requester.username} - {self.get_status_display()}"
+
+
+# ── AdvanceRequestLog (لاگ مراحل مساعده) ──────────────────────────────────────
+class AdvanceRequestLog(models.Model):
+    id              = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    advance_request = models.ForeignKey(AdvanceRequest, on_delete=models.CASCADE, related_name='logs')
+    actor           = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True)
+    action          = models.CharField(max_length=255, verbose_name='عملیات انجام شده')
+    created_at      = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']

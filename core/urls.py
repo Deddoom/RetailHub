@@ -7,7 +7,7 @@ from core.views import (
     ItemExitViewSet, ChecklistViewSet, TaskViewSet, DepositOrderViewSet,
     BranchListView, MissionViewSet, RoleViewSet, ChecklistLogViewSet, ClaimViewSet,
     DamageRegistrationViewSet, ReturnRequestViewSet, ReportDefinitionViewSet, ReportSubmissionViewSet,
-    BranchTransferViewSet, WasteReportViewSet,
+    BranchTransferViewSet, WasteReportViewSet, AdvanceRequestViewSet,
 
 )
 
@@ -32,7 +32,7 @@ router.register(r'report-definitions', ReportDefinitionViewSet, basename='report
 router.register(r'report-submissions', ReportSubmissionViewSet, basename='report-submission')
 router.register(r'transfers',          BranchTransferViewSet,    basename='branch-transfer')
 router.register(r'waste-reports',      WasteReportViewSet,       basename='waste-report')
-
+router.register(r'advance-requests', AdvanceRequestViewSet, basename='advance-request')
 
 urlpatterns = [
     path('auth/token/', AuthTokenView.as_view(), name='auth_token_login'),

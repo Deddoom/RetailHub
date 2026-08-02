@@ -14,7 +14,7 @@ from core.models import (
     ReturnRequest, ReturnItem, ExchangeItem,
     ReportDefinition, ReportSubmission, ReportImage,
     BranchTransfer, TransferItem, TransferLog,
-    WasteReport, WasteItem,
+    WasteReport, WasteItem, AdvanceRequest, AdvanceRequestLog
 )
 
 
@@ -1331,4 +1331,48 @@ class WasteReportListSerializer(serializers.ModelSerializer):
             'waste_date', 'branch',
             'status', 'items_count',
             'created_at',
+        ]
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  سیستم درخواست مساعده (Advance Request)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class AdvanceRequestLogSerializer(serializers.ModelSerializer):
+    actor_name = serializers.CharField(source='actor.get_full_name', read_only=True)
+    actor_username = serializers.CharField(source='actor.username', read_only=True)
+
+    class Meta:
+        model = AdvanceRequestLog
+        fields = ['id', 'actor_name', 'actor_username', 'action', 'created_at']
+
+
+class AdvanceRequestSerializer(serializers.ModelSerializer):
+    logs = AdvanceRequestLogSerializer(many=True, read_only=True)
+    requester_name = serializers.CharField(source='requester.get_full_name', read_only=True)
+    superior_reviewer_name = serializers.CharField(source='superior_reviewer.get_full_name', read_only=True)
+    admin_reviewer_name = serializers.CharField(source='admin_reviewer.get_full_name', read_only=True)
+    finance_reviewer_name = serializers.CharField(source='finance_reviewer.get_full_name', read_only=True)
+
+    class Meta:
+        model = AdvanceRequest
+        fields = [
+            'id', 'requester', 'requester_name', 'amount', 'description', 'status',
+            'superior_reviewer', 'superior_reviewer_name', 'superior_note',
+            'admin_reviewer', 'admin_reviewer_name', 'admin_note',
+            'finance_reviewer', 'finance_reviewer_name', 'payment_date', 'finance_note',
+            'logs', 'created_at', 'updated_at'
+        ]
+        read_only_fields = [
+            'requester', 'status', 'superior_reviewer', 'superior_note',
+            'admin_reviewer', 'admin_note', 'finance_reviewer', 'payment_date', 'finance_note'
+        ]
+
+
+class AdvanceRequestListSerializer(serializers.ModelSerializer):
+    requester_name = serializers.CharField(source='requester.get_full_name', read_only=True)
+    
+    class Meta:
+        model = AdvanceRequest
+        fields = [
+            'id', 'requester', 'requester_name', 'amount', 'status', 'created_at'
         ]
