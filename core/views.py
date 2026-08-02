@@ -119,7 +119,7 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     serializer_class = UserSerializer
 
     def get_permissions(self):
-        public_actions = ['subordinates', 'update_branch', 'complete_profile', 'supervisors' , 'performance' , 'all_users_status']
+        public_actions = ['subordinates', 'update_branch', 'complete_profile', 'supervisors' , 'performance' , 'all_users_status' , 'mark_online']
         if self.action in public_actions:
             return [permissions.IsAuthenticated()]
         return [IsAdminUser()]
@@ -362,33 +362,49 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
             }
 
         # ── Querysetهای پایه ──────────────────────────────────────────────────
-        missions_tot_qs    = Mission.objects.filter(assigned_to_id__in=user_ids)
-        missions_com_qs    = Mission.objects.filter(assigned_to_id__in=user_ids, status='COMPLETED')
-        checklists_tot_qs  = ChecklistLog.objects.filter(assigned_to_id__in=user_ids)
-        checklists_com_qs  = ChecklistLog.objects.filter(
-            assigned_to_id__in=user_ids,
-            total_tasks=F('completed_tasks'),
-            total_tasks__gt=0
-        )
-        # reports: تعداد تعریف‌های فعال برای هر کاربر (باید ارسال میکرد)
-        reports_def_qs     = ReportDefinition.objects.filter(subordinate_id__in=user_ids, is_active=True)
-        # reports: تعداد گزارش‌هایی که واقعاً ارسال شده
-        reports_sub_qs     = ReportSubmission.objects.filter(submitted_by_id__in=user_ids)
+        missions_tot_qs   = Mission.objects.filter(assigned_to_id__in=user_ids)
+        missions_com_qs   = Mission.objects.filter(assigned_to_id__in=user_ids, status='COMPLETED')
+
+        # چک‌لیست: برای daily از Task فعلی بخون، برای weekly/monthly از ChecklistLog
+        if period == 'daily':
+            # وضعیت چک‌لیست‌های فعال امروز (از Task مستقیم)
+            from core.models import Task
+            checklists_tot_qs = Task.objects.filter(
+                checklist__assigned_to_id__in=user_ids
+            )
+            checklists_com_qs = Task.objects.filter(
+                checklist__assigned_to_id__in=user_ids,
+                is_completed=True
+            )
+            checklist_group_field = 'checklist__assigned_to_id'
+        else:
+            # وضعیت از لاگ‌های ثبت‌شده (هفتگی/ماهانه)
+            checklists_tot_qs = ChecklistLog.objects.filter(assigned_to_id__in=user_ids)
+            checklists_com_qs = ChecklistLog.objects.filter(
+                assigned_to_id__in=user_ids,
+                total_tasks=F('completed_tasks'),
+                total_tasks__gt=0
+            )
+            checklist_group_field = 'assigned_to_id'
+
+        reports_def_qs = ReportDefinition.objects.filter(subordinate_id__in=user_ids, is_active=True)
+        reports_sub_qs = ReportSubmission.objects.filter(submitted_by_id__in=user_ids)
 
         # ── اعمال فیلتر زمانی ────────────────────────────────────────────────
         if start_date:
-            missions_tot_qs   = missions_tot_qs.filter(created_at__gte=start_date,  created_at__lte=end_date)
-            missions_com_qs   = missions_com_qs.filter(updated_at__gte=start_date,  updated_at__lte=end_date)
-            checklists_tot_qs = checklists_tot_qs.filter(logged_at__gte=start_date, logged_at__lte=end_date)
-            checklists_com_qs = checklists_com_qs.filter(logged_at__gte=start_date, logged_at__lte=end_date)
-            reports_def_qs    = reports_def_qs.filter(created_at__gte=start_date,   created_at__lte=end_date)
-            reports_sub_qs    = reports_sub_qs.filter(submitted_at__gte=start_date, submitted_at__lte=end_date)
+            missions_tot_qs = missions_tot_qs.filter(created_at__gte=start_date,  created_at__lte=end_date)
+            missions_com_qs = missions_com_qs.filter(updated_at__gte=start_date,  updated_at__lte=end_date)
+            if period != 'daily':
+                checklists_tot_qs = checklists_tot_qs.filter(logged_at__gte=start_date, logged_at__lte=end_date)
+                checklists_com_qs = checklists_com_qs.filter(logged_at__gte=start_date, logged_at__lte=end_date)
+            reports_def_qs = reports_def_qs.filter(created_at__gte=start_date,   created_at__lte=end_date)
+            reports_sub_qs = reports_sub_qs.filter(submitted_at__gte=start_date, submitted_at__lte=end_date)
 
-        # ── ساخت dictهای آمار با str(uuid) به عنوان key ──────────────────────
+        # ── ساخت dictهای آمار ────────────────────────────────────────────────
         missions_total       = _agg(missions_tot_qs,   'assigned_to_id')
         missions_completed   = _agg(missions_com_qs,   'assigned_to_id')
-        checklists_total     = _agg(checklists_tot_qs,  'assigned_to_id')
-        checklists_completed = _agg(checklists_com_qs,  'assigned_to_id')
+        checklists_total     = _agg(checklists_tot_qs,  checklist_group_field)
+        checklists_completed = _agg(checklists_com_qs,  checklist_group_field)
         reports_total        = _agg(reports_def_qs,     'subordinate_id')
         reports_submitted    = _agg(reports_sub_qs,     'submitted_by_id')
 
