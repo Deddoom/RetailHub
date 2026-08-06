@@ -1583,10 +1583,12 @@ class AdvanceRequestViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         if is_admin or is_finance:
             qs = AdvanceRequest.objects.all()
         else:
-            # افراد عادی درخواست‌های خودشان، و سرپرستان درخواست‌های زیردستانشان را می‌بینند
+            # کاربر درخواست‌های خودش، و بالادستی فقط درخواست‌هایی که مستقیماً به خودش ارجاع داده شده (یا بدون بالادستی تعیین‌شده) را می‌بیند
             subordinate_ids = [u.id for u in user.get_all_subordinates()]
             qs = AdvanceRequest.objects.filter(
-                Q(requester=user) | Q(requester_id__in=subordinate_ids)
+                Q(requester=user) | 
+                Q(target_superior=user) | 
+                (Q(target_superior__isnull=True) & Q(requester_id__in=subordinate_ids))
             ).distinct()
 
         # فیلترهای اختیاری وضعیت و تاریخ
@@ -1598,20 +1600,25 @@ class AdvanceRequestViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         if from_date:    qs = qs.filter(created_at__date__gte=from_date)
         if to_date:      qs = qs.filter(created_at__date__lte=to_date)
 
-        return qs.select_related('requester').prefetch_related('logs').order_by('-created_at')
+        return qs.select_related('requester', 'target_superior', 'superior_reviewer', 'admin_reviewer', 'finance_reviewer').prefetch_related('logs').order_by('-created_at')
 
     @transaction.atomic
     def perform_create(self, serializer):
         user = self.request.user
         
-        # اگر کاربر بالادستی نداشته باشد، مستقیم می‌رود برای تایید ادمین
-        initial_status = 'PENDING_SUPERIOR' if user.superiors.exists() else 'PENDING_ADMIN'
+        # اگر کاربر بالادستی داشته باشد، وضعیت اولیه PENDING_SUPERIOR است
+        has_superiors = user.superiors.exists()
+        initial_status = 'PENDING_SUPERIOR' if has_superiors else 'PENDING_ADMIN'
         
         advance = serializer.save(requester=user, status=initial_status)
         
-        log_msg = f"درخواست مساعده به مبلغ {advance.amount} ثبت شد."
-        if initial_status == 'PENDING_ADMIN':
-            log_msg += " (ارسال مستقیم به ادمین به دلیل نداشتن بالادستی)"
+        if advance.target_superior:
+            target_name = advance.target_superior.get_full_name() or advance.target_superior.username
+            log_msg = f"درخواست مساعده به مبلغ {advance.amount} ثبت شد و به بالادستی ({target_name}) ارجاع داده شد."
+        elif initial_status == 'PENDING_ADMIN':
+            log_msg = f"درخواست مساعده به مبلغ {advance.amount} ثبت شد. (ارسال مستقیم به ادمین به دلیل نداشتن بالادستی)"
+        else:
+            log_msg = f"درخواست مساعده به مبلغ {advance.amount} ثبت شد."
             
         AdvanceRequestLog.objects.create(
             advance_request=advance, actor=user, action=log_msg
@@ -1628,8 +1635,13 @@ class AdvanceRequestViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
             return Response({"error": "این درخواست در وضعیت انتظار تایید بالادستی نیست."}, status=status.HTTP_400_BAD_REQUEST)
             
         is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
-        if not is_admin and not user.is_superior_to(advance.requester):
-            return Response({"error": "شما بالادست این کاربر نیستید."}, status=status.HTTP_403_FORBIDDEN)
+        if not is_admin:
+            if advance.target_superior:
+                if advance.target_superior != user:
+                    return Response({"error": "این درخواست برای شما ارجاع داده نشده است."}, status=status.HTTP_403_FORBIDDEN)
+            else:
+                if not user.is_superior_to(advance.requester):
+                    return Response({"error": "شما بالادست این کاربر نیستید."}, status=status.HTTP_403_FORBIDDEN)
 
         action_type = request.data.get('action') # 'approve' or 'reject'
         note = request.data.get('note', '')
@@ -1645,8 +1657,9 @@ class AdvanceRequestViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         advance.save()
 
         action_text = "تایید شد و به ادمین ارجاع داده شد." if action_type == 'approve' else f"رد شد. دلیل: {note}"
+        actor_name = user.get_full_name() or user.username
         AdvanceRequestLog.objects.create(
-            advance_request=advance, actor=user, action=f"بررسی بالادستی: {action_text}"
+            advance_request=advance, actor=user, action=f"بررسی بالادستی ({actor_name}): {action_text}"
         )
 
         return Response({"message": "عملیات با موفقیت ثبت شد."}, status=status.HTTP_200_OK)

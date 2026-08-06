@@ -1349,6 +1349,10 @@ class AdvanceRequestLogSerializer(serializers.ModelSerializer):
 class AdvanceRequestSerializer(serializers.ModelSerializer):
     logs = AdvanceRequestLogSerializer(many=True, read_only=True)
     requester_name = serializers.CharField(source='requester.get_full_name', read_only=True)
+    target_superior_name = serializers.CharField(source='target_superior.get_full_name', read_only=True)
+    superior_id = serializers.PrimaryKeyRelatedField(
+        queryset=CustomUser.objects.all(), source='target_superior', write_only=True, required=False, allow_null=True
+    )
     superior_reviewer_name = serializers.CharField(source='superior_reviewer.get_full_name', read_only=True)
     admin_reviewer_name = serializers.CharField(source='admin_reviewer.get_full_name', read_only=True)
     finance_reviewer_name = serializers.CharField(source='finance_reviewer.get_full_name', read_only=True)
@@ -1356,23 +1360,43 @@ class AdvanceRequestSerializer(serializers.ModelSerializer):
     class Meta:
         model = AdvanceRequest
         fields = [
-            'id', 'requester', 'requester_name', 'amount', 'description', 'status',
+            'id', 'requester', 'requester_name', 'target_superior', 'target_superior_name', 'superior_id',
+            'amount', 'description', 'status',
             'superior_reviewer', 'superior_reviewer_name', 'superior_note',
             'admin_reviewer', 'admin_reviewer_name', 'admin_note',
             'finance_reviewer', 'finance_reviewer_name', 'payment_date', 'finance_note',
             'logs', 'created_at', 'updated_at'
         ]
         read_only_fields = [
-            'requester', 'status', 'superior_reviewer', 'superior_note',
+            'requester', 'target_superior', 'status', 'superior_reviewer', 'superior_note',
             'admin_reviewer', 'admin_note', 'finance_reviewer', 'payment_date', 'finance_note'
         ]
+
+    def validate(self, attrs):
+        request = self.context.get('request')
+        if request and request.user:
+            user = request.user
+            target_superior = attrs.get('target_superior')
+            superiors = list(user.superiors.all())
+
+            if superiors:
+                if target_superior:
+                    if target_superior not in superiors:
+                        raise serializers.ValidationError({"superior_id": "کاربر انتخاب شده در لیست بالادستی‌های شما نیست."})
+                else:
+                    if len(superiors) == 1:
+                        attrs['target_superior'] = superiors[0]
+                    else:
+                        raise serializers.ValidationError({"superior_id": "شما چند بالادستی دارید. لطفاً بالادستی مورد نظر جهت ارجاع درخواست را انتخاب کنید."})
+        return attrs
 
 
 class AdvanceRequestListSerializer(serializers.ModelSerializer):
     requester_name = serializers.CharField(source='requester.get_full_name', read_only=True)
+    target_superior_name = serializers.CharField(source='target_superior.get_full_name', read_only=True)
     
     class Meta:
         model = AdvanceRequest
         fields = [
-            'id', 'requester', 'requester_name', 'amount', 'status', 'created_at'
+            'id', 'requester', 'requester_name', 'target_superior', 'target_superior_name', 'amount', 'status', 'created_at'
         ]

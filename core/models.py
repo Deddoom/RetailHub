@@ -963,6 +963,7 @@ class AdvanceRequest(models.Model):
     status      = models.CharField(max_length=30, choices=STATUS_CHOICES, default='PENDING_SUPERIOR', verbose_name='وضعیت')
     
     # مرحله بالادستی
+    target_superior   = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='received_advance_requests', verbose_name='بالادستی انتخاب‌شده')
     superior_reviewer = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='reviewed_advances_as_superior')
     superior_note     = models.TextField(blank=True, null=True, verbose_name='توضیحات بالادستی')
     
