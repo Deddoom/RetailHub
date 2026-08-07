@@ -1400,3 +1400,31 @@ class AdvanceRequestListSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'requester', 'requester_name', 'target_superior', 'target_superior_name', 'amount', 'status', 'created_at'
         ]
+
+
+class AdvanceRequestInboxSerializer(serializers.ModelSerializer):
+    """
+    سریالایزر کارتابل بالادستی و لیست ادمین.
+    شامل جزئیات کامل‌تری نسبت به AdvanceRequestListSerializer است.
+    """
+    logs = AdvanceRequestLogSerializer(many=True, read_only=True)
+    requester_name     = serializers.CharField(source='requester.get_full_name', read_only=True)
+    requester_username = serializers.CharField(source='requester.username', read_only=True)
+    target_superior_name = serializers.CharField(source='target_superior.get_full_name', read_only=True)
+    superior_reviewer_name = serializers.CharField(source='superior_reviewer.get_full_name', read_only=True)
+    admin_reviewer_name    = serializers.CharField(source='admin_reviewer.get_full_name', read_only=True)
+    finance_reviewer_name  = serializers.CharField(source='finance_reviewer.get_full_name', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+
+    class Meta:
+        model = AdvanceRequest
+        fields = [
+            'id', 'requester', 'requester_name', 'requester_username',
+            'target_superior', 'target_superior_name',
+            'amount', 'description', 'status', 'status_display',
+            'superior_reviewer', 'superior_reviewer_name', 'superior_note',
+            'admin_reviewer', 'admin_reviewer_name', 'admin_note',
+            'finance_reviewer', 'finance_reviewer_name', 'payment_date', 'finance_note',
+            'logs', 'created_at', 'updated_at'
+        ]
+        read_only_fields = fields

@@ -40,7 +40,7 @@ from core.serializers import (
     ReportDefinitionSerializer, ReportSubmissionSerializer, ReportImageSerializer,
     BranchTransferSerializer, BranchTransferListSerializer,
     WasteReportSerializer, WasteReportListSerializer,
-    AdvanceRequestSerializer, AdvanceRequestListSerializer,
+    AdvanceRequestSerializer, AdvanceRequestListSerializer, AdvanceRequestInboxSerializer,
 )
 from core.authentication import StatelessTokenService
 from core.permissions import IsAdminUser, IsOwnerOrAdminOnly, IsSuperiorUser
@@ -1730,3 +1730,103 @@ class AdvanceRequestViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         )
 
         return Response({"message": "وضعیت پرداخت با موفقیت ثبت شد."}, status=status.HTTP_200_OK)
+
+    # --- ۴. کارتابل بالادستی: درخواست‌هایی که مستقیماً به من ارجاع شده ---
+    @action(detail=False, methods=['get'], url_path='my-inbox')
+    def my_inbox(self, request):
+        """
+        کارتابل اختصاصی بالادستی:
+        فقط درخواست‌هایی که target_superior=me هستند برمی‌گردد.
+        این endpoint برای بالادستی‌ها طراحی شده تا «inbox» خود را ببینند.
+        """
+        user = request.user
+
+        qs = AdvanceRequest.objects.filter(target_superior=user)
+
+        # فیلتر وضعیت
+        status_param = request.query_params.get('status')
+        if status_param:
+            qs = qs.filter(status=status_param)
+
+        # فیلتر تاریخ
+        from_date = request.query_params.get('from_date')
+        to_date   = request.query_params.get('to_date')
+        if from_date: qs = qs.filter(created_at__date__gte=from_date)
+        if to_date:   qs = qs.filter(created_at__date__lte=to_date)
+
+        # فیلتر جستجو بر اساس نام یا نام کاربری درخواست‌کننده
+        search = request.query_params.get('search')
+        if search:
+            qs = qs.filter(
+                Q(requester__first_name__icontains=search) |
+                Q(requester__last_name__icontains=search)  |
+                Q(requester__username__icontains=search)
+            )
+
+        qs = qs.select_related('requester', 'target_superior').prefetch_related('logs').order_by('-created_at')
+
+        page = self.paginate_queryset(qs)
+        if page is not None:
+            serializer = AdvanceRequestInboxSerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = AdvanceRequestInboxSerializer(qs, many=True)
+        return Response(serializer.data)
+
+    # --- ۵. ویو کامل ادمین: همه درخواست‌ها با فیلترهای پیشرفته ---
+    @action(detail=False, methods=['get'], url_path='admin-list')
+    def admin_list(self, request):
+        """
+        لیست کامل درخواست‌های مساعده برای ادمین و مدیر مالی.
+        پشتیبانی از فیلترهای: status, from_date, to_date, search (نام/یوزرنیم), superior_id, requester_id
+        """
+        user = request.user
+        is_admin   = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
+        is_finance = any(r.code == 'FINANCIAL_MANAGER' for r in user.roles.all())
+
+        if not (is_admin or is_finance):
+            return Response({"error": "دسترسی محدود است."}, status=status.HTTP_403_FORBIDDEN)
+
+        qs = AdvanceRequest.objects.all()
+
+        # فیلتر وضعیت
+        status_param = request.query_params.get('status')
+        if status_param:
+            qs = qs.filter(status=status_param)
+
+        # فیلتر تاریخ
+        from_date = request.query_params.get('from_date')
+        to_date   = request.query_params.get('to_date')
+        if from_date: qs = qs.filter(created_at__date__gte=from_date)
+        if to_date:   qs = qs.filter(created_at__date__lte=to_date)
+
+        # جستجوی متنی روی نام/یوزرنیم درخواست‌کننده
+        search = request.query_params.get('search')
+        if search:
+            qs = qs.filter(
+                Q(requester__first_name__icontains=search) |
+                Q(requester__last_name__icontains=search)  |
+                Q(requester__username__icontains=search)
+            )
+
+        # فیلتر بر اساس ID درخواست‌کننده مشخص
+        requester_id = request.query_params.get('requester_id')
+        if requester_id:
+            qs = qs.filter(requester_id=requester_id)
+
+        # فیلتر بر اساس ID بالادستی مشخص
+        superior_id = request.query_params.get('superior_id')
+        if superior_id:
+            qs = qs.filter(target_superior_id=superior_id)
+
+        qs = qs.select_related(
+            'requester', 'target_superior', 'superior_reviewer', 'admin_reviewer', 'finance_reviewer'
+        ).prefetch_related('logs').order_by('-created_at')
+
+        page = self.paginate_queryset(qs)
+        if page is not None:
+            serializer = AdvanceRequestInboxSerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = AdvanceRequestInboxSerializer(qs, many=True)
+        return Response(serializer.data)
