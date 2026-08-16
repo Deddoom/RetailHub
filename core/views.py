@@ -119,7 +119,7 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     serializer_class = UserSerializer
 
     def get_permissions(self):
-        public_actions = ['subordinates', 'update_branch', 'complete_profile', 'supervisors' , 'performance' , 'all_users_status' , 'mark_online']
+        public_actions = ['subordinates', 'update_branch', 'complete_profile', 'supervisors' , 'performance' , 'all_users_status' , 'mark_online', 'reports']
         if self.action in public_actions:
             return [permissions.IsAuthenticated()]
         return [IsAdminUser()]
@@ -282,6 +282,115 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
                     "submitted": submitted_reports
                 }
             }
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['get'], url_path='reports')
+    def reports(self, request, pk=None):
+        """
+        دریافت گزارشات یک کاربر خاص (شامل تمام تعاریف گزارش و ارسال‌های کاربر به همراه آمار تجمیعی)
+        URL: GET /api/users/{id}/reports/
+        یا برای کاربر جاری: GET /api/users/me/reports/
+        """
+        if pk == 'me':
+            target_user = request.user
+        else:
+            target_user = self.get_object()
+
+        current_user = request.user
+
+        is_admin = current_user.is_superuser or any(
+            r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in current_user.roles.all()
+        )
+        is_self = current_user == target_user
+        is_superior = current_user.is_superior_to(target_user)
+
+        if not (is_admin or is_self or is_superior):
+            return Response(
+                {"error": "شما دسترسی به گزارش‌های این کاربر را ندارید."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # دریافت پارامترهای اختیاری فیلتر
+        from_date     = request.query_params.get('from_date')
+        to_date       = request.query_params.get('to_date')
+        is_active     = request.query_params.get('is_active')
+        report_type   = request.query_params.get('report_type')
+        definition_id = request.query_params.get('definition_id')
+
+        # ── ۱. تعاریف گزارش‌های محول‌شده به کاربر ──
+        definitions_qs = ReportDefinition.objects.filter(
+            subordinate=target_user
+        ).select_related('superior', 'subordinate').order_by('-created_at')
+
+        if is_active is not None:
+            definitions_qs = definitions_qs.filter(is_active=(is_active.lower() == 'true'))
+        if report_type:
+            definitions_qs = definitions_qs.filter(report_type=report_type)
+        if definition_id:
+            definitions_qs = definitions_qs.filter(id=definition_id)
+        if from_date:
+            definitions_qs = definitions_qs.filter(created_at__date__gte=from_date)
+        if to_date:
+            definitions_qs = definitions_qs.filter(created_at__date__lte=to_date)
+
+        # ── ۲. ارسال‌های ثبت‌شده توسط کاربر ──
+        submissions_qs = ReportSubmission.objects.filter(
+            submitted_by=target_user
+        ).select_related('definition', 'submitted_by').prefetch_related('images').order_by('-submitted_at')
+
+        if report_type:
+            submissions_qs = submissions_qs.filter(definition__report_type=report_type)
+        if definition_id:
+            submissions_qs = submissions_qs.filter(definition_id=definition_id)
+        if from_date:
+            submissions_qs = submissions_qs.filter(submitted_at__date__gte=from_date)
+        if to_date:
+            submissions_qs = submissions_qs.filter(submitted_at__date__lte=to_date)
+
+        # ── ۳. آمار محاسباتی تجمیعی ──
+        from django.db.models import Count
+        all_user_defs = ReportDefinition.objects.filter(subordinate=target_user)
+        total_def_count = all_user_defs.count()
+        active_def_count = all_user_defs.filter(is_active=True).count()
+        inactive_def_count = total_def_count - active_def_count
+        recurring_def_count = all_user_defs.filter(report_type='RECURRING').count()
+        deadline_def_count = all_user_defs.filter(report_type='DEADLINE').count()
+        total_sub_count = ReportSubmission.objects.filter(submitted_by=target_user).count()
+
+        # سریالایز داده‌ها
+        definitions_data = ReportDefinitionSerializer(definitions_qs, many=True, context={'request': request}).data
+        submissions_data = ReportSubmissionSerializer(submissions_qs, many=True, context={'request': request}).data
+
+        # افزودن تعداد سابمیشن‌های ثبت‌شده به هر تعریف گزارش
+        sub_counts = {
+            str(item['definition_id']): item['count']
+            for item in ReportSubmission.objects.filter(submitted_by=target_user).values('definition_id').annotate(count=Count('id'))
+        }
+        for d in definitions_data:
+            d['submissions_count'] = sub_counts.get(str(d['id']), 0)
+
+        return Response({
+            "user": {
+                "id": str(target_user.id),
+                "username": target_user.username,
+                "first_name": target_user.first_name,
+                "last_name": target_user.last_name,
+                "full_name": target_user.get_full_name() or target_user.username,
+                "branch": target_user.branch,
+                "roles": [r.code for r in target_user.roles.all()],
+            },
+            "stats": {
+                "total_definitions": total_def_count,
+                "active_definitions": active_def_count,
+                "inactive_definitions": inactive_def_count,
+                "recurring_definitions": recurring_def_count,
+                "deadline_definitions": deadline_def_count,
+                "total_submissions": total_sub_count,
+                "filtered_definitions_count": len(definitions_data),
+                "filtered_submissions_count": len(submissions_data),
+            },
+            "report_definitions": definitions_data,
+            "report_submissions": submissions_data,
         }, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['post'], url_path='mark-online')
