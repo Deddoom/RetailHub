@@ -6,7 +6,7 @@ class IsAdminUser(permissions.BasePermission):
         if not (request.user and request.user.is_authenticated):
             return False
         return request.user.is_superuser or any(
-            r.code == 'ADMIN' for r in request.user.roles.all()
+            r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in request.user.roles.all()
         )
 
 class IsOwnerOrAdminOnly(permissions.BasePermission):
@@ -25,8 +25,8 @@ class IsOwnerOrAdminOnly(permissions.BasePermission):
 
     def has_object_permission(self, request, view, obj):
         if self._is_admin_or_manager(request.user):
-            # مدیران فقط اجازه دیدن (SAFE_METHODS) دارند، مگر اینکه ادمین کل باشند
-            if request.method in permissions.SAFE_METHODS or any(r.code == 'ADMIN' for r in request.user.roles.all()):
+            # مدیران فقط اجازه دیدن (SAFE_METHODS) دارند، مگر اینکه ادمین کل یا مدیر مالی باشند
+            if request.method in permissions.SAFE_METHODS or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in request.user.roles.all()):
                 return True
 
         if self._is_cashier(request.user):
@@ -46,7 +46,7 @@ class IsSuperiorUser(permissions.BasePermission):
             
         # بررسی منطق ارجاع در هنگام ساخت رکورد جدید (POST)
         if request.method == 'POST' and 'assigned_to' in request.data:
-            if request.user.is_superuser or any(r.code == 'ADMIN' for r in request.user.roles.all()):
+            if request.user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in request.user.roles.all()):
                 return True
                 
             assigned_to_id = request.data.get('assigned_to')
@@ -64,8 +64,8 @@ class IsSuperiorUser(permissions.BasePermission):
         return True
 
     def has_object_permission(self, request, view, obj):
-        # ادمین دسترسی کامل دارد
-        if request.user.is_superuser or any(r.code == 'ADMIN' for r in request.user.roles.all()):
+        # ادمین و مدیر مالی دسترسی کامل دارند
+        if request.user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in request.user.roles.all()):
             return True
             
         # در همه حالتها (حتی ویرایش)، خود فرد ارجاع‌شده، سازنده، یا بالادستی دسترسی دارند.

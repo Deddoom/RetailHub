@@ -128,10 +128,18 @@ class SellerLookupSerializer(serializers.ModelSerializer):
 class CustomerSerializer(serializers.ModelSerializer):
     purchase_types = serializers.MultipleChoiceField(
         choices=[
-            ('CASH',    'نقدی'),
-            ('CARD',    'کارتی'),
-            ('ACCOUNT', 'حساب به حساب'),
-            ('CHEQUE',  'چکی'),
+            ('CASH',         'نقدی'),
+            ('CARD',         'کارتی'),
+            ('CARD_TO_CARD', 'کارت به کارت'),
+            ('POS',          'کارتخوان'),
+            ('ACCOUNT',      'حساب به حساب'),
+            ('TRANSFER',     'انتقال / حواله'),
+            ('SHEBA',        'شبا'),
+            ('CHEQUE',       'چکی'),
+            ('COMBINED',     'ترکیبی'),
+            ('DEPOSIT',      'بیعانه'),
+            ('REMAINING',    'وجه مانده'),
+            ('OTHER',        'سایر'),
         ],
         required=False,
     )
@@ -512,7 +520,7 @@ class ChecklistSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("کاربر غیرفعال است.")
         if request and request.user:
             user     = request.user
-            is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
+            is_admin = user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in user.roles.all())
             if not is_admin and not user.is_superior_to(value):
                 raise serializers.ValidationError("شما بالادست این کاربر نیستید.")
         return value
@@ -888,7 +896,7 @@ class ReportDefinitionSerializer(serializers.ModelSerializer):
         subordinate = data.get('subordinate')
         if request and subordinate:
             superior = request.user
-            is_admin = superior.is_superuser or any(r.code == 'ADMIN' for r in superior.roles.all())
+            is_admin = superior.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in superior.roles.all())
             if not is_admin and not superior.is_superior_to(subordinate):
                 raise serializers.ValidationError(
                     {"subordinate": "شما بالادست این کاربر نیستید و نمی‌توانید برایش گزارش تعریف کنید."}
@@ -983,10 +991,10 @@ class ReportSubmissionSerializer(serializers.ModelSerializer):
         if not definition:
             return data
 
-        # بررسی اینکه آیا کاربر ارسال کننده، همان زیردستی هدف است یا خیر (ادمین مستثنی است)
+        # بررسی اینکه آیا کاربر ارسال کننده، همان زیردستی هدف است یا خیر (ادمین و مدیر مالی مستثنی است)
         if request and definition.subordinate != request.user:
             is_admin = request.user.is_superuser or any(
-                r.code == 'ADMIN' for r in request.user.roles.all()
+                r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in request.user.roles.all()
             )
             if not is_admin:
                 raise serializers.ValidationError(

@@ -17,8 +17,11 @@ ROLE_TREE: dict[str, set[str]] = {
     'ADMIN':             {'FINANCIAL_MANAGER', 'EXECUTIVE_MANAGER', 'SUPERVISOR',
                           'ACCOUNTANT', 'STATISTICIAN', 'CASHIER', 'USER',
                           'SALES_MANAGER', 'SELLER_STAFF', 'IRRIGATOR',
-                          'GREEN_SPACE', 'ADVERTISING'},
-    'FINANCIAL_MANAGER': {'ACCOUNTANT', 'STATISTICIAN', 'CASHIER', 'USER'},
+                          'GREEN_SPACE', 'ADVERTISING', 'WAREHOUSE'},
+    'FINANCIAL_MANAGER': {'EXECUTIVE_MANAGER', 'SUPERVISOR',
+                          'ACCOUNTANT', 'STATISTICIAN', 'CASHIER', 'USER',
+                          'SALES_MANAGER', 'SELLER_STAFF', 'IRRIGATOR',
+                          'GREEN_SPACE', 'ADVERTISING', 'WAREHOUSE'},
     'EXECUTIVE_MANAGER': {'SUPERVISOR', 'USER',
                           'SALES_MANAGER', 'SELLER_STAFF', 'IRRIGATOR',
                           'GREEN_SPACE', 'ADVERTISING'},
@@ -32,6 +35,7 @@ ROLE_TREE: dict[str, set[str]] = {
     'IRRIGATOR':         set(),
     'GREEN_SPACE':       set(),
     'ADVERTISING':       set(),
+    'WAREHOUSE':         set(),
 }
 
 
@@ -104,8 +108,8 @@ class CustomUser(AbstractUser):
         if self.pk == target_user.pk:
             return False
             
-        # ادمین کل به همه افراد دسترسی بالادستی دارد
-        if self.is_superuser or any(r.code == 'ADMIN' for r in self.roles.all()):
+        # ادمین کل و مدیر مالی به همه افراد دسترسی بالادستی دارند
+        if self.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in self.roles.all()):
             return True
 
         # جستجوی درختی (BFS) به سمت بالا برای یافتن این کاربر در بین مدیران
@@ -195,10 +199,17 @@ class Customer(models.Model):
         ('OTHER',  'متفرقه'),
     ]
     PAYMENT_METHOD_CHOICES = [
-        ('CASH',    'نقدی'),
-        ('CARD',    'کارتی'),
-        ('ACCOUNT', 'حساب به حساب'),
-        ('CHEQUE',  'چکی'),
+        ('CASH',         'نقدی'),
+        ('CARD',         'کارتی'),
+        ('CARD_TO_CARD', 'کارت به کارت'),
+        ('POS',          'کارتخوان'),
+        ('ACCOUNT',      'حساب به حساب'),
+        ('TRANSFER',     'انتقال / حواله'),
+        ('SHEBA',        'شبا'),
+        ('CHEQUE',       'چکی'),
+        ('COMBINED',     'ترکیبی'),
+        ('DEPOSIT',      'بیعانه'),
+        ('OTHER',        'سایر'),
     ]
 
     id                    = models.UUIDField(primary_key=True, default=uuid4, editable=False)
