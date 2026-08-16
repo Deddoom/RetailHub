@@ -143,11 +143,20 @@ class CustomerSerializer(serializers.ModelSerializer):
         ],
         required=False,
     )
+    total_purchase_amount = serializers.DecimalField(
+        max_digits=12, decimal_places=2, required=False, default=Decimal('0.00')
+    )
 
     class Meta:
         model            = Customer
         fields           = '__all__'
-        read_only_fields = ['last_purchase_date', 'total_purchase_amount']
+        read_only_fields = ['last_purchase_date']
+
+    def to_internal_value(self, data):
+        ret = super().to_internal_value(data)
+        if 'purchase_types' in ret and isinstance(ret['purchase_types'], set):
+            ret['purchase_types'] = list(ret['purchase_types'])
+        return ret
 
 
 # ── Cheque ────────────────────────────────────────────────────────────────────
