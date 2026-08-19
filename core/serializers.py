@@ -966,17 +966,28 @@ class ReportSubmissionSerializer(serializers.ModelSerializer):
 
     def validate_answers(self, value):
         """
-        بررسی اولیه ساختار فیلد answers (آرایه بودن و داشتن کلیدهای ضروری)
+        بررسی اولیه ساختار فیلد answers (پشتیبانی از آرایه یا دیکشنری)
         """
+        if isinstance(value, dict):
+            # تبدیل خودکار ساختار دیکشنری به لیست
+            normalized = []
+            for k, v in value.items():
+                normalized.append({
+                    "question_id": str(k).strip(),
+                    "answer": str(v) if v is not None else ""
+                })
+            value = normalized
+
         if not isinstance(value, list):
-            raise serializers.ValidationError("پاسخ‌ها باید به صورت یک آرایه (لیست) ارسال شوند.")
+            raise serializers.ValidationError("پاسخ‌ها باید به صورت یک آرایه (لیست) یا آبجکت (Key-Value) ارسال شوند.")
 
         for idx, item in enumerate(value):
             if not isinstance(item, dict):
                 raise serializers.ValidationError(
                     f"پاسخ شماره {idx + 1}: باید یک آبجکت (JSON) باشد."
                 )
-            if 'question_id' not in item or not str(item.get('question_id', '')).strip():
+            qid = item.get('question_id') or item.get('id')
+            if not qid or not str(qid).strip():
                 raise serializers.ValidationError(
                     f"پاسخ شماره {idx + 1}: ارسال کلید «question_id» الزامی است."
                 )
@@ -984,6 +995,7 @@ class ReportSubmissionSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     f"پاسخ شماره {idx + 1}: ارسال کلید «answer» الزامی است."
                 )
+            item['question_id'] = str(qid).strip()
 
         return value
 
@@ -1015,7 +1027,15 @@ class ReportSubmissionSerializer(serializers.ModelSerializer):
         if answers is not None:
             # استخراج آیدی و متن سوالات اصلی برای مقایسه و تزریق
             valid_questions = {str(q['id']): q['text'] for q in definition.questions}
-            answered_ids    = {str(a['question_id']) for a in answers}
+            text_to_id      = {str(q['text']).strip(): str(q['id']) for q in definition.questions}
+
+            # اگر فرانت‌اِند متن سوال را به عنوان question_id ارسال کرده باشد، تبدیل خودکار به ID
+            for a in answers:
+                qid = str(a['question_id']).strip()
+                if qid not in valid_questions and qid in text_to_id:
+                    a['question_id'] = text_to_id[qid]
+
+            answered_ids = {str(a['question_id']) for a in answers}
 
             # ۱. بررسی question_id هایی که در فرم اصلی وجود ندارند
             invalid_ids = answered_ids - set(valid_questions.keys())

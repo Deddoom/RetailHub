@@ -7,8 +7,7 @@ from core.views import (
     ItemExitViewSet, ChecklistViewSet, TaskViewSet, DepositOrderViewSet,
     BranchListView, MissionViewSet, RoleViewSet, ChecklistLogViewSet, ClaimViewSet,
     DamageRegistrationViewSet, ReturnRequestViewSet, ReportDefinitionViewSet, ReportSubmissionViewSet,
-    BranchTransferViewSet, WasteReportViewSet, AdvanceRequestViewSet,
-
+    BranchTransferViewSet, WasteReportViewSet, AdvanceRequestViewSet, FileUploadView,
 )
 
 router = DefaultRouter()
@@ -36,6 +35,8 @@ router.register(r'advance-requests', AdvanceRequestViewSet, basename='advance-re
 
 urlpatterns = [
     path('auth/token/', AuthTokenView.as_view(), name='auth_token_login'),
-    path('branches/', BranchListView.as_view(), name='branch_list'), # <--- ۲. این خط را حتماً اضافه کنید
+    path('branches/', BranchListView.as_view(), name='branch_list'),
+    path('upload/', FileUploadView.as_view(), name='file_upload'),
+    path('upload-image/', FileUploadView.as_view(), name='image_upload'),
     path('', include(router.urls)),
 ]

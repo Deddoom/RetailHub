@@ -1,16 +1,18 @@
-# -*- coding: utf-8 -*-
+import os
+import uuid
 import datetime
-from datetime import timedelta
+from datetime import timedelta, date
 from rest_framework import viewsets, status, permissions, filters
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.views import APIView
 from rest_framework.response import Response
+from rest_framework.parsers import MultiPartParser, FormParser
 from django.db import transaction
-from django.db.models import ProtectedError, Q , F
+from django.db.models import ProtectedError, Q, F
 from django.utils import timezone
+from django.core.files.storage import default_storage
 from decimal import Decimal
-from datetime import date
 from rest_framework.permissions import IsAuthenticated
 
 from core.models import (
@@ -57,6 +59,71 @@ class SafeDestroyMixin:
                 {"error": "این رکورد دارای اطلاعات وابسته است و قابل حذف نمی‌باشد."},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+
+# ── File / Image Upload ───────────────────────────────────────────────────────
+
+class FileUploadView(APIView):
+    """
+    سرویس آپلود عکس و فایل (گزارش‌ها، فاکتورها، چک‌ها و ...)
+    ورودی: multipart/form-data با کلید 'file' یا 'image'
+    خروجی: URL مستقیم و اطلاعات فایل
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    parser_classes     = [MultiPartParser, FormParser]
+
+    def post(self, request, *args, **kwargs):
+        uploaded_file = request.FILES.get('file') or request.FILES.get('image')
+        if not uploaded_file:
+            return Response(
+                {"error": "هیچ فایلی ارسال نشده است. لطفاً فایل را با کلید 'file' یا 'image' ارسال نمایید."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # حداکثر حجم فایل (۱۵ مگابایت)
+        max_size_mb = 15
+        if uploaded_file.size > max_size_mb * 1024 * 1024:
+            return Response(
+                {"error": f"حجم فایل بیش از حد مجاز است. حداکثر حجم مجاز {max_size_mb} مگابایت می‌باشد."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # اعتبارسنجی پسوند فایل
+        original_name = uploaded_file.name
+        ext = os.path.splitext(original_name)[1].lower()
+        allowed_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.pdf', '.svg']
+        if ext not in allowed_extensions:
+            return Response(
+                {"error": f"فرمت فایل نامعتبر است. فرمت‌های مجاز: {', '.join(allowed_extensions)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # مسیر ذخیره‌سازی با ساختار تاریخ و نام یکتا
+        now = timezone.now()
+        date_path = now.strftime("%Y/%m/%d")
+        safe_basename = os.path.basename(original_name).replace(' ', '_')
+        unique_name = f"{uuid.uuid4().hex[:10]}_{safe_basename}"
+        file_relative_path = os.path.join('uploads', date_path, unique_name).replace('\\', '/')
+
+        # ذخیره فایل در مدیا استوریج
+        saved_path = default_storage.save(file_relative_path, uploaded_file)
+        file_url = default_storage.url(saved_path)
+
+        # ساخت URL کامل با هاست سرور
+        full_url = request.build_absolute_uri(file_url)
+
+        return Response(
+            {
+                "url": full_url,
+                "image_url": full_url,
+                "file_url": file_url,
+                "filename": unique_name,
+                "original_name": original_name,
+                "size": uploaded_file.size,
+                "content_type": getattr(uploaded_file, 'content_type', None),
+            },
+            status=status.HTTP_201_CREATED
+        )
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
@@ -115,14 +182,41 @@ class BranchListView(APIView):
 # ── Users ─────────────────────────────────────────────────────────────────────
 
 class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
-    queryset         = CustomUser.objects.all().order_by('-date_joined')
     serializer_class = UserSerializer
 
     def get_permissions(self):
-        public_actions = ['subordinates', 'update_branch', 'complete_profile', 'supervisors' , 'performance' , 'all_users_status' , 'mark_online', 'reports']
+        # صندوق‌داران و سایر پرسنل لاگین‌شده می‌توانند لیست و جزئیات کاربران و سرپرستان را مشاهده کنند
+        public_actions = [
+            'list', 'retrieve', 'subordinates', 'update_branch',
+            'complete_profile', 'supervisors', 'performance',
+            'all_users_status', 'mark_online', 'reports'
+        ]
         if self.action in public_actions:
             return [permissions.IsAuthenticated()]
         return [IsAdminUser()]
+
+    def get_queryset(self):
+        qs = CustomUser.objects.all().prefetch_related('roles', 'superiors').order_by('-date_joined')
+
+        role_param      = self.request.query_params.get('role')
+        branch_param    = self.request.query_params.get('branch')
+        is_active_param = self.request.query_params.get('is_active')
+        search_param    = self.request.query_params.get('search')
+
+        if role_param:
+            qs = qs.filter(roles__code=role_param)
+        if branch_param:
+            qs = qs.filter(branch=branch_param)
+        if is_active_param is not None:
+            qs = qs.filter(is_active=(is_active_param.lower() == 'true'))
+        if search_param:
+            qs = qs.filter(
+                Q(username__icontains=search_param) |
+                Q(first_name__icontains=search_param) |
+                Q(last_name__icontains=search_param)
+            )
+
+        return qs.distinct()
 
     @action(detail=False, methods=['get'], url_path='subordinates')
     def subordinates(self, request):
