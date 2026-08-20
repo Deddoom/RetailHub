@@ -108,8 +108,8 @@ class CustomUser(AbstractUser):
         if self.pk == target_user.pk:
             return False
             
-        # ادمین کل و مدیر مالی به همه افراد دسترسی بالادستی دارند
-        if self.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in self.roles.all()):
+        # ادمین کل به همه افراد دسترسی بالادستی دارد
+        if self.is_superuser or any(r.code == 'ADMIN' for r in self.roles.all()):
             return True
 
         # جستجوی درختی (BFS) به سمت بالا برای یافتن این کاربر در بین مدیران

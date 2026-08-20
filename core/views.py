@@ -222,7 +222,7 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     def subordinates(self, request):
         current_user = request.user
 
-        if current_user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in current_user.roles.all()):
+        if current_user.is_superuser or any(r.code == 'ADMIN' for r in current_user.roles.all()):
             subordinate_users = CustomUser.objects.exclude(pk=current_user.pk).prefetch_related('roles', 'superiors')
         else:
             subordinate_users_set = set()
@@ -393,7 +393,7 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         current_user = request.user
 
         is_admin = current_user.is_superuser or any(
-            r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in current_user.roles.all()
+            r.code == 'ADMIN' for r in current_user.roles.all()
         )
         is_self = current_user == target_user
         is_superior = current_user.is_superior_to(target_user)
@@ -886,7 +886,7 @@ class MissionViewSet(viewsets.ModelViewSet):
         user       = self.request.user
         user_roles = set(user.roles.values_list('code', flat=True))
 
-        if user.is_superuser or any(r in user_roles for r in ['ADMIN', 'FINANCIAL_MANAGER']):
+        if user.is_superuser or any(r in user_roles for r in ['ADMIN']):
             qs = Mission.objects.all()
         else:
             # ✅ رفع N+1: یک بار BFS بالا‌به‌پایین به جای N بار is_superior_to
@@ -912,7 +912,7 @@ class MissionViewSet(viewsets.ModelViewSet):
         user     = self.request.user
         data     = serializer.validated_data
 
-        is_admin   = user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in user.roles.all())
+        is_admin   = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
         can_manage = is_admin or instance.created_by == user or user.is_superior_to(instance.assigned_to)
         is_owner   = instance.assigned_to == user
 
@@ -951,7 +951,7 @@ class ChecklistViewSet(viewsets.ModelViewSet):
         user       = self.request.user
         user_roles = set(user.roles.values_list('code', flat=True))
 
-        if user.is_superuser or any(r in user_roles for r in ['ADMIN', 'FINANCIAL_MANAGER']):
+        if user.is_superuser or any(r in user_roles for r in ['ADMIN']):
             qs = Checklist.objects.all()
         else:
             # ✅ رفع N+1: یک بار BFS بالا‌به‌پایین به جای N بار is_superior_to
@@ -977,7 +977,7 @@ class TaskViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def _is_admin(self, user):
-        return user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in user.roles.all())
+        return user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
 
     def _can_manage_task(self, user, task):
         if self._is_admin(user):
@@ -1073,7 +1073,7 @@ class ChecklistLogViewSet(viewsets.ReadOnlyModelViewSet):
     def get_queryset(self):
         user = self.request.user
 
-        if user.is_superuser or user.roles.filter(code__in=['ADMIN', 'FINANCIAL_MANAGER']).exists():
+        if user.is_superuser or user.roles.filter(code='ADMIN').exists():
             qs = ChecklistLog.objects.all().prefetch_related('items')
         else:
             # ✅ رفع N+1: یک بار BFS بالا‌به‌پایین به جای N بار is_superior_to
@@ -1235,7 +1235,7 @@ class ReportDefinitionViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
 
     def get_queryset(self):
         user     = self.request.user
-        is_admin = user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in user.roles.all())
+        is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
 
         if is_admin:
             qs = ReportDefinition.objects.all()
@@ -1263,7 +1263,7 @@ class ReportDefinitionViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         definition = self.get_object()
         user       = request.user
 
-        is_admin = user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in user.roles.all())
+        is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
         if not is_admin and definition.superior != user:
             return Response(
                 {"error": "فقط سازنده گزارش می‌تواند وضعیت آن را تغییر دهد."},
@@ -1289,7 +1289,7 @@ class ReportDefinitionViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         original_definition = self.get_object()
         user = request.user
 
-        is_admin = user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in user.roles.all())
+        is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
         if not is_admin and original_definition.superior != user:
             return Response(
                 {"error": "شما دسترسی تکرار این گزارش را ندارید."},
@@ -1337,7 +1337,7 @@ class ReportSubmissionViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
 
     def get_queryset(self):
         user     = self.request.user
-        is_admin = user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in user.roles.all())
+        is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
 
         if is_admin:
             qs = ReportSubmission.objects.select_related(
@@ -1373,7 +1373,7 @@ class ReportSubmissionViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
         user     = request.user
-        is_admin = user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in user.roles.all())
+        is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
 
         # ✅ باگ ۵ رفع شد: ادمین هم می‌تواند ویرایش کند
         if not is_admin and instance.submitted_by != user:
@@ -1386,7 +1386,7 @@ class ReportSubmissionViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
         user     = request.user
-        is_admin = user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in user.roles.all())
+        is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
 
         if not is_admin and instance.definition.superior != user:
             return Response(
@@ -1422,7 +1422,7 @@ class BranchTransferViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
  
     def get_queryset(self):
         user = self.request.user
-        is_admin = user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in user.roles.all())
+        is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
  
         if is_admin:
             qs = BranchTransfer.objects.all()
@@ -1472,7 +1472,7 @@ class BranchTransferViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         if transfer.sender_supervisor != request.user and not (
-            request.user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in request.user.roles.all())
+            request.user.is_superuser or any(r.code == 'ADMIN' for r in request.user.roles.all())
         ):
             return Response(
                 {"error": "فقط سرپرست مبدا یا ادمین می‌تواند این انتقال را تایید کند."},
@@ -1510,7 +1510,7 @@ class BranchTransferViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         if transfer.sender_supervisor != request.user and not (
-            request.user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in request.user.roles.all())
+            request.user.is_superuser or any(r.code == 'ADMIN' for r in request.user.roles.all())
         ):
             return Response(
                 {"error": "فقط سرپرست مبدا یا ادمین می‌تواند این انتقال را رد کند."},
@@ -1553,7 +1553,7 @@ class BranchTransferViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         if transfer.receiver_supervisor != request.user and not (
-            request.user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in request.user.roles.all())
+            request.user.is_superuser or any(r.code == 'ADMIN' for r in request.user.roles.all())
         ):
             return Response(
                 {"error": "فقط سرپرست مقصد یا ادمین می‌تواند این انتقال را تایید کند."},
@@ -1599,7 +1599,7 @@ class BranchTransferViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         if transfer.receiver_supervisor != request.user and not (
-            request.user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in request.user.roles.all())
+            request.user.is_superuser or any(r.code == 'ADMIN' for r in request.user.roles.all())
         ):
             return Response(
                 {"error": "فقط سرپرست مقصد یا ادمین می‌تواند این انتقال را رد کند."},
@@ -1656,7 +1656,7 @@ class WasteReportViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
  
     def get_queryset(self):
         user     = self.request.user
-        is_admin = user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in user.roles.all())
+        is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
         is_warehouse = any(r.code == 'WAREHOUSE' for r in user.roles.all())
  
         if is_admin:
@@ -1689,7 +1689,7 @@ class WasteReportViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
         # فقط گزارش‌های در انتظار یا رد شده توسط انباردار قابل ویرایش توسط سرپرست هستند
-        is_admin = request.user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in request.user.roles.all())
+        is_admin = request.user.is_superuser or any(r.code == 'ADMIN' for r in request.user.roles.all())
         if not is_admin and instance.status not in ['PENDING', 'REJECTED_BY_WAREHOUSE']:
             return Response(
                 {"error": "گزارش پس از تایید انباردار قابل ویرایش نیست."},
@@ -1709,7 +1709,7 @@ class WasteReportViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         """
         waste = self.get_object()
  
-        is_admin     = request.user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in request.user.roles.all())
+        is_admin     = request.user.is_superuser or any(r.code == 'ADMIN' for r in request.user.roles.all())
         is_warehouse = any(r.code == 'WAREHOUSE' for r in user.roles.all())
         if not is_admin and not is_warehouse:
             return Response(
@@ -1770,7 +1770,7 @@ class WasteReportViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         """
         waste = self.get_object()
  
-        is_admin = request.user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in request.user.roles.all())
+        is_admin = request.user.is_superuser or any(r.code == 'ADMIN' for r in request.user.roles.all())
         if not is_admin:
             return Response(
                 {"error": "فقط ادمین می‌تواند دستور مدیریت صادر کند."},
