@@ -20,8 +20,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt /app/
 COPY ./wheels /app/wheels
 
-# نصب پکیج‌ها به صورت کاملاً آفلاین و بدون نیاز به اینترنت
-RUN pip install --no-cache-dir --no-index --find-links=/app/wheels -r requirements.txt
+# نصب پکیج‌ها (استفاده از کش محلی wheels و دانلود پکیج‌های مکمل در صورت نیاز)
+RUN pip install --no-cache-dir --find-links=/app/wheels -r requirements.txt
 
 # کپی کردن کل کدهای پروژه به درون کانتینر
 COPY . /app/

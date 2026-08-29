@@ -9,13 +9,7 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.SeparateDatabaseAndState(
-            state_operations=[
-                migrations.AlterField(
-                    model_name='claim',
-                    name='seller',
-                    field=models.CharField(max_length=150),
-                ),
-            ],
+            state_operations=[],
             database_operations=[
                 migrations.RunSQL(
                     sql="""
