@@ -2200,4 +2200,224 @@ INTERNAL
 
 ---
 
+## ── ۷. اصلاح دسترسی اندپوینت زیردستان (Users Subordinates)
+
+### دریافت لیست زیردستان
+
+`GET /api/users/subordinates/`
+
+این اندپوینت بر اساس نقش کاربری درخواست‌دهنده رفتار زیر را دارد:
+1. **ادمین و مدیر مالی (`ADMIN`, `FINANCIAL_MANAGER`, یا `superuser`):** دسترسی کامل به تمامی کاربران سیستم (به غیر از خود کاربر).
+2. **سایر مدیران و بالادستی‌ها:** صرفاً **زیردستان مستقیم (یک لایه پایین‌تر)** را مشاهده می‌کنند و زیردستان لایه‌های بعدی (زیردستِ زیردست) نمایش داده نمی‌شوند.
+
+**نمونه پاسخ (`200 OK`):**
+```json
+[
+  {
+    "id": "c1f10928-89c0-431b-b38a-3607f2efbb91",
+    "username": "seller1",
+    "first_name": "علی",
+    "last_name": "فروشنده",
+    "branch": "شعبه مدرس",
+    "roles": [
+      {
+        "id": "...",
+        "code": "SELLER_STAFF",
+        "display": "فروشنده"
+      }
+    ],
+    "superiors_info": [
+      {
+        "id": "...",
+        "username": "manager1",
+        "first_name": "حسین",
+        "last_name": "سرپرست"
+      }
+    ]
+  }
+]
+```
+
+---
+
+## ── ۸. سیستم پورسانت و پاداش فروشندگان (Seller Commission & Bonus System)
+
+این بخش امکان تعریف پلن پورسانت، ثبت روزانه فروش هر ماه شمسی توسط صندوق‌دار و استعلام وضعیت جامع پورسانت و پاداش را فراهم می‌سازد.
+
+### ۱. تعریف و ویرایش پلن پورسانت فروشنده
+
+`POST /api/seller-commissions/`  
+`PUT /api/seller-commissions/{id}/`  
+`PATCH /api/seller-commissions/{id}/`
+
+**دسترسی:** ادمین یا بالادستی مستقیم فروشنده.  
+**نکته:** کاربر انتخاب‌شده در فیلد `seller` حتماً باید دارای نقش فروشنده (`SELLER_STAFF`) باشد.
+
+#### حالت الف: سیستم کف و درصد مازاد (`THRESHOLD_SURPLUS`)
+در این حالت، اگر فروش از کف مشخص‌شده بیشتر شود، به میزان مازاد آن درصد تعیین‌شده تعلق می‌گیرد.
+فرمول: `(فروش کل ماه - کف) × درصد مازاد`
+
+**نمونه درخواست با پاداش فعال:**
+```json
+{
+  "seller": "c1f10928-89c0-431b-b38a-3607f2efbb91",
+  "is_active": true,
+  "model_type": "THRESHOLD_SURPLUS",
+  "threshold_amount": 200000000.0,
+  "surplus_percentage": 1.0,
+  "reward_active": true,
+  "reward_mode": "HIGHEST_ONLY",
+  "reward_milestones": [
+    { "target_amount": 200000000.0, "reward_amount": 2000000.0 },
+    { "target_amount": 300000000.0, "reward_amount": 4000000.0 },
+    { "target_amount": 400000000.0, "reward_amount": 8000000.0 }
+  ]
+}
+```
+
+#### حالت ب: سیستم پورسانت پلکانی از کف (`TIERED_FROM_BASE`)
+در این حالت پورسانت به صورت پلکان مارجینال (استاندارد حسابداری) محاسبه می‌شود.
+
+**نمونه درخواست:**
+```json
+{
+  "seller": "c1f10928-89c0-431b-b38a-3607f2efbb91",
+  "is_active": true,
+  "model_type": "TIERED_FROM_BASE",
+  "tiers": [
+    { "from_amount": 0.0, "to_amount": 100000000.0, "percentage": 0.0 },
+    { "from_amount": 100000000.0, "to_amount": 200000000.0, "percentage": 0.5 },
+    { "from_amount": 200000000.0, "to_amount": 300000000.0, "percentage": 1.0 },
+    { "from_amount": 300000000.0, "to_amount": null, "percentage": 1.5 }
+  ],
+  "reward_active": false
+}
+```
+
+---
+
+### ۲. ثبت فروش روزانه توسط صندوق‌دار شعبه
+
+#### الف) ثبت تکی روز
+`POST /api/seller-daily-sales/`
+
+**دسترسی:** صندوق‌دار همان شعبه فروشنده، بالادستی فروشنده، یا ادمین.
+
+**نمونه درخواست:**
+```json
+{
+  "seller": "c1f10928-89c0-431b-b38a-3607f2efbb91",
+  "shamsi_year": 1403,
+  "shamsi_month": 7,
+  "shamsi_day": 15,
+  "amount": 12500000.0,
+  "notes": "فروش شیفت عصر"
+}
+```
+
+#### ب) ثبت یا به‌روزرسانی گروهی کل روزهای ماه (Bulk Save)
+`POST /api/seller-daily-sales/bulk-save/`
+
+**نمونه درخواست:**
+```json
+{
+  "seller": "c1f10928-89c0-431b-b38a-3607f2efbb91",
+  "shamsi_year": 1403,
+  "shamsi_month": 7,
+  "daily_sales": [
+    { "shamsi_day": 1, "amount": 8000000.0, "notes": "" },
+    { "shamsi_day": 2, "amount": 11500000.0, "notes": "" },
+    { "shamsi_day": 3, "amount": 14000000.0, "notes": "" }
+  ]
+}
+```
+
+---
+
+### ۳. استعلام وضعیت جامع پورسانت و پاداش
+
+`GET /api/seller-commissions/status/?seller={seller_id}&shamsi_year={year}&shamsi_month={month}`
+
+**پارامترهای ارسالی در Query:**
+- `seller` (الزامی): شناسه UUID فروشنده
+- `shamsi_year` (اختیاری): سال شمسی (پیش‌فرض: سال جاری)
+- `shamsi_month` (اختیاری): ماه شمسی ۱ تا ۱۲ (پیش‌فرض: ماه جاری)
+
+**دسترسی:** ادمین، مدیر مالی، بالادستی فروشنده، صندوق‌دار همان شعبه، یا خود فروشنده.
+
+**نمونه پاسخ کامل (`200 OK`):**
+```json
+{
+  "seller": {
+    "id": "c1f10928-89c0-431b-b38a-3607f2efbb91",
+    "username": "seller1",
+    "name": "علی فروشنده",
+    "branch": "شعبه مدرس"
+  },
+  "period": {
+    "shamsi_year": 1403,
+    "shamsi_month": 7,
+    "shamsi_month_name": "مهر",
+    "days_in_month": 30
+  },
+  "is_configured": true,
+  "config": {
+    "id": "...",
+    "model_type": "THRESHOLD_SURPLUS",
+    "model_type_display": "کف و درصد مازاد",
+    "threshold_amount": "200000000.00",
+    "surplus_percentage": "1.00",
+    "reward_active": true,
+    "reward_mode": "HIGHEST_ONLY",
+    "reward_mode_display": "فقط بالاترین تارگت",
+    "reward_milestones": [
+      { "target_amount": 200000000, "reward_amount": 2000000 },
+      { "target_amount": 300000000, "reward_amount": 4000000 },
+      { "target_amount": 400000000, "reward_amount": 8000000 }
+    ]
+  },
+  "sales_summary": {
+    "total_monthly_sales": 300000000.0,
+    "recorded_days_count": 25,
+    "daily_sales": [
+      {
+        "id": "...",
+        "day": 1,
+        "amount": 12000000.0,
+        "shamsi_date": "1403/07/01",
+        "recorded_by": "cashier1",
+        "recorded_by_name": "صندوق‌دار ۱",
+        "notes": "",
+        "updated_at": "2026-09-16T12:00:00Z"
+      }
+    ]
+  },
+  "calculation": {
+    "is_configured": true,
+    "model_type": "THRESHOLD_SURPLUS",
+    "model_display": "کف و درصد مازاد",
+    "total_sales": 300000000.0,
+    "commission_amount": 1000000.0,
+    "reward_active": true,
+    "reward_amount": 4000000.0,
+    "total_earnings": 5000000.0,
+    "commission_breakdown": {
+      "model": "THRESHOLD_SURPLUS",
+      "total_sales": 300000000.0,
+      "threshold": 200000000.0,
+      "surplus": 100000000.0,
+      "percentage": 1.0,
+      "formula": "(300,000,000 - 200,000,000) × 1.0% = 1,000,000"
+    },
+    "reward_breakdown": [
+      { "target_amount": 200000000.0, "reward_amount": 2000000.0, "achieved": true, "awarded": false },
+      { "target_amount": 300000000.0, "reward_amount": 4000000.0, "achieved": true, "awarded": true },
+      { "target_amount": 400000000.0, "reward_amount": 8000000.0, "achieved": false, "awarded": false }
+    ]
+  }
+}
+```
+
+---
+
 این مستندات جدید با کدهای فعلی بک‌اند سیستم شما هماهنگ است و برای توسعه‌دهندگان فرانت‌اند یا وب‌هوک‌ها به عنوان مرجع کاملاً دقیق عمل می‌کند.

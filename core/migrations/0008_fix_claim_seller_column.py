@@ -1,4 +1,23 @@
-from django.db import migrations, models
+from django.db import migrations
+
+
+def fix_claim_seller(apps, schema_editor):
+    if schema_editor.connection.vendor == 'postgresql':
+        with schema_editor.connection.cursor() as cursor:
+            cursor.execute("""
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name='core_claim' AND column_name='seller_id'
+                    ) AND NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name='core_claim' AND column_name='seller'
+                    ) THEN
+                        ALTER TABLE core_claim RENAME COLUMN seller_id TO seller;
+                    END IF;
+                END $$;
+            """)
 
 
 class Migration(migrations.Migration):
@@ -11,23 +30,7 @@ class Migration(migrations.Migration):
         migrations.SeparateDatabaseAndState(
             state_operations=[],
             database_operations=[
-                migrations.RunSQL(
-                    sql="""
-                        DO $$
-                        BEGIN
-                            IF EXISTS (
-                                SELECT 1 FROM information_schema.columns
-                                WHERE table_name='core_claim' AND column_name='seller_id'
-                            ) AND NOT EXISTS (
-                                SELECT 1 FROM information_schema.columns
-                                WHERE table_name='core_claim' AND column_name='seller'
-                            ) THEN
-                                ALTER TABLE core_claim RENAME COLUMN seller_id TO seller;
-                            END IF;
-                        END $$;
-                    """,
-                    reverse_sql=migrations.RunSQL.noop,
-                ),
+                migrations.RunPython(fix_claim_seller, migrations.RunPython.noop),
             ],
         ),
     ]

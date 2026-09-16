@@ -1007,3 +1007,172 @@ class AdvanceRequestLog(models.Model):
 
     class Meta:
         ordering = ['created_at']
+
+
+# ── SellerCommissionConfig (تنظیمات سیستم پورسانت فروشنده) ────────────────────
+class SellerCommissionConfig(models.Model):
+    MODEL_CHOICES = [
+        ('THRESHOLD_SURPLUS', 'کف و درصد مازاد'),
+        ('TIERED_FROM_BASE',  'پورسانت پلکانی از کف'),
+    ]
+    REWARD_MODE_CHOICES = [
+        ('HIGHEST_ONLY', 'فقط بالاترین تارگت'),
+        ('CUMULATIVE',   'تجمعی پله‌ها'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    seller = models.OneToOneField(
+        CustomUser,
+        on_delete=models.CASCADE,
+        related_name='commission_config',
+        verbose_name='فروشنده'
+    )
+    is_active = models.BooleanField(default=True, verbose_name='فعال است؟')
+    model_type = models.CharField(
+        max_length=30,
+        choices=MODEL_CHOICES,
+        default='THRESHOLD_SURPLUS',
+        verbose_name='نوع مدل پورسانت'
+    )
+
+    # فیلدهای مربوط به مدل کف و درصد مازاد
+    threshold_amount = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        blank=True,
+        null=True,
+        verbose_name='مبلغ کف فروش'
+    )
+    surplus_percentage = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        blank=True,
+        null=True,
+        verbose_name='درصد مازاد بر کف'
+    )
+
+    # فیلدهای مربوط به مدل پلکانی از کف
+    tiers = models.JSONField(
+        default=list,
+        blank=True,
+        verbose_name='پلکان‌های پورسانت'
+    )
+
+    # سیستم پاداش (Bonus)
+    reward_active = models.BooleanField(
+        default=False,
+        verbose_name='سیستم پاداش فعال است؟'
+    )
+    reward_mode = models.CharField(
+        max_length=20,
+        choices=REWARD_MODE_CHOICES,
+        default='HIGHEST_ONLY',
+        verbose_name='نحوه محاسبه پاداش'
+    )
+    reward_milestones = models.JSONField(
+        default=list,
+        blank=True,
+        verbose_name='تارگت‌های پاداش'
+    )
+
+    created_by = models.ForeignKey(
+        CustomUser,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_commission_configs',
+        verbose_name='ثبت‌کننده'
+    )
+    updated_by = models.ForeignKey(
+        CustomUser,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='updated_commission_configs',
+        verbose_name='آخرین ویرایش‌کننده'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'تنظیمات پورسانت فروشنده'
+        verbose_name_plural = 'تنظیمات پورسانت فروشندگان'
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        return f"پورسانت {self.seller.username} ({self.get_model_type_display()})"
+
+
+# ── SellerDailySale (ثبت فروش روزانه ماه شمسی توسط صندوق‌دار) ────────────────
+class SellerDailySale(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    seller = models.ForeignKey(
+        CustomUser,
+        on_delete=models.CASCADE,
+        related_name='daily_sales',
+        verbose_name='فروشنده'
+    )
+    shamsi_year = models.PositiveSmallIntegerField(
+        db_index=True,
+        verbose_name='سال شمسی'
+    )
+    shamsi_month = models.PositiveSmallIntegerField(
+        db_index=True,
+        verbose_name='ماه شمسی'
+    )
+    shamsi_day = models.PositiveSmallIntegerField(
+        verbose_name='روز ماه شمسی'
+    )
+    date = models.DateField(
+        null=True,
+        blank=True,
+        db_index=True,
+        verbose_name='تاریخ میلادی معادل'
+    )
+    amount = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        verbose_name='مبلغ فروش روز'
+    )
+    branch = models.CharField(
+        max_length=50,
+        choices=BRANCH_CHOICES,
+        verbose_name='شعبه'
+    )
+    recorded_by = models.ForeignKey(
+        CustomUser,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='recorded_daily_sales',
+        verbose_name='صندوق‌دار ثبت‌کننده'
+    )
+    notes = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        verbose_name='یادداشت'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'فروش روزانه فروشنده'
+        verbose_name_plural = 'فروش‌های روزانه فروشندگان'
+        unique_together = ('seller', 'shamsi_year', 'shamsi_month', 'shamsi_day')
+        ordering = ['shamsi_year', 'shamsi_month', 'shamsi_day']
+
+    def __str__(self):
+        return f"{self.seller.username} - {self.shamsi_year}/{self.shamsi_month:02d}/{self.shamsi_day:02d}: {self.amount:,.0f}"
+
+    def save(self, *args, **kwargs):
+        if not self.date and self.shamsi_year and self.shamsi_month and self.shamsi_day:
+            from core.utils.jalali import get_gregorian_date
+            try:
+                self.date = get_gregorian_date(self.shamsi_year, self.shamsi_month, self.shamsi_day)
+            except Exception:
+                pass
+        super().save(*args, **kwargs)

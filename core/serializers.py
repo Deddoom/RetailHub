@@ -14,8 +14,13 @@ from core.models import (
     ReturnRequest, ReturnItem, ExchangeItem,
     ReportDefinition, ReportSubmission, ReportImage,
     BranchTransfer, TransferItem, TransferLog,
-    WasteReport, WasteItem, AdvanceRequest, AdvanceRequestLog
+    WasteReport, WasteItem, AdvanceRequest, AdvanceRequestLog,
+    SellerCommissionConfig, SellerDailySale
 )
+from core.utils.jalali import (
+    get_days_in_shamsi_month, format_jalali_date, get_shamsi_month_name
+)
+
 
 
 # ── Role  ─────────────────────────────────────────────────────────────────────
@@ -1466,3 +1471,192 @@ class AdvanceRequestInboxSerializer(serializers.ModelSerializer):
             'logs', 'created_at', 'updated_at'
         ]
         read_only_fields = fields
+
+
+# ── سیستم پورسانت و پاداش فروشندگان (Seller Commission & Reward) ──────────────
+
+class SellerCommissionConfigSerializer(serializers.ModelSerializer):
+    seller_name = serializers.SerializerMethodField(read_only=True)
+    seller_username = serializers.CharField(source='seller.username', read_only=True)
+    seller_branch = serializers.CharField(source='seller.branch', read_only=True)
+    model_type_display = serializers.CharField(source='get_model_type_display', read_only=True)
+    reward_mode_display = serializers.CharField(source='get_reward_mode_display', read_only=True)
+    created_by_name = serializers.SerializerMethodField(read_only=True)
+    updated_by_name = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = SellerCommissionConfig
+        fields = [
+            'id', 'seller', 'seller_name', 'seller_username', 'seller_branch',
+            'is_active', 'model_type', 'model_type_display',
+            'threshold_amount', 'surplus_percentage',
+            'tiers',
+            'reward_active', 'reward_mode', 'reward_mode_display', 'reward_milestones',
+            'created_by', 'created_by_name',
+            'updated_by', 'updated_by_name',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['created_by', 'updated_by', 'created_at', 'updated_at']
+
+    def get_seller_name(self, obj):
+        name = f"{obj.seller.first_name} {obj.seller.last_name}".strip()
+        return name if name else obj.seller.username
+
+    def get_created_by_name(self, obj):
+        if not obj.created_by:
+            return None
+        name = f"{obj.created_by.first_name} {obj.created_by.last_name}".strip()
+        return name if name else obj.created_by.username
+
+    def get_updated_by_name(self, obj):
+        if not obj.updated_by:
+            return None
+        name = f"{obj.updated_by.first_name} {obj.updated_by.last_name}".strip()
+        return name if name else obj.updated_by.username
+
+    def validate_seller(self, value):
+        # بررسی اینکه کاربر نقش فروشنده داشته باشد
+        has_seller_role = any(r.code == 'SELLER_STAFF' for r in value.roles.all())
+        if not has_seller_role:
+            raise serializers.ValidationError("کاربر انتخاب‌شده نقش فروشنده (SELLER_STAFF) را ندارد.")
+        return value
+
+    def validate(self, attrs):
+        model_type = attrs.get('model_type', getattr(self.instance, 'model_type', 'THRESHOLD_SURPLUS'))
+
+        if model_type == 'THRESHOLD_SURPLUS':
+            thresh = attrs.get('threshold_amount', getattr(self.instance, 'threshold_amount', Decimal('0.00')))
+            pct = attrs.get('surplus_percentage', getattr(self.instance, 'surplus_percentage', Decimal('0.00')))
+            if thresh is not None and thresh < 0:
+                raise serializers.ValidationError({"threshold_amount": "مبلغ کف نمی‌تواند منفی باشد."})
+            if pct is not None and (pct < 0 or pct > 100):
+                raise serializers.ValidationError({"surplus_percentage": "درصد مازاد باید بین ۰ تا ۱۰۰ باشد."})
+
+        elif model_type == 'TIERED_FROM_BASE':
+            tiers = attrs.get('tiers', getattr(self.instance, 'tiers', []))
+            if not isinstance(tiers, list):
+                raise serializers.ValidationError({"tiers": "پلکان‌ها باید به صورت یک آرایه (لیست) ارسال شوند."})
+            for idx, tier in enumerate(tiers):
+                if not isinstance(tier, dict):
+                    raise serializers.ValidationError({"tiers": f"پلکان شماره {idx+1} نامعتبر است."})
+                from_amt = tier.get('from_amount')
+                pct = tier.get('percentage')
+                if from_amt is None or Decimal(str(from_amt)) < 0:
+                    raise serializers.ValidationError({"tiers": f"مقدار شروع (from_amount) در پلکان {idx+1} نامعتبر است."})
+                if pct is None or not (0 <= Decimal(str(pct)) <= 100):
+                    raise serializers.ValidationError({"tiers": f"درصد پورسانت (percentage) در پلکان {idx+1} باید بین ۰ تا ۱۰۰ باشد."})
+
+        # اعتبارسنجی پاداش در صورت فعال بودن
+        reward_active = attrs.get('reward_active', getattr(self.instance, 'reward_active', False))
+        if reward_active:
+            milestones = attrs.get('reward_milestones', getattr(self.instance, 'reward_milestones', []))
+            if not isinstance(milestones, list):
+                raise serializers.ValidationError({"reward_milestones": "تارگت‌های پاداش باید به صورت لیست ارسال شوند."})
+            for idx, m in enumerate(milestones):
+                if not isinstance(m, dict):
+                    raise serializers.ValidationError({"reward_milestones": f"تارگت شماره {idx+1} نامعتبر است."})
+                target = m.get('target_amount')
+                reward = m.get('reward_amount')
+                if target is None or Decimal(str(target)) <= 0:
+                    raise serializers.ValidationError({"reward_milestones": f"مبلغ تارگت (target_amount) در پاداش {idx+1} باید بزرگتر از صفر باشد."})
+                if reward is None or Decimal(str(reward)) < 0:
+                    raise serializers.ValidationError({"reward_milestones": f"مبلغ پاداش (reward_amount) در پاداش {idx+1} نمی‌تواند منفی باشد."})
+
+        return attrs
+
+
+class SellerDailySaleSerializer(serializers.ModelSerializer):
+    seller_name = serializers.SerializerMethodField(read_only=True)
+    recorded_by_name = serializers.SerializerMethodField(read_only=True)
+    shamsi_date = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = SellerDailySale
+        fields = [
+            'id', 'seller', 'seller_name',
+            'shamsi_year', 'shamsi_month', 'shamsi_day', 'shamsi_date',
+            'date', 'amount', 'branch',
+            'recorded_by', 'recorded_by_name',
+            'notes', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['date', 'recorded_by', 'created_at', 'updated_at']
+
+    def get_seller_name(self, obj):
+        name = f"{obj.seller.first_name} {obj.seller.last_name}".strip()
+        return name if name else obj.seller.username
+
+    def get_recorded_by_name(self, obj):
+        if not obj.recorded_by:
+            return None
+        name = f"{obj.recorded_by.first_name} {obj.recorded_by.last_name}".strip()
+        return name if name else obj.recorded_by.username
+
+    def get_shamsi_date(self, obj):
+        return format_jalali_date(obj.shamsi_year, obj.shamsi_month, obj.shamsi_day)
+
+    def validate_amount(self, value):
+        if value < 0:
+            raise serializers.ValidationError("مبلغ فروش نمی‌تواند منفی باشد.")
+        return value
+
+    def validate(self, attrs):
+        jy = attrs.get('shamsi_year', getattr(self.instance, 'shamsi_year', None))
+        jm = attrs.get('shamsi_month', getattr(self.instance, 'shamsi_month', None))
+        jd = attrs.get('shamsi_day', getattr(self.instance, 'shamsi_day', None))
+
+        if not (1 <= jm <= 12):
+            raise serializers.ValidationError({"shamsi_month": "ماه شمسی باید بین ۱ تا ۱۲ باشد."})
+
+        try:
+            max_days = get_days_in_shamsi_month(jy, jm)
+        except Exception:
+            max_days = 31
+
+        if not (1 <= jd <= max_days):
+            raise serializers.ValidationError({
+                "shamsi_day": f"روز شمسی در ماه {get_shamsi_month_name(jm)} سال {jy} باید بین ۱ تا {max_days} باشد."
+            })
+
+        return attrs
+
+
+class DailySaleItemSerializer(serializers.Serializer):
+    shamsi_day = serializers.IntegerField(min_value=1, max_value=31)
+    amount = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=0)
+    notes = serializers.CharField(max_length=255, required=False, allow_blank=True, default='')
+
+
+class SellerDailySaleBulkSerializer(serializers.Serializer):
+    seller = serializers.PrimaryKeyRelatedField(queryset=CustomUser.objects.all())
+    shamsi_year = serializers.IntegerField(min_value=1300, max_value=1500)
+    shamsi_month = serializers.IntegerField(min_value=1, max_value=12)
+    daily_sales = DailySaleItemSerializer(many=True)
+
+    def validate_seller(self, value):
+        has_seller_role = any(r.code == 'SELLER_STAFF' for r in value.roles.all())
+        if not has_seller_role:
+            raise serializers.ValidationError("کاربر انتخاب‌شده نقش فروشنده (SELLER_STAFF) را ندارد.")
+        return value
+
+    def validate(self, attrs):
+        jy = attrs['shamsi_year']
+        jm = attrs['shamsi_month']
+        try:
+            max_days = get_days_in_shamsi_month(jy, jm)
+        except Exception:
+            max_days = 31
+
+        days_seen = set()
+        for item in attrs['daily_sales']:
+            day = item['shamsi_day']
+            if day > max_days:
+                raise serializers.ValidationError({
+                    "daily_sales": f"روز {day} در ماه {get_shamsi_month_name(jm)} سال {jy} غیرمجاز است (حداکثر {max_days} روز)."
+                })
+            if day in days_seen:
+                raise serializers.ValidationError({
+                    "daily_sales": f"روز {day} بیش از یک بار در لیست تکرار شده است."
+                })
+            days_seen.add(day)
+
+        return attrs

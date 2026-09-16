@@ -26,6 +26,7 @@ from core.models import (
     ReportDefinition, ReportSubmission,
     BranchTransfer, TransferItem, TransferLog,
     WasteReport, WasteItem, UserOnlineLog, AdvanceRequest, AdvanceRequestLog,
+    SellerCommissionConfig, SellerDailySale,
 )
 from core.serializers import (
     UserSerializer,
@@ -43,7 +44,13 @@ from core.serializers import (
     BranchTransferSerializer, BranchTransferListSerializer,
     WasteReportSerializer, WasteReportListSerializer,
     AdvanceRequestSerializer, AdvanceRequestListSerializer, AdvanceRequestInboxSerializer,
+    SellerCommissionConfigSerializer, SellerDailySaleSerializer, SellerDailySaleBulkSerializer,
 )
+from core.utils.jalali import (
+    get_current_shamsi, get_days_in_shamsi_month, get_shamsi_month_name, format_jalali_date
+)
+from core.utils.commission import calculate_seller_commission
+
 from core.authentication import StatelessTokenService
 from core.permissions import IsAdminUser, IsOwnerOrAdminOnly, IsSuperiorUser
 
@@ -222,20 +229,16 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     def subordinates(self, request):
         current_user = request.user
 
-        if current_user.is_superuser or any(r.code == 'ADMIN' for r in current_user.roles.all()):
+        # ادمین و مدیر مالی دسترسی کامل به تمام کاربران دارند
+        if current_user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in current_user.roles.all()):
             subordinate_users = CustomUser.objects.exclude(pk=current_user.pk).prefetch_related('roles', 'superiors')
         else:
-            subordinate_users_set = set()
-            queue = list(current_user.subordinate_users.all())
-            while queue:
-                curr = queue.pop(0)
-                if curr not in subordinate_users_set:
-                    subordinate_users_set.add(curr)
-                    queue.extend(curr.subordinate_users.all())
-            subordinate_users = list(subordinate_users_set)
+            # سایر مدیران و بالادستی‌ها فقط و فقط یک لایه پایین‌تر (زیردستان مستقیم) را می‌بینند
+            subordinate_users = current_user.subordinate_users.all().prefetch_related('roles', 'superiors')
 
         serializer = self.get_serializer(subordinate_users, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
 
     @action(detail=False, methods=['patch'], url_path='update-branch')
     def update_branch(self, request):
@@ -2066,3 +2069,325 @@ class AdvanceRequestViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
 
         serializer = AdvanceRequestInboxSerializer(qs, many=True)
         return Response(serializer.data)
+
+
+# ── سیستم پورسانت و پاداش فروشندگان (Seller Commission & Reward) ──────────────
+
+class SellerCommissionConfigViewSet(viewsets.ModelViewSet):
+    """
+    مدیریت تنظیمات پورسانت و پاداش برای فروشندگان:
+    - ایجاد و ویرایش فقط توسط ادمین یا بالادستی مستقیم فروشنده
+    - مشاهده توسط ادمین، مدیر مالی، بالادستی و خود فروشنده
+    - اکشن استعلام جامع وضعیت و محاسبه خودکار پورسانت
+    """
+    queryset = SellerCommissionConfig.objects.select_related(
+        'seller', 'created_by', 'updated_by'
+    ).all()
+    serializer_class = SellerCommissionConfigSerializer
+    permission_classes = [IsAuthenticated]
+
+    def _is_admin(self, user):
+        return user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
+
+    def _is_admin_or_finance(self, user):
+        return user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in user.roles.all())
+
+    def _can_manage_seller(self, user, seller):
+        if self._is_admin(user):
+            return True
+        return user.is_superior_to(seller)
+
+    def get_queryset(self):
+        user = self.request.user
+        if self._is_admin_or_finance(user):
+            return self.queryset
+
+        # برای سایر کاربران: اگر خود فروشنده است، یا بالادستی فروشنده است
+        seller_ids = [
+            u.id for u in CustomUser.objects.filter(roles__code='SELLER_STAFF')
+            if user.is_superior_to(u) or u.pk == user.pk
+        ]
+        return self.queryset.filter(seller_id__in=seller_ids)
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        seller = serializer.validated_data.get('seller')
+
+        if not self._can_manage_seller(user, seller):
+            raise PermissionDenied("تنها ادمین یا بالادستی مستقیم فروشنده مجاز به تعریف سیستم پورسانت هستند.")
+
+        serializer.save(created_by=user, updated_by=user)
+
+    def perform_update(self, serializer):
+        user = self.request.user
+        instance = serializer.instance
+
+        if not self._can_manage_seller(user, instance.seller):
+            raise PermissionDenied("تنها ادمین یا بالادستی مستقیم فروشنده مجاز به ویرایش سیستم پورسانت هستند.")
+
+        serializer.save(updated_by=user)
+
+    def perform_destroy(self, instance):
+        user = self.request.user
+        if not self._can_manage_seller(user, instance.seller):
+            raise PermissionDenied("تنها ادمین یا بالادستی مستقیم فروشنده مجاز به حذف این رکورد هستند.")
+        instance.delete()
+
+    @action(detail=False, methods=['get'], url_path='status')
+    def status(self, request):
+        """
+        استعلام جامع وضعیت پورسانت فروشنده به ازای ماه و سال شمسی مشخص.
+        پارامترها:
+        - seller: شناسه کاربری فروشنده (الزامی)
+        - shamsi_year: سال شمسی (اختیاری - پیش‌فرض سال جاری)
+        - shamsi_month: ماه شمسی (اختیاری - پیش‌فرض ماه جاری)
+        """
+        user = request.user
+        seller_id = request.query_params.get('seller')
+
+        if not seller_id:
+            return Response(
+                {"error": "پارامتر seller (شناسه کاربر فروشنده) الزامی است."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            seller = CustomUser.objects.prefetch_related('roles', 'superiors').get(pk=seller_id)
+        except (CustomUser.DoesNotExist, ValueError):
+            return Response(
+                {"error": "فروشنده مورد نظر یافت نشد."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # بررسی دسترسی خواندن وضعیت:
+        # ادمین، مدیر مالی، بالادستی فروشنده، صندوق‌دار همان شعبه، یا خود فروشنده
+        is_self = (user.pk == seller.pk)
+        is_superior = user.is_superior_to(seller)
+        is_admin_or_fin = self._is_admin_or_finance(user)
+        is_branch_cashier = (
+            any(r.code == 'CASHIER' for r in user.roles.all()) and
+            user.branch and user.branch == seller.branch
+        )
+
+        if not (is_admin_or_fin or is_superior or is_self or is_branch_cashier):
+            raise PermissionDenied("شما دسترسی لازم برای مشاهده وضعیت پورسانت این فروشنده را ندارید.")
+
+        # تشخیص سال و ماه شمسی
+        cur_y, cur_m, _ = get_current_shamsi()
+        try:
+            shamsi_year = int(request.query_params.get('shamsi_year', cur_y))
+            shamsi_month = int(request.query_params.get('shamsi_month', cur_m))
+        except ValueError:
+            return Response(
+                {"error": "سال یا ماه شمسی نامعتبر است."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not (1 <= shamsi_month <= 12):
+            return Response(
+                {"error": "ماه شمسی باید بین ۱ تا ۱۲ باشد."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # استخراج لیست فروش‌های روزانه ثبت شده برای این ماه
+        daily_sales_qs = SellerDailySale.objects.filter(
+            seller=seller,
+            shamsi_year=shamsi_year,
+            shamsi_month=shamsi_month
+        ).select_related('recorded_by').order_by('shamsi_day')
+
+        total_monthly_sales = sum(s.amount for s in daily_sales_qs)
+
+        # استخراج کانفیگ پورسانت
+        config = SellerCommissionConfig.objects.filter(seller=seller).first()
+
+        # اجرای محاسبات پورسانت و پاداش
+        calc_result = calculate_seller_commission(config, total_monthly_sales)
+
+        try:
+            days_in_month = get_days_in_shamsi_month(shamsi_year, shamsi_month)
+        except Exception:
+            days_in_month = 30
+
+        response_data = {
+            "seller": {
+                "id": str(seller.id),
+                "username": seller.username,
+                "name": f"{seller.first_name} {seller.last_name}".strip() or seller.username,
+                "branch": seller.branch,
+            },
+            "period": {
+                "shamsi_year": shamsi_year,
+                "shamsi_month": shamsi_month,
+                "shamsi_month_name": get_shamsi_month_name(shamsi_month),
+                "days_in_month": days_in_month,
+            },
+            "is_configured": calc_result["is_configured"],
+            "config": SellerCommissionConfigSerializer(config).data if config else None,
+            "sales_summary": {
+                "total_monthly_sales": float(total_monthly_sales),
+                "recorded_days_count": daily_sales_qs.count(),
+                "daily_sales": [
+                    {
+                        "id": str(s.id),
+                        "day": s.shamsi_day,
+                        "amount": float(s.amount),
+                        "shamsi_date": format_jalali_date(s.shamsi_year, s.shamsi_month, s.shamsi_day),
+                        "recorded_by": s.recorded_by.username if s.recorded_by else None,
+                        "recorded_by_name": f"{s.recorded_by.first_name} {s.recorded_by.last_name}".strip() if s.recorded_by else None,
+                        "notes": s.notes,
+                        "updated_at": s.updated_at
+                    }
+                    for s in daily_sales_qs
+                ]
+            },
+            "calculation": calc_result
+        }
+
+        return Response(response_data, status=status.HTTP_200_OK)
+
+
+class SellerDailySaleViewSet(viewsets.ModelViewSet):
+    """
+    ثبت و ویرایش لیست فروش روزانه فروشندگان در ماه‌های شمسی:
+    - ایجاد/ویرایش توسط صندوق‌دار شعبه، بالادستی فروشنده یا ادمین
+    - پشتیبانی از اکشن bulk-save برای ثبت کل روزهای ماه در یک درخواست
+    """
+    queryset = SellerDailySale.objects.select_related(
+        'seller', 'recorded_by'
+    ).all()
+    serializer_class = SellerDailySaleSerializer
+    permission_classes = [IsAuthenticated]
+
+    def _can_record_sales_for_seller(self, user, seller):
+        # ادمین و مدیر مالی دسترسی کامل دارند
+        if user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in user.roles.all()):
+            return True
+        # بالادستی فروشنده
+        if user.is_superior_to(seller):
+            return True
+        # صندوق‌دار همان شعبه فروشنده
+        if any(r.code == 'CASHIER' for r in user.roles.all()) and user.branch and user.branch == seller.branch:
+            return True
+        return False
+
+    def get_queryset(self):
+        qs = self.queryset
+        user = self.request.user
+
+        # فیلترها
+        seller_id = self.request.query_params.get('seller')
+        if seller_id:
+            qs = qs.filter(seller_id=seller_id)
+
+        shamsi_year = self.request.query_params.get('shamsi_year')
+        if shamsi_year:
+            qs = qs.filter(shamsi_year=shamsi_year)
+
+        shamsi_month = self.request.query_params.get('shamsi_month')
+        if shamsi_month:
+            qs = qs.filter(shamsi_month=shamsi_month)
+
+        branch = self.request.query_params.get('branch')
+        if branch:
+            qs = qs.filter(branch=branch)
+
+        # محدودسازی دسترسی در صورتی که ادمین/مدیرمالی نباشد
+        if not (user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in user.roles.all())):
+            # اگر صندوق‌دار است، فقط شعبه خودش
+            if any(r.code == 'CASHIER' for r in user.roles.all()):
+                qs = qs.filter(branch=user.branch)
+            elif any(r.code == 'SELLER_STAFF' for r in user.roles.all()):
+                # فروشنده فقط فروش‌های خودش را می‌بیند
+                qs = qs.filter(seller=user)
+            else:
+                # بالادستی زیردستان خودش را می‌بیند
+                sub_ids = [u.id for u in user.get_all_subordinates()]
+                qs = qs.filter(seller_id__in=sub_ids)
+
+        return qs.order_by('shamsi_year', 'shamsi_month', 'shamsi_day')
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        seller = serializer.validated_data.get('seller')
+
+        if not self._can_record_sales_for_seller(user, seller):
+            raise PermissionDenied("شما مجاز به ثبت فروش برای این فروشنده نیستید (صندوق‌دار باید در همان شعبه باشد).")
+
+        branch = seller.branch or user.branch or ''
+        serializer.save(recorded_by=user, branch=branch)
+
+    def perform_update(self, serializer):
+        user = self.request.user
+        instance = serializer.instance
+
+        if not self._can_record_sales_for_seller(user, instance.seller):
+            raise PermissionDenied("شما مجاز به ویرایش فروش این فروشنده نیستید.")
+
+        serializer.save(recorded_by=user)
+
+    def perform_destroy(self, instance):
+        user = self.request.user
+        if not self._can_record_sales_for_seller(user, instance.seller):
+            raise PermissionDenied("شما مجاز به حذف این رکورد نیستید.")
+        instance.delete()
+
+    @action(detail=False, methods=['post'], url_path='bulk-save')
+    def bulk_save(self, request):
+        """
+        ثبت یا به‌روزرسانی گروهی فروش روزهای ماه توسط صندوق‌دار.
+        ورودی:
+        {
+            "seller": "<UUID>",
+            "shamsi_year": 1403,
+            "shamsi_month": 7,
+            "daily_sales": [
+                {"shamsi_day": 1, "amount": 10000000, "notes": ""},
+                {"shamsi_day": 2, "amount": 12000000, "notes": ""}
+            ]
+        }
+        """
+        serializer = SellerDailySaleBulkSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user = request.user
+        seller = serializer.validated_data['seller']
+        shamsi_year = serializer.validated_data['shamsi_year']
+        shamsi_month = serializer.validated_data['shamsi_month']
+        daily_sales = serializer.validated_data['daily_sales']
+
+        if not self._can_record_sales_for_seller(user, seller):
+            raise PermissionDenied("شما مجاز به ثبت فروش برای این فروشنده نیستید.")
+
+        branch = seller.branch or user.branch or ''
+        saved_records = []
+
+        with transaction.atomic():
+            for item in daily_sales:
+                day = item['shamsi_day']
+                amount = item['amount']
+                notes = item.get('notes', '')
+
+                record, _ = SellerDailySale.objects.update_or_create(
+                    seller=seller,
+                    shamsi_year=shamsi_year,
+                    shamsi_month=shamsi_month,
+                    shamsi_day=day,
+                    defaults={
+                        'amount': amount,
+                        'notes': notes,
+                        'recorded_by': user,
+                        'branch': branch
+                    }
+                )
+                saved_records.append(record)
+
+        total_amount = sum(r.amount for r in saved_records)
+        return Response({
+            "message": f"تعداد {len(saved_records)} رکورد فروش با موفقیت ثبت/ویرایش شد.",
+            "seller": str(seller.id),
+            "shamsi_year": shamsi_year,
+            "shamsi_month": shamsi_month,
+            "total_sales_updated": float(total_amount),
+            "records": SellerDailySaleSerializer(saved_records, many=True).data
+        }, status=status.HTTP_200_OK)

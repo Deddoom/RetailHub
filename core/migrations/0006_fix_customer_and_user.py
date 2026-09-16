@@ -3,6 +3,8 @@ from django.db import connection
 
 
 def add_fields_if_not_exists(apps, schema_editor):
+    if connection.vendor != 'postgresql':
+        return
     with connection.cursor() as cursor:
 
         # is_profile_completed در core_customuser

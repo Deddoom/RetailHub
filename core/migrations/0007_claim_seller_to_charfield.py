@@ -3,6 +3,8 @@ from django.db import connection
 
 
 def convert_seller_to_charfield(apps, schema_editor):
+    if connection.vendor != 'postgresql':
+        return
     with connection.cursor() as cursor:
         # اول یه ستون متنی موقت بساز
         cursor.execute("""
