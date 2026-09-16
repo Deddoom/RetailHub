@@ -1167,8 +1167,26 @@ class DamageRegistrationViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     def get_queryset(self):
         qs   = super().get_queryset()
         user = self.request.user
-        if not (user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in user.roles.all())):
+        # ادمین، مدیر مالی و انباردار دسترسی کامل به تمامی ثبت‌های ضایعات دارند
+        if not (user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER', 'WAREHOUSE'] for r in user.roles.all())):
             qs = qs.filter(created_by=user)
+
+        branch = self.request.query_params.get('branch')
+        if branch:
+            qs = qs.filter(branch=branch)
+
+        reason = self.request.query_params.get('reason')
+        if reason:
+            qs = qs.filter(reason=reason)
+
+        from_date = self.request.query_params.get('from_date')
+        if from_date:
+            qs = qs.filter(date__gte=from_date)
+
+        to_date = self.request.query_params.get('to_date')
+        if to_date:
+            qs = qs.filter(date__lte=to_date)
+
         return qs
 
 
