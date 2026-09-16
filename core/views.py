@@ -1713,7 +1713,7 @@ class WasteReportViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         waste = self.get_object()
  
         is_admin     = request.user.is_superuser or any(r.code == 'ADMIN' for r in request.user.roles.all())
-        is_warehouse = any(r.code == 'WAREHOUSE' for r in user.roles.all())
+        is_warehouse = any(r.code == 'WAREHOUSE' for r in request.user.roles.all())
         if not is_admin and not is_warehouse:
             return Response(
                 {"error": "فقط انباردار یا ادمین می‌تواند این عملیات را انجام دهد."},
