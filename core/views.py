@@ -116,8 +116,12 @@ class FileUploadView(APIView):
         saved_path = default_storage.save(file_relative_path, uploaded_file)
         file_url = default_storage.url(saved_path)
 
-        # ساخت URL کامل با هاست سرور
-        full_url = request.build_absolute_uri(file_url)
+        # ساخت URL کامل با هاست سرور یا BASE_URL تعیین‌شده
+        base_url = os.environ.get('BASE_URL', '').strip().rstrip('/')
+        if base_url:
+            full_url = f"{base_url}{file_url}"
+        else:
+            full_url = request.build_absolute_uri(file_url)
 
         return Response(
             {
