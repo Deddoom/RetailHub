@@ -3,6 +3,7 @@ from django.db import models
 from django.contrib.auth.models import AbstractUser
 from uuid import uuid4
 from decimal import Decimal
+import datetime
 
 # ── تعریف شعب ثابت سیستم ──────────────────────────────────────────────────
 BRANCH_CHOICES = [
@@ -1175,4 +1176,183 @@ class SellerDailySale(models.Model):
                 self.date = get_gregorian_date(self.shamsi_year, self.shamsi_month, self.shamsi_day)
             except Exception:
                 pass
-        super().save(*args, **kwargs)
+        super().save(*args, **kwargs)
+
+
+# ── Liquidity Management (مدیریت نقدینگی) ──────────────────────────────────────
+
+class LiquidityDailyRevenueSetting(models.Model):
+    """
+    میزان درآمد روزانه (مبنای فرمول‌های محاسبه وضعیت هزینه‌ها)
+    """
+    amount = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'), verbose_name="میزان درآمد روزانه (تومان)")
+    updated_by = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='daily_revenue_updates', verbose_name="به‌روزرسانی توسط")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="زمان آخرین تغییر")
+
+    class Meta:
+        verbose_name = "تنظیم درآمد روزانه نقدینگی"
+        verbose_name_plural = "تنظیمات درآمد روزانه نقدینگی"
+
+    def __str__(self):
+        return f"درآمد روزانه: {self.amount:,.0f} تومان"
+
+    @classmethod
+    def get_current_revenue(cls):
+        obj = cls.objects.first()
+        if not obj:
+            obj = cls.objects.create(amount=Decimal('0.00'))
+        return obj
+
+
+class LiquidityExpense(models.Model):
+    """
+    هزینه‌های تعهد شده مدیریت نقدینگی (حقوق، روزانه، اجاره، قبض، چک، خرید، متفرقه)
+    """
+    CATEGORY_CHOICES = [
+        ('SALARY',   'حقوق'),
+        ('DAILY',    'روزانه'),
+        ('RENT',     'اجاره'),
+        ('BILL',     'قبض'),
+        ('CHEQUE',   'چک'),
+        ('PURCHASE', 'خرید'),
+        ('MISC',     'متفرقه'),
+    ]
+
+    id          = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    title       = models.CharField(max_length=150, verbose_name="نام/عنوان هزینه")
+    category    = models.CharField(max_length=30, choices=CATEGORY_CHOICES, default='MISC', verbose_name="دسته‌بندی")
+    amount      = models.DecimalField(max_digits=14, decimal_places=2, verbose_name="مبلغ کل هزینه")
+    due_date    = models.DateField(verbose_name="تاریخ سررسید")
+    description = models.TextField(blank=True, null=True, verbose_name="توضیحات")
+    is_paid     = models.BooleanField(default=False, verbose_name="آیا تایید پرداخت زده شده است؟")
+    paid_at     = models.DateTimeField(blank=True, null=True, verbose_name="زمان تایید نهایی پرداخت")
+    created_by  = models.ForeignKey(CustomUser, on_delete=models.PROTECT, related_name='liquidity_expenses_created', verbose_name="کاربر ثبت‌کننده")
+    created_at  = models.DateTimeField(auto_now_add=True, verbose_name="تاریخ ثبت")
+    updated_at  = models.DateTimeField(auto_now=True, verbose_name="تاریخ ویرایش")
+
+    class Meta:
+        verbose_name = "هزینه نقدینگی"
+        verbose_name_plural = "هزینه‌های نقدینگی"
+        ordering = ['is_paid', 'due_date', '-created_at']
+
+    def __str__(self):
+        return f"{self.title} ({self.get_category_display()}) - {self.amount:,.0f}"
+
+    @property
+    def allocated_amount(self):
+        """مجموع مبالغ تخصیص‌یافته/پرداخت شده به این هزینه تا کنون"""
+        total = self.payments.aggregate(total=models.Sum('amount'))['total']
+        return total or Decimal('0.00')
+
+    @property
+    def remaining_debt(self):
+        """مقدار بدهی باقی‌مانده از کل هزینه"""
+        remaining = self.amount - self.allocated_amount
+        return max(Decimal('0.00'), remaining)
+
+    @property
+    def days_remaining(self):
+        """تعداد روزهای باقی‌مانده تا سررسید نسبت به امروز"""
+        today = datetime.date.today()
+        return (self.due_date - today).days
+
+    def calculate_status(self, daily_revenue=None):
+        """
+        محاسبه وضعیت هوشمند:
+        1. اگر تایید پرداخت خورده -> PAID (پرداخت شده)
+        2. اگر قبل از سررسید مقدار داده شده >= کل مقدار -> EXCELLENT (عالی)
+        3. اگر سررسید گذشته و پرداخت نشده -> OVERDUE (عقب مانده)
+        4. در غیر این صورت بر اساس نسبت نرخ ذخیره روزانه به درآمد روزانه:
+           - کمتر از 50% درآمد روزانه -> NORMAL (عادی)
+           - بین 50% تا 75% درآمد روزانه -> WARNING (هشدار)
+           - بالاتر از 75% درآمد روزانه -> CRITICAL (خطرناک)
+        """
+        if self.is_paid:
+            return 'PAID'
+
+        allocated = self.allocated_amount
+        rem_debt = max(Decimal('0.00'), self.amount - allocated)
+        days = self.days_remaining
+
+        if rem_debt == Decimal('0.00') and days >= 0:
+            return 'EXCELLENT'
+
+        if days < 0:
+            return 'OVERDUE'
+
+        if daily_revenue is None:
+            setting = LiquidityDailyRevenueSetting.get_current_revenue()
+            daily_revenue = setting.amount
+
+        if not daily_revenue or daily_revenue <= 0:
+            if days <= 1:
+                return 'CRITICAL'
+            elif days <= 3:
+                return 'WARNING'
+            return 'NORMAL'
+
+        # در روز سررسید (days == 0)، ۱ روز در نظر گرفته می‌شود
+        effective_days = max(1, days)
+        daily_required = rem_debt / Decimal(str(effective_days))
+        ratio = daily_required / Decimal(str(daily_revenue))
+
+        if ratio < Decimal('0.50'):
+            return 'NORMAL'
+        elif ratio <= Decimal('0.75'):
+            return 'WARNING'
+        else:
+            return 'CRITICAL'
+
+
+class LiquidityExpensePayment(models.Model):
+    """
+    پرداخت‌ها و تخصیص‌های مرحله‌ای به یک هزینه نقدینگی
+    """
+    id          = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    expense     = models.ForeignKey(LiquidityExpense, on_delete=models.CASCADE, related_name='payments', verbose_name="هزینه مربوطه")
+    amount      = models.DecimalField(max_digits=14, decimal_places=2, verbose_name="مبلغ پرداختی/تخصیص")
+    date        = models.DateField(default=datetime.date.today, verbose_name="تاریخ تخصیص")
+    description = models.TextField(blank=True, null=True, verbose_name="توضیحات")
+    created_by  = models.ForeignKey(CustomUser, on_delete=models.PROTECT, related_name='liquidity_payments_created', verbose_name="ثبت‌کننده")
+    created_at  = models.DateTimeField(auto_now_add=True, verbose_name="زمان ثبت")
+
+    class Meta:
+        verbose_name = "پرداخت/تخصیص هزینه نقدینگی"
+        verbose_name_plural = "پرداخت‌های هزینه‌های نقدینگی"
+        ordering = ['-date', '-created_at']
+
+    def __str__(self):
+        return f"{self.expense.title} - {self.amount:,.0f} ({self.date})"
+
+
+class LiquidityCardTransaction(models.Model):
+    """
+    تراکنش‌های کارت تنخواه و کارت سود (واریز و برداشت)
+    """
+    CARD_TYPE_CHOICES = [
+        ('PETTY_CASH', 'تنخواه'),
+        ('PROFIT',     'سود'),
+    ]
+
+    TRANSACTION_TYPE_CHOICES = [
+        ('DEPOSIT',    'واریز / پرداخت به کارت'),
+        ('WITHDRAWAL', 'برداشت / خرج از کارت'),
+    ]
+
+    id               = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    card_type        = models.CharField(max_length=20, choices=CARD_TYPE_CHOICES, verbose_name="نوع کارت")
+    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPE_CHOICES, verbose_name="نوع تراکنش")
+    amount           = models.DecimalField(max_digits=14, decimal_places=2, verbose_name="مبلغ")
+    date             = models.DateField(default=datetime.date.today, verbose_name="تاریخ تراکنش")
+    description      = models.TextField(blank=True, null=True, verbose_name="توضیحات تراکنش")
+    created_by       = models.ForeignKey(CustomUser, on_delete=models.PROTECT, related_name='liquidity_card_transactions', verbose_name="ثبت‌کننده")
+    created_at       = models.DateTimeField(auto_now_add=True, verbose_name="زمان ثبت")
+
+    class Meta:
+        verbose_name = "تراکنش کارت نقدینگی"
+        verbose_name_plural = "تراکنش‌های کارت‌های نقدینگی"
+        ordering = ['-date', '-created_at']
+
+    def __str__(self):
+        return f"[{self.get_card_type_display()}] {self.get_transaction_type_display()} {self.amount:,.0f} ({self.date})"
+

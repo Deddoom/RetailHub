@@ -9,6 +9,7 @@ from core.views import (
     DamageRegistrationViewSet, ReturnRequestViewSet, ReportDefinitionViewSet, ReportSubmissionViewSet,
     BranchTransferViewSet, WasteReportViewSet, AdvanceRequestViewSet, FileUploadView,
     SellerCommissionConfigViewSet, SellerDailySaleViewSet,
+    LiquidityDailyRevenueView, LiquidityExpenseViewSet, LiquidityCardsViewSet,
 )
 
 router = DefaultRouter()
@@ -35,11 +36,14 @@ router.register(r'waste-reports',      WasteReportViewSet,       basename='waste
 router.register(r'advance-requests', AdvanceRequestViewSet, basename='advance-request')
 router.register(r'seller-commissions', SellerCommissionConfigViewSet, basename='seller-commission')
 router.register(r'seller-daily-sales', SellerDailySaleViewSet, basename='seller-daily-sale')
+router.register(r'liquidity/expenses', LiquidityExpenseViewSet, basename='liquidity-expense')
+router.register(r'liquidity/cards', LiquidityCardsViewSet, basename='liquidity-cards')
 
 urlpatterns = [
     path('auth/token/', AuthTokenView.as_view(), name='auth_token_login'),
     path('branches/', BranchListView.as_view(), name='branch_list'),
     path('upload/', FileUploadView.as_view(), name='file_upload'),
     path('upload-image/', FileUploadView.as_view(), name='image_upload'),
+    path('liquidity/daily-revenue/', LiquidityDailyRevenueView.as_view(), name='liquidity_daily_revenue'),
     path('', include(router.urls)),
-]
+]

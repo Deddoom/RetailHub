@@ -15,10 +15,11 @@ from core.models import (
     ReportDefinition, ReportSubmission, ReportImage,
     BranchTransfer, TransferItem, TransferLog,
     WasteReport, WasteItem, AdvanceRequest, AdvanceRequestLog,
-    SellerCommissionConfig, SellerDailySale
+    SellerCommissionConfig, SellerDailySale,
+    LiquidityDailyRevenueSetting, LiquidityExpense, LiquidityExpensePayment, LiquidityCardTransaction
 )
 from core.utils.jalali import (
-    get_days_in_shamsi_month, format_jalali_date, get_shamsi_month_name
+    get_days_in_shamsi_month, format_jalali_date, get_shamsi_month_name, gregorian_to_jalali
 )
 
 
@@ -1659,4 +1660,249 @@ class SellerDailySaleBulkSerializer(serializers.Serializer):
                 })
             days_seen.add(day)
 
-        return attrs
+        return attrs
+
+
+# ── Liquidity Management Serializers (مدیریت نقدینگی) ─────────────────────────
+
+LIQUIDITY_STATUS_DISPLAY = {
+    'EXCELLENT': 'عالی',
+    'NORMAL':    'عادی',
+    'WARNING':   'هشدار',
+    'CRITICAL':  'خطرناک',
+    'OVERDUE':   'عقب مانده',
+    'PAID':      'پرداخت شده',
+}
+
+
+class LiquidityDailyRevenueSettingSerializer(serializers.ModelSerializer):
+    updated_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = LiquidityDailyRevenueSetting
+        fields = ['id', 'amount', 'updated_by', 'updated_by_name', 'updated_at']
+        read_only_fields = ['id', 'updated_by', 'updated_at']
+
+    def get_updated_by_name(self, obj):
+        if not obj.updated_by:
+            return None
+        full = f"{obj.updated_by.first_name} {obj.updated_by.last_name}".strip()
+        return full or obj.updated_by.username
+
+
+class LiquidityExpensePaymentSerializer(serializers.ModelSerializer):
+    created_by_name = serializers.SerializerMethodField()
+    date_jalali = serializers.SerializerMethodField()
+
+    class Meta:
+        model = LiquidityExpensePayment
+        fields = [
+            'id', 'expense', 'amount', 'date', 'date_jalali',
+            'description', 'created_by', 'created_by_name', 'created_at'
+        ]
+        read_only_fields = ['id', 'created_by', 'created_at']
+
+    def get_created_by_name(self, obj):
+        if not obj.created_by:
+            return None
+        full = f"{obj.created_by.first_name} {obj.created_by.last_name}".strip()
+        return full or obj.created_by.username
+
+    def get_date_jalali(self, obj):
+        if not obj.date:
+            return None
+        d = obj.date
+        if isinstance(d, str):
+            try:
+                d = datetime.date.fromisoformat(d)
+            except Exception:
+                return None
+        jy, jm, jd = gregorian_to_jalali(d.year, d.month, d.day)
+        return format_jalali_date(jy, jm, jd)
+
+
+class LiquidityCardTransactionSerializer(serializers.ModelSerializer):
+    card_type_display = serializers.CharField(source='get_card_type_display', read_only=True)
+    transaction_type_display = serializers.CharField(source='get_transaction_type_display', read_only=True)
+    created_by_name = serializers.SerializerMethodField()
+    date_jalali = serializers.SerializerMethodField()
+
+    class Meta:
+        model = LiquidityCardTransaction
+        fields = [
+            'id', 'card_type', 'card_type_display',
+            'transaction_type', 'transaction_type_display',
+            'amount', 'date', 'date_jalali',
+            'description', 'created_by', 'created_by_name', 'created_at'
+        ]
+        read_only_fields = ['id', 'created_by', 'created_at']
+
+    def get_created_by_name(self, obj):
+        if not obj.created_by:
+            return None
+        full = f"{obj.created_by.first_name} {obj.created_by.last_name}".strip()
+        return full or obj.created_by.username
+
+    def get_date_jalali(self, obj):
+        if not obj.date:
+            return None
+        d = obj.date
+        if isinstance(d, str):
+            try:
+                d = datetime.date.fromisoformat(d)
+            except Exception:
+                return None
+        jy, jm, jd = gregorian_to_jalali(d.year, d.month, d.day)
+        return format_jalali_date(jy, jm, jd)
+
+
+class LiquidityExpenseSerializer(serializers.ModelSerializer):
+    name = serializers.CharField(source='title', required=False)
+    category_display = serializers.CharField(source='get_category_display', read_only=True)
+    allocated_amount = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    remaining_debt = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    days_remaining = serializers.IntegerField(read_only=True)
+    status = serializers.SerializerMethodField()
+    status_display = serializers.SerializerMethodField()
+    daily_saving_needed = serializers.SerializerMethodField()
+    daily_revenue_ratio = serializers.SerializerMethodField()
+    due_date_jalali = serializers.SerializerMethodField()
+    paid_at_jalali = serializers.SerializerMethodField()
+    created_by_name = serializers.SerializerMethodField()
+    payments = LiquidityExpensePaymentSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = LiquidityExpense
+        fields = [
+            'id', 'title', 'name', 'category', 'category_display',
+            'amount', 'due_date', 'due_date_jalali',
+            'description', 'is_paid', 'paid_at', 'paid_at_jalali',
+            'allocated_amount', 'remaining_debt', 'days_remaining',
+            'daily_saving_needed', 'daily_revenue_ratio',
+            'status', 'status_display', 'payments',
+            'created_by', 'created_by_name', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'is_paid', 'paid_at', 'created_by', 'created_at', 'updated_at']
+
+    def to_internal_value(self, data):
+        # پشتیبانی از هر دو کلید name و title در ورودی
+        mutable_data = data.copy() if hasattr(data, 'copy') else dict(data)
+        if 'name' in mutable_data and 'title' not in mutable_data:
+            mutable_data['title'] = mutable_data['name']
+        return super().to_internal_value(mutable_data)
+
+    def get_status(self, obj):
+        daily_revenue = self.context.get('daily_revenue')
+        return obj.calculate_status(daily_revenue=daily_revenue)
+
+    def get_status_display(self, obj):
+        st = self.get_status(obj)
+        return LIQUIDITY_STATUS_DISPLAY.get(st, st)
+
+    def get_daily_saving_needed(self, obj):
+        if obj.is_paid:
+            return Decimal('0.00')
+        rem = obj.remaining_debt
+        if rem <= Decimal('0.00'):
+            return Decimal('0.00')
+        days = obj.days_remaining
+        if days < 0:
+            return rem
+        effective_days = max(1, days)
+        return round(rem / Decimal(str(effective_days)), 2)
+
+    def get_daily_revenue_ratio(self, obj):
+        if obj.is_paid:
+            return Decimal('0.00')
+        daily_revenue = self.context.get('daily_revenue')
+        if daily_revenue is None:
+            setting = LiquidityDailyRevenueSetting.get_current_revenue()
+            daily_revenue = setting.amount
+        if not daily_revenue or daily_revenue <= 0:
+            return None
+        needed = self.get_daily_saving_needed(obj)
+        return round(needed / Decimal(str(daily_revenue)), 4)
+
+    def get_due_date_jalali(self, obj):
+        if not obj.due_date:
+            return None
+        d = obj.due_date
+        if isinstance(d, str):
+            try:
+                d = datetime.date.fromisoformat(d)
+            except Exception:
+                return None
+        jy, jm, jd = gregorian_to_jalali(d.year, d.month, d.day)
+        return format_jalali_date(jy, jm, jd)
+
+    def get_paid_at_jalali(self, obj):
+        if not obj.paid_at:
+            return None
+        d = obj.paid_at.date()
+        jy, jm, jd = gregorian_to_jalali(d.year, d.month, d.day)
+        return format_jalali_date(jy, jm, jd)
+
+    def get_created_by_name(self, obj):
+        if not obj.created_by:
+            return None
+        full = f"{obj.created_by.first_name} {obj.created_by.last_name}".strip()
+        return full or obj.created_by.username
+
+
+class LiquidityExpenseListSerializer(serializers.ModelSerializer):
+    """سریالایزر سبک برای نمایش سریع لیست هزینه‌ها بدون لود عمیق تمام پرداخت‌ها"""
+    name = serializers.CharField(source='title', read_only=True)
+    category_display = serializers.CharField(source='get_category_display', read_only=True)
+    allocated_amount = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    remaining_debt = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    days_remaining = serializers.IntegerField(read_only=True)
+    status = serializers.SerializerMethodField()
+    status_display = serializers.SerializerMethodField()
+    daily_saving_needed = serializers.SerializerMethodField()
+    due_date_jalali = serializers.SerializerMethodField()
+    payments_count = serializers.IntegerField(source='payments.count', read_only=True)
+
+    class Meta:
+        model = LiquidityExpense
+        fields = [
+            'id', 'title', 'name', 'category', 'category_display',
+            'amount', 'due_date', 'due_date_jalali',
+            'is_paid', 'paid_at',
+            'allocated_amount', 'remaining_debt', 'days_remaining',
+            'daily_saving_needed', 'status', 'status_display',
+            'payments_count', 'created_at'
+        ]
+
+    def get_status(self, obj):
+        daily_revenue = self.context.get('daily_revenue')
+        return obj.calculate_status(daily_revenue=daily_revenue)
+
+    def get_status_display(self, obj):
+        st = self.get_status(obj)
+        return LIQUIDITY_STATUS_DISPLAY.get(st, st)
+
+    def get_daily_saving_needed(self, obj):
+        if obj.is_paid:
+            return Decimal('0.00')
+        rem = obj.remaining_debt
+        if rem <= Decimal('0.00'):
+            return Decimal('0.00')
+        days = obj.days_remaining
+        if days < 0:
+            return rem
+        effective_days = max(1, days)
+        return round(rem / Decimal(str(effective_days)), 2)
+
+    def get_due_date_jalali(self, obj):
+        if not obj.due_date:
+            return None
+        d = obj.due_date
+        if isinstance(d, str):
+            try:
+                d = datetime.date.fromisoformat(d)
+            except Exception:
+                return None
+        jy, jm, jd = gregorian_to_jalali(d.year, d.month, d.day)
+        return format_jalali_date(jy, jm, jd)
+
+

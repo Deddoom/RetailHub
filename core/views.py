@@ -8,8 +8,8 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
-from django.db import transaction
-from django.db.models import ProtectedError, Q, F
+from django.db import transaction, models
+from django.db.models import ProtectedError, Q, F, Sum
 from django.utils import timezone
 from django.core.files.storage import default_storage
 from decimal import Decimal
@@ -27,6 +27,7 @@ from core.models import (
     BranchTransfer, TransferItem, TransferLog,
     WasteReport, WasteItem, UserOnlineLog, AdvanceRequest, AdvanceRequestLog,
     SellerCommissionConfig, SellerDailySale,
+    LiquidityDailyRevenueSetting, LiquidityExpense, LiquidityExpensePayment, LiquidityCardTransaction,
 )
 from core.serializers import (
     UserSerializer,
@@ -45,9 +46,11 @@ from core.serializers import (
     WasteReportSerializer, WasteReportListSerializer,
     AdvanceRequestSerializer, AdvanceRequestListSerializer, AdvanceRequestInboxSerializer,
     SellerCommissionConfigSerializer, SellerDailySaleSerializer, SellerDailySaleBulkSerializer,
+    LiquidityDailyRevenueSettingSerializer, LiquidityExpensePaymentSerializer,
+    LiquidityCardTransactionSerializer, LiquidityExpenseSerializer, LiquidityExpenseListSerializer,
 )
 from core.utils.jalali import (
-    get_current_shamsi, get_days_in_shamsi_month, get_shamsi_month_name, format_jalali_date
+    get_current_shamsi, get_days_in_shamsi_month, get_shamsi_month_name, format_jalali_date, get_gregorian_date
 )
 from core.utils.commission import calculate_seller_commission
 
@@ -2412,4 +2415,491 @@ class SellerDailySaleViewSet(viewsets.ModelViewSet):
             "shamsi_month": shamsi_month,
             "total_sales_updated": float(total_amount),
             "records": SellerDailySaleSerializer(saved_records, many=True).data
-        }, status=status.HTTP_200_OK)
+        }, status=status.HTTP_200_OK)
+
+
+# ── Liquidity Management Views (مدیریت نقدینگی) ───────────────────────────────
+
+class IsLiquidityManager(permissions.BasePermission):
+    """
+    مجوز دسترسی به ماژول مدیریت نقدینگی:
+    - ادمین کل و مدیر مالی: دسترسی کامل خواندن و نوشتن
+    - مدیر اجرایی، سرپرست و حسابدار: دسترسی فقط خواندنی (GET)
+    """
+    def has_permission(self, request, view):
+        if not (request.user and request.user.is_authenticated):
+            return False
+        if request.user.is_superuser:
+            return True
+        user_roles = {r.code for r in request.user.roles.all()}
+        if 'ADMIN' in user_roles or 'FINANCIAL_MANAGER' in user_roles:
+            return True
+        if request.method in permissions.SAFE_METHODS:
+            return bool(user_roles & {'EXECUTIVE_MANAGER', 'ACCOUNTANT', 'SUPERVISOR'})
+        return False
+
+
+class LiquidityDailyRevenueView(APIView):
+    """
+    دریافت و تنظیم میزان درآمد روزانه
+    GET /api/liquidity/daily-revenue/
+    POST/PUT /api/liquidity/daily-revenue/  {"amount": 50000000}
+    """
+    permission_classes = [IsLiquidityManager]
+
+    def get(self, request):
+        setting = LiquidityDailyRevenueSetting.get_current_revenue()
+        serializer = LiquidityDailyRevenueSettingSerializer(setting)
+        return Response(serializer.data)
+
+    def post(self, request):
+        return self._update(request)
+
+    def put(self, request):
+        return self._update(request)
+
+    def _update(self, request):
+        raw_amount = request.data.get('amount')
+        if raw_amount is None:
+            return Response({"error": "فیلد amount الزامی است."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            amount = Decimal(str(raw_amount))
+            if amount < 0:
+                return Response({"error": "مبلغ درآمد روزانه نمی‌تواند منفی باشد."}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            return Response({"error": "مقدار مبلغ نامعتبر است."}, status=status.HTTP_400_BAD_REQUEST)
+
+        setting = LiquidityDailyRevenueSetting.get_current_revenue()
+        setting.amount = amount
+        setting.updated_by = request.user
+        setting.save()
+
+        serializer = LiquidityDailyRevenueSettingSerializer(setting)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class LiquidityExpenseViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
+    """
+    مدیریت هزینه‌های تعهد شده نقدینگی (CRUD، لیست با فیلترهای تفکیکی، ثبت پرداخت مرحله‌ای و تایید تسویه نهایی)
+    """
+    permission_classes = [IsLiquidityManager]
+    serializer_class = LiquidityExpenseSerializer
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return LiquidityExpenseListSerializer
+        return LiquidityExpenseSerializer
+
+    def get_serializer_context(self):
+        ctx = super().get_serializer_context()
+        setting = LiquidityDailyRevenueSetting.get_current_revenue()
+        ctx['daily_revenue'] = setting.amount
+        return ctx
+
+    def get_queryset(self):
+        qs = LiquidityExpense.objects.select_related('created_by').prefetch_related('payments__created_by')
+
+        if self.action != 'list':
+            return qs
+
+        # فیلتر جستجو
+        search = self.request.query_params.get('search')
+        if search:
+            qs = qs.filter(Q(title__icontains=search) | Q(description__icontains=search))
+
+        # فیلتر دسته‌بندی
+        category = self.request.query_params.get('category')
+        if category:
+            qs = qs.filter(category=category)
+
+        # فیلتر وضعیت پرداخت صریح
+        is_paid = self.request.query_params.get('is_paid')
+        if is_paid is not None:
+            if is_paid.lower() in ['true', '1']:
+                qs = qs.filter(is_paid=True)
+            elif is_paid.lower() in ['false', '0']:
+                qs = qs.filter(is_paid=False)
+
+        # فیلتر نماها / Scope
+        scope = self.request.query_params.get('scope', 'unpaid')
+        today = datetime.date.today()
+
+        if scope == 'unpaid':
+            qs = qs.filter(is_paid=False)
+        elif scope == 'paid':
+            qs = qs.filter(is_paid=True)
+        elif scope == 'next_week':
+            next_week = today + timedelta(days=7)
+            qs = qs.filter(is_paid=False, due_date__gte=today, due_date__lte=next_week)
+        elif scope == 'overdue':
+            qs = qs.filter(is_paid=False, due_date__lt=today)
+        elif scope == 'this_month':
+            jy, jm, _ = get_current_shamsi()
+            days_in_m = get_days_in_shamsi_month(jy, jm)
+            start_g = get_gregorian_date(jy, jm, 1)
+            end_g = get_gregorian_date(jy, jm, days_in_m)
+            qs = qs.filter(is_paid=False, due_date__gte=start_g, due_date__lte=end_g)
+        elif scope == 'all':
+            pass  # بدون فیلتر پیش‌فرض
+
+        # فیلتر بر اساس وضعیت هوشمند (status)
+        status_param = self.request.query_params.get('status')
+        if status_param:
+            status_param = status_param.upper()
+            daily_rev = LiquidityDailyRevenueSetting.get_current_revenue().amount
+            matching_ids = [
+                exp.id for exp in qs if exp.calculate_status(daily_revenue=daily_rev) == status_param
+            ]
+            qs = qs.filter(id__in=matching_ids)
+
+        # مرتب‌سازی
+        ordering = self.request.query_params.get('ordering', 'due_date')
+        if ordering in ['due_date', '-due_date', 'amount', '-amount', 'created_at', '-created_at']:
+            qs = qs.order_by(ordering)
+        else:
+            qs = qs.order_by('is_paid', 'due_date', '-created_at')
+
+        return qs
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
+    @action(detail=True, methods=['post'], url_path='payments')
+    def add_payment(self, request, pk=None):
+        """
+        ثبت یک پرداخت یا واریز ذخیره‌سازی به این هزینه
+        POST /api/liquidity/expenses/{id}/payments/
+        body: {"amount": 10000000, "date": "2026-09-22", "description": "واریز از صندوق"}
+        """
+        expense = self.get_object()
+        raw_amount = request.data.get('amount')
+        if not raw_amount:
+            return Response({"error": "مبلغ پرداختی (amount) الزامی است."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            amount = Decimal(str(raw_amount))
+            if amount <= 0:
+                return Response({"error": "مبلغ پرداختی باید بیشتر از صفر باشد."}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            return Response({"error": "فرمت مبلغ نامعتبر است."}, status=status.HTTP_400_BAD_REQUEST)
+
+        raw_date = request.data.get('date')
+        if raw_date:
+            if isinstance(raw_date, str):
+                try:
+                    pay_date = datetime.date.fromisoformat(raw_date)
+                except Exception:
+                    pay_date = datetime.date.today()
+            else:
+                pay_date = raw_date
+        else:
+            pay_date = datetime.date.today()
+
+        description = request.data.get('description', '')
+
+        payment = LiquidityExpensePayment.objects.create(
+            expense=expense,
+            amount=amount,
+            date=pay_date,
+            description=description,
+            created_by=request.user
+        )
+        payment.refresh_from_db()
+
+        expense.refresh_from_db()
+        ctx = self.get_serializer_context()
+        return Response({
+            "message": "پرداخت با موفقیت ثبت شد.",
+            "payment": LiquidityExpensePaymentSerializer(payment).data,
+            "expense": LiquidityExpenseSerializer(expense, context=ctx).data
+        }, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['delete'], url_path=r'payments/(?P<payment_id>[^/.]+)')
+    def delete_payment(self, request, pk=None, payment_id=None):
+        """
+        حذف یک پرداخت مرحله‌ای ثبت‌شده
+        DELETE /api/liquidity/expenses/{id}/payments/{payment_id}/
+        """
+        expense = self.get_object()
+        try:
+            payment = expense.payments.get(id=payment_id)
+            payment.delete()
+        except LiquidityExpensePayment.DoesNotExist:
+            return Response({"error": "پرداخت مورد نظر یافت نشد."}, status=status.HTTP_404_NOT_FOUND)
+
+        expense.refresh_from_db()
+        ctx = self.get_serializer_context()
+        return Response({
+            "message": "پرداخت با موفقیت حذف شد.",
+            "expense": LiquidityExpenseSerializer(expense, context=ctx).data
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='confirm-payment')
+    def confirm_payment(self, request, pk=None):
+        """
+        تایید نهایی تسویه هزینه (خروج از کارت هزینه‌ها و انتقال به وضعیت پرداخت شده)
+        POST /api/liquidity/expenses/{id}/confirm-payment/
+        """
+        expense = self.get_object()
+        expense.is_paid = True
+        expense.paid_at = timezone.now()
+        expense.save()
+
+        ctx = self.get_serializer_context()
+        return Response({
+            "message": "هزینه با موفقیت به عنوان پرداخت‌شده تایید گردید.",
+            "expense": LiquidityExpenseSerializer(expense, context=ctx).data
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='unconfirm-payment')
+    def unconfirm_payment(self, request, pk=None):
+        """
+        بازگردانی وضعیت هزینه از پرداخت‌شده به پرداخت‌نشده
+        POST /api/liquidity/expenses/{id}/unconfirm-payment/
+        """
+        expense = self.get_object()
+        expense.is_paid = False
+        expense.paid_at = None
+        expense.save()
+
+        ctx = self.get_serializer_context()
+        return Response({
+            "message": "وضعیت پرداخت هزینه با موفقیت بازگردانی شد.",
+            "expense": LiquidityExpenseSerializer(expense, context=ctx).data
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], url_path='summary')
+    def summary(self, request):
+        """
+        خلاصه شمارنده‌ها و مبالغ برای تب‌ها و نشان‌های فرانت‌اند
+        GET /api/liquidity/expenses/summary/
+        """
+        today = datetime.date.today()
+        next_week = today + timedelta(days=7)
+        daily_rev = LiquidityDailyRevenueSetting.get_current_revenue().amount
+
+        all_expenses = list(LiquidityExpense.objects.prefetch_related('payments').all())
+        unpaid = [e for e in all_expenses if not e.is_paid]
+        paid = [e for e in all_expenses if e.is_paid]
+
+        next_week_items = [e for e in unpaid if today <= e.due_date <= next_week]
+        overdue_items = [e for e in unpaid if e.due_date < today]
+
+        # وضعیت‌ها
+        status_counts = {'EXCELLENT': 0, 'NORMAL': 0, 'WARNING': 0, 'CRITICAL': 0, 'OVERDUE': 0, 'PAID': len(paid)}
+        for e in unpaid:
+            st = e.calculate_status(daily_revenue=daily_rev)
+            if st in status_counts:
+                status_counts[st] += 1
+
+        total_unpaid_amount = sum(e.amount for e in unpaid)
+        total_allocated_amount = sum(e.allocated_amount for e in unpaid)
+        total_remaining_amount = max(Decimal('0.00'), total_unpaid_amount - total_allocated_amount)
+
+        return Response({
+            "total_count": len(all_expenses),
+            "unpaid_count": len(unpaid),
+            "paid_count": len(paid),
+            "next_week_count": len(next_week_items),
+            "overdue_count": len(overdue_items),
+            "critical_count": status_counts['CRITICAL'],
+            "warning_count": status_counts['WARNING'],
+            "normal_count": status_counts['NORMAL'],
+            "excellent_count": status_counts['EXCELLENT'],
+            "total_unpaid_amount": float(total_unpaid_amount),
+            "total_allocated_amount": float(total_allocated_amount),
+            "total_remaining_amount": float(total_remaining_amount),
+        }, status=status.HTTP_200_OK)
+
+
+class LiquidityCardsViewSet(viewsets.ViewSet):
+    """
+    مدیریت کارت‌های سه‌گانه نقدینگی:
+    1. کارت هزینه‌ها: جمع مبالغ ذخیره شده برای هزینه‌های فعال
+    2. کارت تنخواه: مقدار، پرداخت‌ها، برداشت‌ها
+    3. کارت سود: پرداخت‌ها، برداشت‌ها
+    """
+    permission_classes = [IsLiquidityManager]
+
+    def list(self, request):
+        return self.overview(request)
+
+    @action(detail=False, methods=['get'], url_path='overview')
+    def overview(self, request):
+        """
+        خلاصه لحظه‌ای وضعیت هر سه کارت نقدینگی
+        GET /api/liquidity/cards/ (یا /api/liquidity/cards/overview/)
+        """
+        # ۱. کارت هزینه‌ها (جمع مقدار داده شده همه هزینه‌های پرداخت نشده)
+        unpaid_expenses = LiquidityExpense.objects.filter(is_paid=False).prefetch_related('payments')
+        total_expenses_target = sum(e.amount for e in unpaid_expenses)
+        total_expenses_allocated = sum(e.allocated_amount for e in unpaid_expenses)
+        remaining_needed = max(Decimal('0.00'), total_expenses_target - total_expenses_allocated)
+
+        # ۲. کارت تنخواه
+        petty_qs = LiquidityCardTransaction.objects.filter(card_type='PETTY_CASH')
+        petty_deposits = petty_qs.filter(transaction_type='DEPOSIT').aggregate(s=models.Sum('amount'))['s'] or Decimal('0.00')
+        petty_withdrawals = petty_qs.filter(transaction_type='WITHDRAWAL').aggregate(s=models.Sum('amount'))['s'] or Decimal('0.00')
+        petty_balance = petty_deposits - petty_withdrawals
+        petty_recent = LiquidityCardTransactionSerializer(petty_qs.order_by('-date', '-created_at')[:5], many=True).data
+
+        # ۳. کارت سود
+        profit_qs = LiquidityCardTransaction.objects.filter(card_type='PROFIT')
+        profit_deposits = profit_qs.filter(transaction_type='DEPOSIT').aggregate(s=models.Sum('amount'))['s'] or Decimal('0.00')
+        profit_withdrawals = profit_qs.filter(transaction_type='WITHDRAWAL').aggregate(s=models.Sum('amount'))['s'] or Decimal('0.00')
+        profit_balance = profit_deposits - profit_withdrawals
+        profit_recent = LiquidityCardTransactionSerializer(profit_qs.order_by('-date', '-created_at')[:5], many=True).data
+
+        return Response({
+            "expense_card": {
+                "title": "کارت هزینه‌ها",
+                "total_allocated": float(total_expenses_allocated),
+                "total_target": float(total_expenses_target),
+                "remaining_needed": float(remaining_needed),
+                "active_expenses_count": unpaid_expenses.count(),
+                "description": "جمع مقادیر داده شده برای تمامی هزینه‌های پرداخت‌نشده جاری"
+            },
+            "petty_cash_card": {
+                "title": "کارت تنخواه",
+                "balance": float(petty_balance),
+                "total_deposits": float(petty_deposits),
+                "total_withdrawals": float(petty_withdrawals),
+                "recent_transactions": petty_recent
+            },
+            "profit_card": {
+                "title": "کارت سود",
+                "balance": float(profit_balance),
+                "total_deposits": float(profit_deposits),
+                "total_withdrawals": float(profit_withdrawals),
+                "recent_transactions": profit_recent
+            }
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], url_path='petty-cash')
+    def petty_cash(self, request):
+        """
+        جزئیات و تاریخچه تراکنش‌های کارت تنخواه
+        GET /api/liquidity/cards/petty-cash/
+        """
+        qs = LiquidityCardTransaction.objects.filter(card_type='PETTY_CASH').select_related('created_by')
+
+        tx_type = request.query_params.get('type')
+        if tx_type:
+            qs = qs.filter(transaction_type=tx_type.upper())
+
+        deposits = qs.filter(transaction_type='DEPOSIT').aggregate(s=models.Sum('amount'))['s'] or Decimal('0.00')
+        withdrawals = qs.filter(transaction_type='WITHDRAWAL').aggregate(s=models.Sum('amount'))['s'] or Decimal('0.00')
+        balance = deposits - withdrawals
+
+        transactions = LiquidityCardTransactionSerializer(qs.order_by('-date', '-created_at'), many=True).data
+        return Response({
+            "card": "PETTY_CASH",
+            "title": "کارت تنخواه",
+            "balance": float(balance),
+            "total_deposits": float(deposits),
+            "total_withdrawals": float(withdrawals),
+            "transactions": transactions
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'], url_path='petty-cash/transactions')
+    def add_petty_cash_transaction(self, request):
+        """
+        ثبت تراکنش واریز یا برداشت کارت تنخواه
+        POST /api/liquidity/cards/petty-cash/transactions/
+        body: {"transaction_type": "DEPOSIT", "amount": 5000000, "date": "2026-09-21", "description": "شارژ تنخواه"}
+        """
+        return self._add_card_transaction(request, 'PETTY_CASH')
+
+    @action(detail=False, methods=['get'], url_path='profit')
+    def profit(self, request):
+        """
+        جزئیات و تاریخچه تراکنش‌های کارت سود
+        GET /api/liquidity/cards/profit/
+        """
+        qs = LiquidityCardTransaction.objects.filter(card_type='PROFIT').select_related('created_by')
+
+        tx_type = request.query_params.get('type')
+        if tx_type:
+            qs = qs.filter(transaction_type=tx_type.upper())
+
+        deposits = qs.filter(transaction_type='DEPOSIT').aggregate(s=models.Sum('amount'))['s'] or Decimal('0.00')
+        withdrawals = qs.filter(transaction_type='WITHDRAWAL').aggregate(s=models.Sum('amount'))['s'] or Decimal('0.00')
+        balance = deposits - withdrawals
+
+        transactions = LiquidityCardTransactionSerializer(qs.order_by('-date', '-created_at'), many=True).data
+        return Response({
+            "card": "PROFIT",
+            "title": "کارت سود",
+            "balance": float(balance),
+            "total_deposits": float(deposits),
+            "total_withdrawals": float(withdrawals),
+            "transactions": transactions
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'], url_path='profit/transactions')
+    def add_profit_transaction(self, request):
+        """
+        ثبت تراکنش واریز یا برداشت کارت سود
+        POST /api/liquidity/cards/profit/transactions/
+        body: {"transaction_type": "DEPOSIT", "amount": 5000000, "date": "2026-09-21", "description": "واریز سود مازاد"}
+        """
+        return self._add_card_transaction(request, 'PROFIT')
+
+    @action(detail=False, methods=['delete'], url_path=r'transactions/(?P<tx_id>[^/.]+)')
+    def delete_transaction(self, request, tx_id=None):
+        """
+        حذف یک تراکنش از کارت‌های تنخواه یا سود
+        DELETE /api/liquidity/cards/transactions/{tx_id}/
+        """
+        try:
+            tx = LiquidityCardTransaction.objects.get(id=tx_id)
+            tx.delete()
+            return Response({"message": "تراکنش با موفقیت حذف شد."}, status=status.HTTP_200_OK)
+        except LiquidityCardTransaction.DoesNotExist:
+            return Response({"error": "تراکنش یافت نشد."}, status=status.HTTP_404_NOT_FOUND)
+
+    def _add_card_transaction(self, request, card_type):
+        raw_amount = request.data.get('amount')
+        tx_type = request.data.get('transaction_type')
+        if not raw_amount or not tx_type:
+            return Response({"error": "فیلدهای amount و transaction_type الزامی هستند."}, status=status.HTTP_400_BAD_REQUEST)
+
+        tx_type = tx_type.upper()
+        if tx_type not in ['DEPOSIT', 'WITHDRAWAL']:
+            return Response({"error": "نوع تراکنش باید DEPOSIT یا WITHDRAWAL باشد."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            amount = Decimal(str(raw_amount))
+            if amount <= 0:
+                return Response({"error": "مبلغ باید بزرگتر از صفر باشد."}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            return Response({"error": "مبلغ نامعتبر است."}, status=status.HTTP_400_BAD_REQUEST)
+
+        raw_date = request.data.get('date')
+        if raw_date:
+            if isinstance(raw_date, str):
+                try:
+                    tx_date = datetime.date.fromisoformat(raw_date)
+                except Exception:
+                    tx_date = datetime.date.today()
+            else:
+                tx_date = raw_date
+        else:
+            tx_date = datetime.date.today()
+
+        description = request.data.get('description', '')
+
+        tx = LiquidityCardTransaction.objects.create(
+            card_type=card_type,
+            transaction_type=tx_type,
+            amount=amount,
+            date=tx_date,
+            description=description,
+            created_by=request.user
+        )
+        tx.refresh_from_db()
+
+        return Response({
+            "message": "تراکنش با موفقیت ثبت شد.",
+            "transaction": LiquidityCardTransactionSerializer(tx).data
+        }, status=status.HTTP_201_CREATED)
+
