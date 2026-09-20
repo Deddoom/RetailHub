@@ -37,10 +37,38 @@ class RoleSerializer(serializers.ModelSerializer):
 
 # ── Auth / User ───────────────────────────────────────────────────────────────
 
+class FlexibleRoleField(serializers.RelatedField):
+    """
+    پذیرش نقش هم بر اساس UUID و هم بر اساس کد انگلیسی (مانند ADMIN, CASHIER, USER)
+    """
+    queryset = Role.objects.all()
+
+    def to_internal_value(self, data):
+        if not data:
+            raise serializers.ValidationError("شناسه یا کد نقش نمی‌تواند خالی باشد.")
+        val = str(data).strip()
+        # 1. جستجو بر اساس کد نقش
+        role = Role.objects.filter(code__iexact=val).first()
+        if role:
+            return role
+        # 2. جستجو بر اساس UUID
+        try:
+            return Role.objects.get(id=val)
+        except (Role.DoesNotExist, ValueError, TypeError):
+            raise serializers.ValidationError(f"نقش با شناسه یا کد '{data}' یافت نشد.")
+
+    def to_representation(self, value):
+        return str(value.id)
+
+
 class UserSerializer(serializers.ModelSerializer):
     roles    = RoleSerializer(many=True, read_only=True)
-    role_ids = serializers.PrimaryKeyRelatedField(
-        many=True, queryset=Role.objects.all(),
+    role_ids = FlexibleRoleField(
+        many=True,
+        source='roles', write_only=True, required=False
+    )
+    role_codes = FlexibleRoleField(
+        many=True,
         source='roles', write_only=True, required=False
     )
     superior_ids = serializers.PrimaryKeyRelatedField(
@@ -53,7 +81,7 @@ class UserSerializer(serializers.ModelSerializer):
         model        = CustomUser
         fields       = [
             'id', 'username', 'first_name', 'last_name',
-            'is_profile_completed', 'roles', 'role_ids',
+            'is_profile_completed', 'roles', 'role_ids', 'role_codes',
             'branch', 'is_active', 'password',
             'superiors_info', 'superior_ids'
         ]
