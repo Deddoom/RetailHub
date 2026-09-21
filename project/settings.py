@@ -118,4 +118,14 @@ SPECTACULAR_SETTINGS = {
 
     # رفع warning: type hint برای get_superiors_info
     'COMPONENT_SPLIT_REQUEST': True,
-}
+
+    'SWAGGER_UI_SETTINGS': {
+        'deepLinking': True,
+        'persistAuthorization': True,
+        'displayOperationId': True,
+        'filter': True,
+    },
+    'REDOC_UI_SETTINGS': {
+        'expandResponses': 'all',
+    },
+}
