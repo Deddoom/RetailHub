@@ -22,6 +22,10 @@ from core.models import (
 from core.utils.jalali import (
     get_days_in_shamsi_month, format_jalali_date, get_shamsi_month_name, gregorian_to_jalali
 )
+from drf_spectacular.utils import extend_schema_field
+from drf_spectacular.extensions import OpenApiSerializerFieldExtension
+from drf_spectacular.openapi import OpenApiTypes
+
 
 
 
@@ -61,6 +65,18 @@ class FlexibleRoleField(serializers.RelatedField):
         return str(value.id)
 
 
+class FlexibleRoleFieldExtension(OpenApiSerializerFieldExtension):
+    target_class = 'core.serializers.FlexibleRoleField'
+
+    def map_serializer_field(self, auto_schema, direction):
+        return {
+            'type': 'string',
+            'description': 'شناسه UUID یا کد انگلیسی نقش (مانند ADMIN, CASHIER, SUPERVISOR, USER, ...)',
+            'example': 'ADMIN',
+        }
+
+
+
 class UserSerializer(serializers.ModelSerializer):
     roles    = RoleSerializer(many=True, read_only=True)
     role_ids = FlexibleRoleField(
@@ -90,6 +106,7 @@ class UserSerializer(serializers.ModelSerializer):
             'password': {'write_only': True, 'required': False},
         }
 
+    @extend_schema_field(serializers.ListField(child=serializers.DictField()))
     def get_superiors_info(self, obj):
         return [
             {
@@ -1284,6 +1301,7 @@ class BranchTransferListSerializer(serializers.ModelSerializer):
     receiver_supervisor_name = serializers.CharField(source='receiver_supervisor.get_full_name', read_only=True)
     items_count              = serializers.SerializerMethodField()
  
+    @extend_schema_field(serializers.IntegerField())
     def get_items_count(self, obj):
         return obj.items.count()
  
@@ -1323,6 +1341,7 @@ class WasteReportSerializer(serializers.ModelSerializer):
     )
     involved_users_detail  = serializers.SerializerMethodField(read_only=True)
  
+    @extend_schema_field(serializers.ListField(child=serializers.DictField()))
     def get_involved_users_detail(self, obj):
         return [
             {
@@ -1394,6 +1413,7 @@ class WasteReportListSerializer(serializers.ModelSerializer):
     reporter_name = serializers.CharField(source='reporter.get_full_name', read_only=True)
     items_count   = serializers.SerializerMethodField()
  
+    @extend_schema_field(serializers.IntegerField())
     def get_items_count(self, obj):
         return obj.items.count()
  
@@ -1528,16 +1548,19 @@ class SellerCommissionConfigSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['created_by', 'updated_by', 'created_at', 'updated_at']
 
+    @extend_schema_field(serializers.CharField())
     def get_seller_name(self, obj):
         name = f"{obj.seller.first_name} {obj.seller.last_name}".strip()
         return name if name else obj.seller.username
 
+    @extend_schema_field(serializers.CharField(allow_null=True))
     def get_created_by_name(self, obj):
         if not obj.created_by:
             return None
         name = f"{obj.created_by.first_name} {obj.created_by.last_name}".strip()
         return name if name else obj.created_by.username
 
+    @extend_schema_field(serializers.CharField(allow_null=True))
     def get_updated_by_name(self, obj):
         if not obj.updated_by:
             return None
@@ -1611,16 +1634,19 @@ class SellerDailySaleSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['date', 'recorded_by', 'created_at', 'updated_at']
 
+    @extend_schema_field(serializers.CharField())
     def get_seller_name(self, obj):
         name = f"{obj.seller.first_name} {obj.seller.last_name}".strip()
         return name if name else obj.seller.username
 
+    @extend_schema_field(serializers.CharField(allow_null=True))
     def get_recorded_by_name(self, obj):
         if not obj.recorded_by:
             return None
         name = f"{obj.recorded_by.first_name} {obj.recorded_by.last_name}".strip()
         return name if name else obj.recorded_by.username
 
+    @extend_schema_field(serializers.CharField())
     def get_shamsi_date(self, obj):
         return format_jalali_date(obj.shamsi_year, obj.shamsi_month, obj.shamsi_day)
 
@@ -1712,6 +1738,7 @@ class LiquidityDailyRevenueSettingSerializer(serializers.ModelSerializer):
         fields = ['id', 'amount', 'updated_by', 'updated_by_name', 'updated_at']
         read_only_fields = ['id', 'updated_by', 'updated_at']
 
+    @extend_schema_field(serializers.CharField(allow_null=True))
     def get_updated_by_name(self, obj):
         if not obj.updated_by:
             return None
@@ -1731,12 +1758,14 @@ class LiquidityExpensePaymentSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'created_by', 'created_at']
 
+    @extend_schema_field(serializers.CharField(allow_null=True))
     def get_created_by_name(self, obj):
         if not obj.created_by:
             return None
         full = f"{obj.created_by.first_name} {obj.created_by.last_name}".strip()
         return full or obj.created_by.username
 
+    @extend_schema_field(serializers.CharField(allow_null=True))
     def get_date_jalali(self, obj):
         if not obj.date:
             return None
@@ -1766,12 +1795,14 @@ class LiquidityCardTransactionSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'created_by', 'created_at']
 
+    @extend_schema_field(serializers.CharField(allow_null=True))
     def get_created_by_name(self, obj):
         if not obj.created_by:
             return None
         full = f"{obj.created_by.first_name} {obj.created_by.last_name}".strip()
         return full or obj.created_by.username
 
+    @extend_schema_field(serializers.CharField(allow_null=True))
     def get_date_jalali(self, obj):
         if not obj.date:
             return None
@@ -1820,14 +1851,17 @@ class LiquidityExpenseSerializer(serializers.ModelSerializer):
             mutable_data['title'] = mutable_data['name']
         return super().to_internal_value(mutable_data)
 
+    @extend_schema_field(serializers.ChoiceField(choices=['EXCELLENT', 'NORMAL', 'WARNING', 'CRITICAL', 'OVERDUE', 'PAID']))
     def get_status(self, obj):
         daily_revenue = self.context.get('daily_revenue')
         return obj.calculate_status(daily_revenue=daily_revenue)
 
+    @extend_schema_field(serializers.CharField())
     def get_status_display(self, obj):
         st = self.get_status(obj)
         return LIQUIDITY_STATUS_DISPLAY.get(st, st)
 
+    @extend_schema_field(serializers.DecimalField(max_digits=14, decimal_places=2))
     def get_daily_saving_needed(self, obj):
         if obj.is_paid:
             return Decimal('0.00')
@@ -1840,6 +1874,7 @@ class LiquidityExpenseSerializer(serializers.ModelSerializer):
         effective_days = max(1, days)
         return round(rem / Decimal(str(effective_days)), 2)
 
+    @extend_schema_field(serializers.FloatField(allow_null=True))
     def get_daily_revenue_ratio(self, obj):
         if obj.is_paid:
             return Decimal('0.00')
@@ -1852,6 +1887,7 @@ class LiquidityExpenseSerializer(serializers.ModelSerializer):
         needed = self.get_daily_saving_needed(obj)
         return round(needed / Decimal(str(daily_revenue)), 4)
 
+    @extend_schema_field(serializers.CharField(allow_null=True))
     def get_due_date_jalali(self, obj):
         if not obj.due_date:
             return None
@@ -1864,6 +1900,7 @@ class LiquidityExpenseSerializer(serializers.ModelSerializer):
         jy, jm, jd = gregorian_to_jalali(d.year, d.month, d.day)
         return format_jalali_date(jy, jm, jd)
 
+    @extend_schema_field(serializers.CharField(allow_null=True))
     def get_paid_at_jalali(self, obj):
         if not obj.paid_at:
             return None
@@ -1871,6 +1908,7 @@ class LiquidityExpenseSerializer(serializers.ModelSerializer):
         jy, jm, jd = gregorian_to_jalali(d.year, d.month, d.day)
         return format_jalali_date(jy, jm, jd)
 
+    @extend_schema_field(serializers.CharField(allow_null=True))
     def get_created_by_name(self, obj):
         if not obj.created_by:
             return None
@@ -1902,14 +1940,17 @@ class LiquidityExpenseListSerializer(serializers.ModelSerializer):
             'payments_count', 'created_at'
         ]
 
+    @extend_schema_field(serializers.ChoiceField(choices=['EXCELLENT', 'NORMAL', 'WARNING', 'CRITICAL', 'OVERDUE', 'PAID']))
     def get_status(self, obj):
         daily_revenue = self.context.get('daily_revenue')
         return obj.calculate_status(daily_revenue=daily_revenue)
 
+    @extend_schema_field(serializers.CharField())
     def get_status_display(self, obj):
         st = self.get_status(obj)
         return LIQUIDITY_STATUS_DISPLAY.get(st, st)
 
+    @extend_schema_field(serializers.DecimalField(max_digits=14, decimal_places=2))
     def get_daily_saving_needed(self, obj):
         if obj.is_paid:
             return Decimal('0.00')
@@ -1922,6 +1963,7 @@ class LiquidityExpenseListSerializer(serializers.ModelSerializer):
         effective_days = max(1, days)
         return round(rem / Decimal(str(effective_days)), 2)
 
+    @extend_schema_field(serializers.CharField(allow_null=True))
     def get_due_date_jalali(self, obj):
         if not obj.due_date:
             return None
@@ -1933,5 +1975,112 @@ class LiquidityExpenseListSerializer(serializers.ModelSerializer):
                 return None
         jy, jm, jd = gregorian_to_jalali(d.year, d.month, d.day)
         return format_jalali_date(jy, jm, jd)
+
+
+# ── سریالایزرهای کمکی جهت مستندات کامل OpenAPI / Swagger / ReDoc ──────────────
+
+class FileUploadRequestSerializer(serializers.Serializer):
+    file = serializers.FileField(required=False, help_text="فایل ارسالی (تصویر، PDF یا داکیومنت، حداکثر ۱۵ مگابایت)")
+    image = serializers.ImageField(required=False, help_text="تصویر ارسالی (کلید جایگزین file)")
+
+
+class FileUploadResponseSerializer(serializers.Serializer):
+    url = serializers.CharField(help_text="آدرس عمومی و قابل دسترسی فایل")
+    image_url = serializers.CharField(help_text="آدرس عکس")
+    file_url = serializers.CharField(help_text="آدرس نسبی ذخیره‌سازی")
+    filename = serializers.CharField(help_text="نام یکتا تولیدشده در سرور")
+    original_name = serializers.CharField(help_text="نام اصلی فایل هنگام ارسال")
+    size = serializers.IntegerField(help_text="حجم فایل به بایت")
+    content_type = serializers.CharField(allow_null=True, required=False, help_text="نوع MIME فایل")
+
+
+class LiquidityExpensePaymentCreateSerializer(serializers.Serializer):
+    amount = serializers.DecimalField(
+        max_digits=14, decimal_places=2, required=True, min_value=Decimal('0.01'),
+        help_text="مبلغ پرداختی مرحله‌ای یا واریز ذخیره‌سازی"
+    )
+    date = serializers.DateField(required=False, help_text="تاریخ پرداخت میلادی (پیش‌فرض: امروز)")
+    description = serializers.CharField(required=False, allow_blank=True, default='', help_text="شرح یا بابت واریز/پرداخت")
+
+
+class LiquidityExpensePaymentCreateResponseSerializer(serializers.Serializer):
+    message = serializers.CharField(default="پرداخت با موفقیت ثبت شد.")
+    payment = LiquidityExpensePaymentSerializer()
+    expense = LiquidityExpenseSerializer()
+
+
+class LiquidityExpenseActionResponseSerializer(serializers.Serializer):
+    message = serializers.CharField()
+    expense = LiquidityExpenseSerializer()
+
+
+class LiquidityExpenseSummaryResponseSerializer(serializers.Serializer):
+    total_count = serializers.IntegerField(help_text="تعداد کل هزینه‌ها")
+    unpaid_count = serializers.IntegerField(help_text="تعداد پرداخت‌نشده‌ها")
+    paid_count = serializers.IntegerField(help_text="تعداد تسویه‌شده‌ها")
+    next_week_count = serializers.IntegerField(help_text="تعداد سررسید ۷ روز آینده")
+    overdue_count = serializers.IntegerField(help_text="تعداد سررسید گذشته (معوق)")
+    critical_count = serializers.IntegerField(help_text="تعداد وضعیت بحرانی/خطرناک")
+    warning_count = serializers.IntegerField(help_text="تعداد وضعیت هشدار")
+    normal_count = serializers.IntegerField(help_text="تعداد وضعیت عادی")
+    excellent_count = serializers.IntegerField(help_text="تعداد وضعیت عالی")
+    total_unpaid_amount = serializers.FloatField(help_text="مجموع مبالغ کل هزینه‌های فعال")
+    total_allocated_amount = serializers.FloatField(help_text="مجموع مبالغ واریزشده/ذخیره‌شده")
+    total_remaining_amount = serializers.FloatField(help_text="مجموع مبالغ باقی‌مانده تا تسویه کامل")
+
+
+class LiquidityCardTransactionCreateSerializer(serializers.Serializer):
+    transaction_type = serializers.ChoiceField(
+        choices=['DEPOSIT', 'WITHDRAWAL'], required=True,
+        help_text="نوع تراکنش: DEPOSIT (واریز) یا WITHDRAWAL (برداشت)"
+    )
+    amount = serializers.DecimalField(
+        max_digits=14, decimal_places=2, required=True, min_value=Decimal('0.01'),
+        help_text="مبلغ تراکنش"
+    )
+    date = serializers.DateField(required=False, help_text="تاریخ تراکنش میلادی (پیش‌فرض: امروز)")
+    description = serializers.CharField(required=False, allow_blank=True, default='', help_text="توضیحات تراکنش")
+
+
+class LiquidityCardTransactionCreateResponseSerializer(serializers.Serializer):
+    message = serializers.CharField(default="تراکنش با موفقیت ثبت شد.")
+    transaction = LiquidityCardTransactionSerializer()
+
+
+class LiquidityExpenseCardOverviewSerializer(serializers.Serializer):
+    title = serializers.CharField(default="کارت هزینه‌ها")
+    total_allocated = serializers.FloatField(help_text="مجموع مبالغ ذخیره شده برای هزینه‌های فعال")
+    total_target = serializers.FloatField(help_text="مجموع مبلغ کل هزینه‌های پرداخت‌نشده")
+    remaining_needed = serializers.FloatField(help_text="مبلغ مانده مورد نیاز")
+    active_expenses_count = serializers.IntegerField(help_text="تعداد هزینه‌های جاری فعال")
+    description = serializers.CharField()
+
+
+class LiquidityPettyOrProfitCardOverviewSerializer(serializers.Serializer):
+    title = serializers.CharField()
+    balance = serializers.FloatField(help_text="مانده فعلی حساب")
+    total_deposits = serializers.FloatField(help_text="مجموع واریزی‌ها")
+    total_withdrawals = serializers.FloatField(help_text="مجموع برداشت‌ها")
+    recent_transactions = LiquidityCardTransactionSerializer(many=True, help_text="آخرین ۵ تراکنش")
+
+
+class LiquidityCardsOverviewSerializer(serializers.Serializer):
+    expense_card = LiquidityExpenseCardOverviewSerializer()
+    petty_cash_card = LiquidityPettyOrProfitCardOverviewSerializer()
+    profit_card = LiquidityPettyOrProfitCardOverviewSerializer()
+
+
+class LiquidityCardDetailResponseSerializer(serializers.Serializer):
+    card = serializers.CharField(help_text="نوع کارت: PETTY_CASH یا PROFIT")
+    title = serializers.CharField(help_text="عنوان کارت")
+    balance = serializers.FloatField(help_text="مانده فعلی")
+    total_deposits = serializers.FloatField(help_text="مجموع واریزی‌ها")
+    total_withdrawals = serializers.FloatField(help_text="مجموع برداشت‌ها")
+    transactions = LiquidityCardTransactionSerializer(many=True, help_text="تاریخچه کامل تراکنش‌ها")
+
+
+class LiquiditySimpleMessageResponseSerializer(serializers.Serializer):
+    message = serializers.CharField()
+
 
 

@@ -100,8 +100,8 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # ── تنظیمات drf-spectacular ──────────────────────────────────────────────────
 SPECTACULAR_SETTINGS = {
     'TITLE': 'RetailHub API',
-    'DESCRIPTION': 'سیستم مدیریت خرده‌فروشی RetailHub',
-    'VERSION': '1.0.0',
+    'DESCRIPTION': 'مستندات تعاملی وب‌سرویس جامع مدیریت خرده‌فروشی RetailHub',
+    'VERSION': '2.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
 
     # رفع warning: UUID path parameters
@@ -114,9 +114,21 @@ SPECTACULAR_SETTINGS = {
         'DepositOrderStatusEnum': 'core.models.DepositOrder.STATUS_CHOICES',
         'ClaimStatusEnum':        'core.models.Claim.STATUS_CHOICES',
         'ReturnRequestStatusEnum':'core.models.ReturnRequest.STATUS_CHOICES',
+        'BranchTransferStatusEnum':'core.models.BranchTransfer.STATUS_CHOICES',
+        'WasteReportStatusEnum':  'core.models.WasteReport.STATUS_CHOICES',
+        'AdvanceRequestStatusEnum':'core.models.AdvanceRequest.STATUS_CHOICES',
+        'BranchChoiceEnum':       'core.models.BRANCH_CHOICES',
     },
 
-    # رفع warning: type hint برای get_superiors_info
+    # دسته‌بندی موضوعی فارسی در سایدبار Swagger و ReDoc
+    'TAGS': [
+        {'name': 'مدیریت نقدینگی - هزینه‌ها', 'description': 'ثبت، لیست، فیلتر، پرداخت‌های مرحله‌ای و تسویه نهایی هزینه‌های تعهدشده'},
+        {'name': 'مدیریت نقدینگی - کارت‌ها', 'description': 'کارت هزینه‌ها، کارت تنخواه و کارت سود (برداشت، واریز و گردش مالی)'},
+        {'name': 'مدیریت نقدینگی - درآمد روزانه', 'description': 'تنظیم و دریافت تک‌مقدار درآمد روزانه کسب‌وکار جهت فرمول‌های محاسباتی'},
+        {'name': 'پورسانت و فروشندگان', 'description': 'تعریف مدل‌های پورسانت، ثبت فروش‌های روزانه و استعلام وضعیت ماهانه'},
+        {'name': 'مدیریت فایل‌ها و رسانه', 'description': 'سرویس آپلود تصاویر، اسناد و مدارک'},
+    ],
+
     'COMPONENT_SPLIT_REQUEST': True,
 
     'SWAGGER_UI_SETTINGS': {
@@ -128,4 +140,5 @@ SPECTACULAR_SETTINGS = {
     'REDOC_UI_SETTINGS': {
         'expandResponses': 'all',
     },
-}
+}
+

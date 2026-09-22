@@ -48,6 +48,15 @@ from core.serializers import (
     SellerCommissionConfigSerializer, SellerDailySaleSerializer, SellerDailySaleBulkSerializer,
     LiquidityDailyRevenueSettingSerializer, LiquidityExpensePaymentSerializer,
     LiquidityCardTransactionSerializer, LiquidityExpenseSerializer, LiquidityExpenseListSerializer,
+    FileUploadRequestSerializer, FileUploadResponseSerializer,
+    LiquidityExpensePaymentCreateSerializer, LiquidityExpensePaymentCreateResponseSerializer,
+    LiquidityExpenseActionResponseSerializer, LiquidityExpenseSummaryResponseSerializer,
+    LiquidityCardTransactionCreateSerializer, LiquidityCardTransactionCreateResponseSerializer,
+    LiquidityCardsOverviewSerializer, LiquidityCardDetailResponseSerializer,
+    LiquiditySimpleMessageResponseSerializer,
+)
+from drf_spectacular.utils import (
+    extend_schema, extend_schema_view, OpenApiParameter, OpenApiTypes, OpenApiExample
 )
 from core.utils.jalali import (
     get_current_shamsi, get_days_in_shamsi_month, get_shamsi_month_name, format_jalali_date, get_gregorian_date
@@ -73,6 +82,18 @@ class SafeDestroyMixin:
 
 # ── File / Image Upload ───────────────────────────────────────────────────────
 
+@extend_schema(
+    tags=['مدیریت فایل‌ها و رسانه'],
+    summary="آپلود فایل یا تصویر",
+    description="سرویس آپلود عکس و فایل (گزارش‌ها، فاکتورها، چک‌ها و ...). فایل را با کلید 'file' یا 'image' ارسال نمایید.",
+    request={
+        'multipart/form-data': FileUploadRequestSerializer,
+    },
+    responses={
+        201: FileUploadResponseSerializer,
+        400: OpenApiTypes.OBJECT,
+    }
+)
 class FileUploadView(APIView):
     """
     سرویس آپلود عکس و فایل (گزارش‌ها، فاکتورها، چک‌ها و ...)
@@ -2098,6 +2119,14 @@ class AdvanceRequestViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
 
 # ── سیستم پورسانت و پاداش فروشندگان (Seller Commission & Reward) ──────────────
 
+@extend_schema_view(
+    list=extend_schema(tags=['پورسانت و فروشندگان'], summary="لیست قوانین پورسانت و پاداش"),
+    retrieve=extend_schema(tags=['پورسانت و فروشندگان'], summary="مشاهده جزئیات تنظیمات پورسانت یک فروشنده"),
+    create=extend_schema(tags=['پورسانت و فروشندگان'], summary="ثبت قوانین پورسانت جدید برای فروشنده"),
+    update=extend_schema(tags=['پورسانت و فروشندگان'], summary="ویرایش کامل تنظیمات پورسانت"),
+    partial_update=extend_schema(tags=['پورسانت و فروشندگان'], summary="ویرایش جزئی تنظیمات پورسانت"),
+    destroy=extend_schema(tags=['پورسانت و فروشندگان'], summary="حذف تنظیمات پورسانت"),
+)
 class SellerCommissionConfigViewSet(viewsets.ModelViewSet):
     """
     مدیریت تنظیمات پورسانت و پاداش برای فروشندگان:
@@ -2158,6 +2187,24 @@ class SellerCommissionConfigViewSet(viewsets.ModelViewSet):
             raise PermissionDenied("تنها ادمین یا بالادستی مستقیم فروشنده مجاز به حذف این رکورد هستند.")
         instance.delete()
 
+    @extend_schema(
+        tags=['پورسانت و فروشندگان'],
+        summary="استعلام جامع وضعیت پورسانت، پاداش و فروش‌های ماهانه فروشنده",
+        parameters=[
+            OpenApiParameter(
+                name='seller', type=OpenApiTypes.UUID, location=OpenApiParameter.QUERY,
+                required=True, description="شناسه کاربر فروشنده"
+            ),
+            OpenApiParameter(
+                name='shamsi_year', type=OpenApiTypes.INT, location=OpenApiParameter.QUERY,
+                required=False, description="سال شمسی (پیش‌فرض: سال جاری)"
+            ),
+            OpenApiParameter(
+                name='shamsi_month', type=OpenApiTypes.INT, location=OpenApiParameter.QUERY,
+                required=False, description="ماه شمسی (پیش‌فرض: ماه جاری، بین ۱ تا ۱۲)"
+            ),
+        ]
+    )
     @action(detail=False, methods=['get'], url_path='status')
     def status(self, request):
         """
@@ -2272,6 +2319,14 @@ class SellerCommissionConfigViewSet(viewsets.ModelViewSet):
         return Response(response_data, status=status.HTTP_200_OK)
 
 
+@extend_schema_view(
+    list=extend_schema(tags=['پورسانت و فروشندگان'], summary="لیست فروش‌های روزانه فروشندگان"),
+    retrieve=extend_schema(tags=['پورسانت و فروشندگان'], summary="مشاهده یک رکورد فروش روزانه"),
+    create=extend_schema(tags=['پورسانت و فروشندگان'], summary="ثبت یک رکورد فروش روزانه برای فروشنده"),
+    update=extend_schema(tags=['پورسانت و فروشندگان'], summary="ویرایش فروش روزانه"),
+    partial_update=extend_schema(tags=['پورسانت و فروشندگان'], summary="ویرایش جزئی فروش روزانه"),
+    destroy=extend_schema(tags=['پورسانت و فروشندگان'], summary="حذف رکورد فروش روزانه"),
+)
 class SellerDailySaleViewSet(viewsets.ModelViewSet):
     """
     ثبت و ویرایش لیست فروش روزانه فروشندگان در ماه‌های شمسی:
@@ -2357,6 +2412,11 @@ class SellerDailySaleViewSet(viewsets.ModelViewSet):
             raise PermissionDenied("شما مجاز به حذف این رکورد نیستید.")
         instance.delete()
 
+    @extend_schema(
+        tags=['پورسانت و فروشندگان'],
+        summary="ثبت تجمیعی (Bulk) فروش‌های روزانه کل ماه برای یک فروشنده",
+        request=SellerDailySaleBulkSerializer,
+    )
     @action(detail=False, methods=['post'], url_path='bulk-save')
     def bulk_save(self, request):
         """
@@ -2439,6 +2499,9 @@ class IsLiquidityManager(permissions.BasePermission):
         return False
 
 
+@extend_schema(
+    tags=['مدیریت نقدینگی - درآمد روزانه'],
+)
 class LiquidityDailyRevenueView(APIView):
     """
     دریافت و تنظیم میزان درآمد روزانه
@@ -2447,14 +2510,28 @@ class LiquidityDailyRevenueView(APIView):
     """
     permission_classes = [IsLiquidityManager]
 
+    @extend_schema(
+        summary="دریافت تک‌مقدار درآمد روزانه فعلی کسب‌وکار",
+        responses={200: LiquidityDailyRevenueSettingSerializer}
+    )
     def get(self, request):
         setting = LiquidityDailyRevenueSetting.get_current_revenue()
         serializer = LiquidityDailyRevenueSettingSerializer(setting)
         return Response(serializer.data)
 
+    @extend_schema(
+        summary="تنظیم یا ویرایش میزان درآمد روزانه (POST)",
+        request=LiquidityDailyRevenueSettingSerializer,
+        responses={200: LiquidityDailyRevenueSettingSerializer}
+    )
     def post(self, request):
         return self._update(request)
 
+    @extend_schema(
+        summary="تنظیم یا ویرایش میزان درآمد روزانه (PUT)",
+        request=LiquidityDailyRevenueSettingSerializer,
+        responses={200: LiquidityDailyRevenueSettingSerializer}
+    )
     def put(self, request):
         return self._update(request)
 
@@ -2478,6 +2555,70 @@ class LiquidityDailyRevenueView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
+@extend_schema_view(
+    list=extend_schema(
+        tags=['مدیریت نقدینگی - هزینه‌ها'],
+        summary="لیست هزینه‌ها با فیلترهای تفکیکی و جستجو",
+        parameters=[
+            OpenApiParameter(
+                name='scope', type=OpenApiTypes.STR, location=OpenApiParameter.QUERY,
+                description="فیلتر نما/بازه: unpaid (پرداخت نشده - پیش‌فرض), paid (تسویه‌شده), next_week (سررسید ۷ روز آینده), overdue (معوق), this_month (ماه جاری شمسی), all (همه)",
+                enum=['unpaid', 'paid', 'next_week', 'overdue', 'this_month', 'all']
+            ),
+            OpenApiParameter(
+                name='status', type=OpenApiTypes.STR, location=OpenApiParameter.QUERY,
+                description="فیلتر بر اساس وضعیت هوشمند محاسبه‌شده: EXCELLENT (عالی), NORMAL (عادی), WARNING (هشدار), CRITICAL (خطرناک), OVERDUE (عقب مانده), PAID (پرداخت شده)",
+                enum=['EXCELLENT', 'NORMAL', 'WARNING', 'CRITICAL', 'OVERDUE', 'PAID']
+            ),
+            OpenApiParameter(
+                name='category', type=OpenApiTypes.STR, location=OpenApiParameter.QUERY,
+                description="دسته‌بندی هزینه: SALARY (حقوق), DAILY (روزانه), RENT (اجاره), BILL (قبض), CHEQUE (چک), PURCHASE (خرید), MISC (متفرقه)",
+                enum=['SALARY', 'DAILY', 'RENT', 'BILL', 'CHEQUE', 'PURCHASE', 'MISC']
+            ),
+            OpenApiParameter(
+                name='is_paid', type=OpenApiTypes.BOOL, location=OpenApiParameter.QUERY,
+                description="فیلتر صریح وضعیت پرداخت (true یا false)"
+            ),
+            OpenApiParameter(
+                name='search', type=OpenApiTypes.STR, location=OpenApiParameter.QUERY,
+                description="جستجوی متنی در عنوان و توضیحات هزینه"
+            ),
+            OpenApiParameter(
+                name='ordering', type=OpenApiTypes.STR, location=OpenApiParameter.QUERY,
+                description="مرتب‌سازی: due_date, -due_date, amount, -amount, created_at, -created_at"
+            ),
+        ],
+        responses={200: LiquidityExpenseListSerializer(many=True)}
+    ),
+    retrieve=extend_schema(
+        tags=['مدیریت نقدینگی - هزینه‌ها'],
+        summary="مشاهده جزئیات یک هزینه به همراه کلیه پرداخت‌های ثبت‌شده",
+        responses={200: LiquidityExpenseSerializer}
+    ),
+    create=extend_schema(
+        tags=['مدیریت نقدینگی - هزینه‌ها'],
+        summary="ثبت هزینه تعهدشده جدید",
+        request=LiquidityExpenseSerializer,
+        responses={201: LiquidityExpenseSerializer}
+    ),
+    update=extend_schema(
+        tags=['مدیریت نقدینگی - هزینه‌ها'],
+        summary="ویرایش کامل هزینه",
+        request=LiquidityExpenseSerializer,
+        responses={200: LiquidityExpenseSerializer}
+    ),
+    partial_update=extend_schema(
+        tags=['مدیریت نقدینگی - هزینه‌ها'],
+        summary="ویرایش جزئی هزینه",
+        request=LiquidityExpenseSerializer,
+        responses={200: LiquidityExpenseSerializer}
+    ),
+    destroy=extend_schema(
+        tags=['مدیریت نقدینگی - هزینه‌ها'],
+        summary="حذف ایمن هزینه",
+        responses={200: OpenApiTypes.OBJECT}
+    ),
+)
 class LiquidityExpenseViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     """
     مدیریت هزینه‌های تعهد شده نقدینگی (CRUD، لیست با فیلترهای تفکیکی، ثبت پرداخت مرحله‌ای و تایید تسویه نهایی)
@@ -2564,6 +2705,12 @@ class LiquidityExpenseViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
 
+    @extend_schema(
+        tags=['مدیریت نقدینگی - هزینه‌ها'],
+        summary="ثبت یک پرداخت مرحله‌ای / واریز ذخیره‌سازی به این هزینه",
+        request=LiquidityExpensePaymentCreateSerializer,
+        responses={201: LiquidityExpensePaymentCreateResponseSerializer}
+    )
     @action(detail=True, methods=['post'], url_path='payments')
     def add_payment(self, request, pk=None):
         """
@@ -2613,6 +2760,17 @@ class LiquidityExpenseViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
             "expense": LiquidityExpenseSerializer(expense, context=ctx).data
         }, status=status.HTTP_201_CREATED)
 
+    @extend_schema(
+        tags=['مدیریت نقدینگی - هزینه‌ها'],
+        summary="حذف یک پرداخت مرحله‌ای ثبت‌شده",
+        parameters=[
+            OpenApiParameter(
+                name='payment_id', type=OpenApiTypes.UUID, location=OpenApiParameter.PATH,
+                description="شناسه UUID پرداخت مرحله‌ای"
+            )
+        ],
+        responses={200: LiquidityExpenseActionResponseSerializer}
+    )
     @action(detail=True, methods=['delete'], url_path=r'payments/(?P<payment_id>[^/.]+)')
     def delete_payment(self, request, pk=None, payment_id=None):
         """
@@ -2633,6 +2791,12 @@ class LiquidityExpenseViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
             "expense": LiquidityExpenseSerializer(expense, context=ctx).data
         }, status=status.HTTP_200_OK)
 
+    @extend_schema(
+        tags=['مدیریت نقدینگی - هزینه‌ها'],
+        summary="تایید نهایی تسویه هزینه (خروج از کارت هزینه‌ها و ورود به پرداخت‌شده)",
+        request=None,
+        responses={200: LiquidityExpenseActionResponseSerializer}
+    )
     @action(detail=True, methods=['post'], url_path='confirm-payment')
     def confirm_payment(self, request, pk=None):
         """
@@ -2650,6 +2814,12 @@ class LiquidityExpenseViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
             "expense": LiquidityExpenseSerializer(expense, context=ctx).data
         }, status=status.HTTP_200_OK)
 
+    @extend_schema(
+        tags=['مدیریت نقدینگی - هزینه‌ها'],
+        summary="بازگردانی وضعیت هزینه از تسویه‌شده به جاری/فعال",
+        request=None,
+        responses={200: LiquidityExpenseActionResponseSerializer}
+    )
     @action(detail=True, methods=['post'], url_path='unconfirm-payment')
     def unconfirm_payment(self, request, pk=None):
         """
@@ -2667,6 +2837,11 @@ class LiquidityExpenseViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
             "expense": LiquidityExpenseSerializer(expense, context=ctx).data
         }, status=status.HTTP_200_OK)
 
+    @extend_schema(
+        tags=['مدیریت نقدینگی - هزینه‌ها'],
+        summary="خلاصه شمارنده‌ها، وضعیت‌ها و مبالغ برای تب‌های فرانت‌اند",
+        responses={200: LiquidityExpenseSummaryResponseSerializer}
+    )
     @action(detail=False, methods=['get'], url_path='summary')
     def summary(self, request):
         """
@@ -2711,6 +2886,13 @@ class LiquidityExpenseViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         }, status=status.HTTP_200_OK)
 
 
+@extend_schema_view(
+    list=extend_schema(
+        tags=['مدیریت نقدینگی - کارت‌ها'],
+        summary="نمای کلی وضعیت هر سه کارت نقدینگی (هزینه‌ها، تنخواه، سود)",
+        responses={200: LiquidityCardsOverviewSerializer}
+    )
+)
 class LiquidityCardsViewSet(viewsets.ViewSet):
     """
     مدیریت کارت‌های سه‌گانه نقدینگی:
@@ -2723,12 +2905,13 @@ class LiquidityCardsViewSet(viewsets.ViewSet):
     def list(self, request):
         return self.overview(request)
 
+    @extend_schema(
+        tags=['مدیریت نقدینگی - کارت‌ها'],
+        summary="خلاصه لحظه‌ای وضعیت هر سه کارت نقدینگی",
+        responses={200: LiquidityCardsOverviewSerializer}
+    )
     @action(detail=False, methods=['get'], url_path='overview')
     def overview(self, request):
-        """
-        خلاصه لحظه‌ای وضعیت هر سه کارت نقدینگی
-        GET /api/liquidity/cards/ (یا /api/liquidity/cards/overview/)
-        """
         # ۱. کارت هزینه‌ها (جمع مقدار داده شده همه هزینه‌های پرداخت نشده)
         unpaid_expenses = LiquidityExpense.objects.filter(is_paid=False).prefetch_related('payments')
         total_expenses_target = sum(e.amount for e in unpaid_expenses)
@@ -2774,6 +2957,18 @@ class LiquidityCardsViewSet(viewsets.ViewSet):
             }
         }, status=status.HTTP_200_OK)
 
+    @extend_schema(
+        tags=['مدیریت نقدینگی - کارت‌ها'],
+        summary="جزئیات و تاریخچه تراکنش‌های کارت تنخواه",
+        parameters=[
+            OpenApiParameter(
+                name='type', type=OpenApiTypes.STR, location=OpenApiParameter.QUERY,
+                description="فیلتر بر اساس نوع تراکنش: DEPOSIT (واریز) یا WITHDRAWAL (برداشت)",
+                enum=['DEPOSIT', 'WITHDRAWAL']
+            )
+        ],
+        responses={200: LiquidityCardDetailResponseSerializer}
+    )
     @action(detail=False, methods=['get'], url_path='petty-cash')
     def petty_cash(self, request):
         """
@@ -2800,6 +2995,12 @@ class LiquidityCardsViewSet(viewsets.ViewSet):
             "transactions": transactions
         }, status=status.HTTP_200_OK)
 
+    @extend_schema(
+        tags=['مدیریت نقدینگی - کارت‌ها'],
+        summary="ثبت تراکنش واریز یا برداشت کارت تنخواه",
+        request=LiquidityCardTransactionCreateSerializer,
+        responses={201: LiquidityCardTransactionCreateResponseSerializer}
+    )
     @action(detail=False, methods=['post'], url_path='petty-cash/transactions')
     def add_petty_cash_transaction(self, request):
         """
@@ -2809,6 +3010,18 @@ class LiquidityCardsViewSet(viewsets.ViewSet):
         """
         return self._add_card_transaction(request, 'PETTY_CASH')
 
+    @extend_schema(
+        tags=['مدیریت نقدینگی - کارت‌ها'],
+        summary="جزئیات و تاریخچه تراکنش‌های کارت سود",
+        parameters=[
+            OpenApiParameter(
+                name='type', type=OpenApiTypes.STR, location=OpenApiParameter.QUERY,
+                description="فیلتر بر اساس نوع تراکنش: DEPOSIT (واریز) یا WITHDRAWAL (برداشت)",
+                enum=['DEPOSIT', 'WITHDRAWAL']
+            )
+        ],
+        responses={200: LiquidityCardDetailResponseSerializer}
+    )
     @action(detail=False, methods=['get'], url_path='profit')
     def profit(self, request):
         """
@@ -2835,6 +3048,12 @@ class LiquidityCardsViewSet(viewsets.ViewSet):
             "transactions": transactions
         }, status=status.HTTP_200_OK)
 
+    @extend_schema(
+        tags=['مدیریت نقدینگی - کارت‌ها'],
+        summary="ثبت تراکنش واریز یا برداشت کارت سود",
+        request=LiquidityCardTransactionCreateSerializer,
+        responses={201: LiquidityCardTransactionCreateResponseSerializer}
+    )
     @action(detail=False, methods=['post'], url_path='profit/transactions')
     def add_profit_transaction(self, request):
         """
@@ -2844,6 +3063,17 @@ class LiquidityCardsViewSet(viewsets.ViewSet):
         """
         return self._add_card_transaction(request, 'PROFIT')
 
+    @extend_schema(
+        tags=['مدیریت نقدینگی - کارت‌ها'],
+        summary="حذف یک تراکنش از کارت‌های تنخواه یا سود",
+        parameters=[
+            OpenApiParameter(
+                name='tx_id', type=OpenApiTypes.UUID, location=OpenApiParameter.PATH,
+                description="شناسه UUID تراکنش کارت"
+            )
+        ],
+        responses={200: LiquiditySimpleMessageResponseSerializer}
+    )
     @action(detail=False, methods=['delete'], url_path=r'transactions/(?P<tx_id>[^/.]+)')
     def delete_transaction(self, request, tx_id=None):
         """
