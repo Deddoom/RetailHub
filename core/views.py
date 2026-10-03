@@ -28,6 +28,7 @@ from core.models import (
     WasteReport, WasteItem, UserOnlineLog, AdvanceRequest, AdvanceRequestLog,
     SellerCommissionConfig, SellerDailySale,
     LiquidityDailyRevenueSetting, LiquidityExpense, LiquidityExpensePayment, LiquidityCardTransaction,
+    LiquidityDailyCharge,
 )
 from core.serializers import (
     UserSerializer,
@@ -54,7 +55,10 @@ from core.serializers import (
     LiquidityCardTransactionCreateSerializer, LiquidityCardTransactionCreateResponseSerializer,
     LiquidityCardsOverviewSerializer, LiquidityCardDetailResponseSerializer,
     LiquiditySimpleMessageResponseSerializer,
+    UserPendingCountsResponseSerializer, UserOnlineResponseSerializer,
+    LiquidityDailyChargeSerializer, LiquidityDailyChargeCreateSerializer,
 )
+from core.pagination import OptionalPageNumberPagination
 from drf_spectacular.utils import (
     extend_schema, extend_schema_view, OpenApiParameter, OpenApiTypes, OpenApiExample
 )
@@ -224,7 +228,7 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         public_actions = [
             'list', 'retrieve', 'subordinates', 'update_branch',
             'complete_profile', 'supervisors', 'performance',
-            'all_users_status', 'mark_online', 'reports'
+            'all_users_status', 'mark_online', 'pending_counts', 'reports'
         ]
         if self.action in public_actions:
             return [permissions.IsAuthenticated()]
@@ -518,6 +522,80 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
             "report_submissions": submissions_data,
         }, status=status.HTTP_200_OK)
 
+    @staticmethod
+    def _get_user_pending_counts(user):
+        """
+        محاسبه تعداد وظایف انجام‌نشده کاربر برای بج‌ها و داشبورد اولیه:
+        1. ماموریت‌های انجام نشده (pending_missions_count): ماموریت‌های با وضعیت PENDING یا DOING
+        2. چک‌لیست‌های پر نشده (incomplete_checklists_count): چک‌لیست‌های کاربر با حداقل یک تسک انجام‌نشده
+        3. گزارش‌های کامل نشده (incomplete_reports_count): گزارش‌های فعال منتسب به کاربر که هنوز در دوره مقرر ارسال نشده‌اند
+        """
+        from django.utils import timezone
+        from datetime import timedelta
+        from core.models import Mission, Checklist, ReportDefinition
+
+        now = timezone.now()
+        today = now.date()
+
+        # ۱. ماموریت‌های انجام نشده
+        pending_missions_count = Mission.objects.filter(
+            assigned_to=user,
+            status__in=['PENDING', 'DOING']
+        ).count()
+
+        # ۲. چک‌لیست‌های پر نشده
+        incomplete_checklists_count = Checklist.objects.filter(
+            assigned_to=user,
+            tasks__is_completed=False
+        ).distinct().count()
+
+        # ۳. گزارش‌های کامل نشده
+        user_defs = ReportDefinition.objects.filter(subordinate=user, is_active=True)
+        incomplete_reports_count = 0
+
+        for rdef in user_defs:
+            if rdef.report_type == 'DEADLINE':
+                # گزارش‌های مهلت‌دار: آیا پاسخی ارسال شده؟
+                has_sub = rdef.submissions.filter(submitted_by=user).exists()
+                if not has_sub:
+                    incomplete_reports_count += 1
+            elif rdef.report_type == 'RECURRING':
+                interval = rdef.interval or 'DAILY'
+                if interval == 'DAILY':
+                    has_sub = rdef.submissions.filter(
+                        submitted_by=user,
+                        submitted_at__date=today
+                    ).exists()
+                elif interval == 'WEEKLY':
+                    has_sub = rdef.submissions.filter(
+                        submitted_by=user,
+                        submitted_at__date__gte=today - timedelta(days=6)
+                    ).exists()
+                elif interval == 'MONTHLY':
+                    has_sub = rdef.submissions.filter(
+                        submitted_by=user,
+                        submitted_at__date__gte=today - timedelta(days=29)
+                    ).exists()
+                else:
+                    has_sub = rdef.submissions.filter(
+                        submitted_by=user,
+                        submitted_at__date__gte=today - timedelta(days=59)
+                    ).exists()
+
+                if not has_sub:
+                    incomplete_reports_count += 1
+
+        return {
+            "pending_missions_count": pending_missions_count,
+            "incomplete_reports_count": incomplete_reports_count,
+            "incomplete_checklists_count": incomplete_checklists_count,
+        }
+
+    @extend_schema(
+        summary="اعلام آنلاین شدن کاربر در اپلیکیشن همراه با دریافت آمار وظایف باز",
+        description="ثبت حضور و زمان آخرین بازدید روزانه کاربر، و بازگرداندن تعداد ماموریت‌های انجام‌نشده، گزارش‌های کامل‌نشده و چک‌لیست‌های پرنشده",
+        responses={200: UserOnlineResponseSerializer}
+    )
     @action(detail=False, methods=['post'], url_path='mark-online')
     def mark_online(self, request):
         """
@@ -547,10 +625,30 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         if not created:
             log.save() # فیلد last_seen به صورت خودکار به لحظه فعلی آپدیت می‌شود
 
+        pending_counts = self._get_user_pending_counts(request.user)
+
         return Response(
-            {"message": "وضعیت آنلاین شما برای امروز ثبت شد.", "date": str(today), "time": now.strftime("%H:%M")},
+            {
+                "message": "وضعیت آنلاین شما برای امروز ثبت شد.",
+                "date": str(today),
+                "time": now.strftime("%H:%M"),
+                **pending_counts
+            },
             status=status.HTTP_200_OK
         )
+
+    @extend_schema(
+        summary="دریافت آمار وظایف انجام‌نشده کاربر جاری (بج‌ها و داشبورد اولیه)",
+        description="تعداد ماموریت‌های باز، چک‌لیست‌های پرنشده و گزارش‌های کامل‌نشده",
+        responses={200: UserPendingCountsResponseSerializer}
+    )
+    @action(detail=False, methods=['get'], url_path='pending-counts')
+    def pending_counts(self, request):
+        """
+        دریافت آمار عددی وظایف باز کاربر بدون نیاز به ثبت آنلاین شدن مجدد
+        """
+        counts = self._get_user_pending_counts(request.user)
+        return Response(counts, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['get'], url_path='all-users-status')
     def all_users_status(self, request):
@@ -737,10 +835,27 @@ class SellerViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
 
 # ── Customers ─────────────────────────────────────────────────────────────────
 
+@extend_schema_view(
+    list=extend_schema(
+        summary="لیست مشتریان (پشتیبانی از صفحه‌بندی هوشمند و جستجو)",
+        description="دریافت لیست مشتریان با پشتیبانی از اینفینیت اسکرول و جستجوی سروری. در صورت ارسال page صفحه‌بندی اعمال می‌شود و در غیر این صورت خروجی مانند نسخه قبل آرایه‌ای خواهد بود تا نسخه‌های قبلی اپ با مشکلی مواجه نشوند.",
+        parameters=[
+            OpenApiParameter('page', OpenApiTypes.INT, description="شماره صفحه (شروع از ۱)", required=False),
+            OpenApiParameter('page_size', OpenApiTypes.INT, description="تعداد در هر صفحه (پیش‌فرض ۲۰، حداکثر ۱۰۰)", required=False),
+            OpenApiParameter('search', OpenApiTypes.STR, description="جستجو در نام و شماره تماس مشتری", required=False),
+            OpenApiParameter('ordering', OpenApiTypes.STR, description="مرتب‌سازی (مثلاً name, -last_purchase_date, -total_purchase_amount)", required=False),
+        ]
+    )
+)
 class CustomerViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
-    queryset           = Customer.objects.all()
+    queryset           = Customer.objects.all().order_by('-last_purchase_date', '-id')
     serializer_class   = CustomerSerializer
     permission_classes = [permissions.IsAuthenticated]
+    pagination_class   = OptionalPageNumberPagination
+    filter_backends    = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields      = ['name', 'phone']
+    ordering_fields    = ['name', 'last_purchase_date', 'total_purchase_amount']
+    ordering           = ['-last_purchase_date', '-id']
 
 
 # ── Sales ─────────────────────────────────────────────────────────────────────
@@ -2553,6 +2668,72 @@ class LiquidityDailyRevenueView(APIView):
 
         serializer = LiquidityDailyRevenueSettingSerializer(setting)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+# ── Liquidity Daily Charges (شارژ روزانه نقدینگی) ──────────────────────────────
+
+@extend_schema_view(
+    list=extend_schema(
+        tags=['مدیریت نقدینگی - شارژ روزانه'],
+        summary="لیست شارژهای روزانه نقدینگی",
+        description="دریافت لیست مبالغ شارژ شده روزانه نقدینگی به همراه تاریخ و ساعت دقیق ثبت",
+        responses={200: LiquidityDailyChargeSerializer(many=True)},
+        parameters=[
+            OpenApiParameter('from_date', OpenApiTypes.DATE, description="فیلتر از تاریخ میلادی (YYYY-MM-DD)", required=False),
+            OpenApiParameter('to_date', OpenApiTypes.DATE, description="فیلتر تا تاریخ میلادی (YYYY-MM-DD)", required=False),
+        ]
+    ),
+    create=extend_schema(
+        tags=['مدیریت نقدینگی - شارژ روزانه'],
+        summary="ثبت شارژ روزانه نقدینگی جدید",
+        description="ارسال مبلغ شارژ روزانه به سرور جهت ذخیره با تاریخ و ساعت جاری",
+        request=LiquidityDailyChargeCreateSerializer,
+        responses={201: LiquidityDailyChargeSerializer}
+    ),
+    retrieve=extend_schema(
+        tags=['مدیریت نقدینگی - شارژ روزانه'],
+        summary="مشاهده جزئیات یک شارژ روزانه",
+        responses={200: LiquidityDailyChargeSerializer}
+    ),
+    destroy=extend_schema(
+        tags=['مدیریت نقدینگی - شارژ روزانه'],
+        summary="حذف رکورد شارژ روزانه",
+        description="فقط ادمین و مدیر مالی مجاز به حذف شارژ روزانه هستند",
+        responses={204: None}
+    ),
+)
+class LiquidityDailyChargeViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated, IsLiquidityManager]
+    serializer_class = LiquidityDailyChargeSerializer
+    filter_backends = [filters.OrderingFilter]
+    ordering_fields = ['created_at', 'amount']
+    ordering = ['-created_at']
+
+    def get_queryset(self):
+        qs = LiquidityDailyCharge.objects.select_related('created_by').all()
+        from_date = self.request.query_params.get('from_date')
+        to_date = self.request.query_params.get('to_date')
+        if from_date:
+            qs = qs.filter(created_at__date__gte=from_date)
+        if to_date:
+            qs = qs.filter(created_at__date__lte=to_date)
+        return qs.order_by('-created_at')
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return LiquidityDailyChargeCreateSerializer
+        return LiquidityDailyChargeSerializer
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        charge = serializer.save(created_by=request.user)
+        output_serializer = LiquidityDailyChargeSerializer(charge, context={'request': request})
+        return Response(output_serializer.data, status=status.HTTP_201_CREATED)
+
 
 
 @extend_schema_view(

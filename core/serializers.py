@@ -17,7 +17,8 @@ from core.models import (
     BranchTransfer, TransferItem, TransferLog,
     WasteReport, WasteItem, AdvanceRequest, AdvanceRequestLog,
     SellerCommissionConfig, SellerDailySale,
-    LiquidityDailyRevenueSetting, LiquidityExpense, LiquidityExpensePayment, LiquidityCardTransaction
+    LiquidityDailyRevenueSetting, LiquidityExpense, LiquidityExpensePayment, LiquidityCardTransaction,
+    LiquidityDailyCharge
 )
 from core.utils.jalali import (
     get_days_in_shamsi_month, format_jalali_date, get_shamsi_month_name, gregorian_to_jalali
@@ -2081,6 +2082,88 @@ class LiquidityCardDetailResponseSerializer(serializers.Serializer):
 
 class LiquiditySimpleMessageResponseSerializer(serializers.Serializer):
     message = serializers.CharField()
+
+
+# ── آمار وظایف باز کاربر (Pending Badges) ──────────────────────────────────────
+
+class UserPendingCountsResponseSerializer(serializers.Serializer):
+    """
+    پاسخ تعداد کارهای انجام‌نشده کاربر برای بج‌ها و داشبورد اولیه
+    """
+    pending_missions_count = serializers.IntegerField(help_text="تعداد ماموریت‌های انجام‌نشده")
+    incomplete_reports_count = serializers.IntegerField(help_text="تعداد گزارش‌های کامل‌نشده")
+    incomplete_checklists_count = serializers.IntegerField(help_text="تعداد چک‌لیست‌های پرنشده")
+
+
+class UserOnlineResponseSerializer(serializers.Serializer):
+    """
+    پاسخ ثبت وضعیت آنلاین کاربر همراه با شمارنده وظایف باز
+    """
+    message = serializers.CharField()
+    date = serializers.CharField(help_text="تاریخ میلادی امروز")
+    time = serializers.CharField(help_text="ساعت ثبت آنلاین")
+    pending_missions_count = serializers.IntegerField(help_text="تعداد ماموریت‌های انجام‌نشده")
+    incomplete_reports_count = serializers.IntegerField(help_text="تعداد گزارش‌های کامل‌نشده")
+    incomplete_checklists_count = serializers.IntegerField(help_text="تعداد چک‌لیست‌های پرنشده")
+
+
+# ── شارژ روزانه نقدینگی (Liquidity Daily Charges) ──────────────────────────────
+
+class LiquidityDailyChargeSerializer(serializers.ModelSerializer):
+    """
+    سریالایزر دریافت و نمایش اطلاعات شارژ روزانه نقدینگی
+    """
+    created_by_name = serializers.SerializerMethodField()
+    shamsi_date = serializers.SerializerMethodField()
+    shamsi_time = serializers.SerializerMethodField()
+
+    class Meta:
+        model = LiquidityDailyCharge
+        fields = [
+            'id', 'amount', 'description',
+            'created_by', 'created_by_name',
+            'created_at', 'shamsi_date', 'shamsi_time'
+        ]
+        read_only_fields = ['id', 'created_by', 'created_at']
+
+    @extend_schema_field(serializers.CharField(allow_null=True))
+    def get_created_by_name(self, obj):
+        if not obj.created_by:
+            return None
+        full = f"{obj.created_by.first_name} {obj.created_by.last_name}".strip()
+        return full or obj.created_by.username
+
+    @extend_schema_field(serializers.CharField(allow_null=True))
+    def get_shamsi_date(self, obj):
+        if not obj.created_at:
+            return None
+        from django.utils import timezone
+        local_dt = timezone.localtime(obj.created_at)
+        jy, jm, jd = gregorian_to_jalali(local_dt.year, local_dt.month, local_dt.day)
+        return format_jalali_date(jy, jm, jd)
+
+    @extend_schema_field(serializers.CharField(allow_null=True))
+    def get_shamsi_time(self, obj):
+        if not obj.created_at:
+            return None
+        from django.utils import timezone
+        local_dt = timezone.localtime(obj.created_at)
+        return local_dt.strftime('%H:%M')
+
+
+class LiquidityDailyChargeCreateSerializer(serializers.ModelSerializer):
+    """
+    سریالایزر ثبت سریع شارژ روزانه (فقط ارسال مبلغ و توضیحات اختیاری)
+    """
+    class Meta:
+        model = LiquidityDailyCharge
+        fields = ['amount', 'description']
+
+    def validate_amount(self, value):
+        if value <= Decimal('0'):
+            raise serializers.ValidationError("مبلغ شارژ روزانه باید بزرگتر از صفر باشد.")
+        return value
+
 
 
 

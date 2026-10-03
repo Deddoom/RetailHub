@@ -1355,4 +1355,24 @@ class LiquidityCardTransaction(models.Model):
 
     def __str__(self):
         return f"[{self.get_card_type_display()}] {self.get_transaction_type_display()} {self.amount:,.0f} ({self.date})"
+
+
+# ── LiquidityDailyCharge (شارژ شدگی روزانه مدیریت نقدینگی) ──────────────────────
+class LiquidityDailyCharge(models.Model):
+    """
+    ثبت شارژهای روزانه نقدینگی (میزان شارژ شدگی به همراه تاریخ و ساعت دقیق)
+    """
+    id          = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    amount      = models.DecimalField(max_digits=14, decimal_places=2, verbose_name="مبلغ شارژ روزانه (تومان)")
+    description = models.CharField(max_length=255, blank=True, null=True, verbose_name="توضیحات / بابت")
+    created_by  = models.ForeignKey(CustomUser, on_delete=models.PROTECT, related_name='liquidity_daily_charges', verbose_name="ثبت‌کننده")
+    created_at  = models.DateTimeField(auto_now_add=True, verbose_name="تاریخ و ساعت ثبت شارژ")
+
+    class Meta:
+        verbose_name = "شارژ روزانه نقدینگی"
+        verbose_name_plural = "شارژهای روزانه نقدینگی"
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"شارژ {self.amount:,.0f} تومان - {self.created_at}"
 
