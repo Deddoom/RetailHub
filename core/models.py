@@ -1209,18 +1209,20 @@ class LiquidityExpense(models.Model):
     هزینه‌های تعهد شده مدیریت نقدینگی (حقوق، روزانه، اجاره، قبض، چک، خرید، متفرقه)
     """
     CATEGORY_CHOICES = [
-        ('SALARY',   'حقوق'),
-        ('DAILY',    'روزانه'),
-        ('RENT',     'اجاره'),
-        ('BILL',     'قبض'),
-        ('CHEQUE',   'چک'),
-        ('PURCHASE', 'خرید'),
-        ('MISC',     'متفرقه'),
+        ('SUPPLIER',       'تامین کننده'),
+        ('SALARY',         'حقوق'),
+        ('RENT',           'اجاره'),
+        ('INSTALLMENTS',   'اقساط'),
+        ('OTHER_EXPENSES', 'سایر هزینه ها'),
+        ('MANAGEMENT',     'مدیریت'),
+        ('SAVINGS',        'پس انداز'),
+        ('CHARITY',        'خیریه'),
+        ('EQUIPMENT',      'تجهیزات'),
     ]
 
     id          = models.UUIDField(primary_key=True, default=uuid4, editable=False)
     title       = models.CharField(max_length=150, verbose_name="نام/عنوان هزینه")
-    category    = models.CharField(max_length=30, choices=CATEGORY_CHOICES, default='MISC', verbose_name="دسته‌بندی")
+    category    = models.CharField(max_length=30, choices=CATEGORY_CHOICES, default='OTHER_EXPENSES', verbose_name="دسته‌بندی")
     amount      = models.DecimalField(max_digits=14, decimal_places=2, verbose_name="مبلغ کل هزینه")
     due_date    = models.DateField(verbose_name="تاریخ سررسید")
     description = models.TextField(blank=True, null=True, verbose_name="توضیحات")
@@ -1327,11 +1329,18 @@ class LiquidityExpensePayment(models.Model):
 
 class LiquidityCardTransaction(models.Model):
     """
-    تراکنش‌های کارت تنخواه و کارت سود (واریز و برداشت)
+    تراکنش‌های کارت‌های ۹‌گانه نقدینگی (واریز و برداشت)
     """
     CARD_TYPE_CHOICES = [
-        ('PETTY_CASH', 'تنخواه'),
-        ('PROFIT',     'سود'),
+        ('SUPPLIER',       'کارت تامین کننده'),
+        ('SALARY',         'کارت حقوق'),
+        ('RENT',           'کارت اجاره'),
+        ('INSTALLMENTS',   'کارت اقساط'),
+        ('OTHER_EXPENSES', 'کارت سایر هزینه ها'),
+        ('MANAGEMENT',     'کارت مدیریت'),
+        ('SAVINGS',        'کارت پس انداز'),
+        ('CHARITY',        'کارت خیریه'),
+        ('EQUIPMENT',      'کارت تجهیزات'),
     ]
 
     TRANSACTION_TYPE_CHOICES = [
@@ -1340,11 +1349,19 @@ class LiquidityCardTransaction(models.Model):
     ]
 
     id               = models.UUIDField(primary_key=True, default=uuid4, editable=False)
-    card_type        = models.CharField(max_length=20, choices=CARD_TYPE_CHOICES, verbose_name="نوع کارت")
+    card_type        = models.CharField(max_length=30, choices=CARD_TYPE_CHOICES, verbose_name="نوع کارت")
     transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPE_CHOICES, verbose_name="نوع تراکنش")
     amount           = models.DecimalField(max_digits=14, decimal_places=2, verbose_name="مبلغ")
     date             = models.DateField(default=datetime.date.today, verbose_name="تاریخ تراکنش")
     description      = models.TextField(blank=True, null=True, verbose_name="توضیحات تراکنش")
+    expense          = models.ForeignKey(
+        LiquidityExpense,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='card_transactions',
+        verbose_name="هزینه مربوطه (در صورت کسر خودکار)"
+    )
     created_by       = models.ForeignKey(CustomUser, on_delete=models.PROTECT, related_name='liquidity_card_transactions', verbose_name="ثبت‌کننده")
     created_at       = models.DateTimeField(auto_now_add=True, verbose_name="زمان ثبت")
 

@@ -1783,6 +1783,7 @@ class LiquidityExpensePaymentSerializer(serializers.ModelSerializer):
 class LiquidityCardTransactionSerializer(serializers.ModelSerializer):
     card_type_display = serializers.CharField(source='get_card_type_display', read_only=True)
     transaction_type_display = serializers.CharField(source='get_transaction_type_display', read_only=True)
+    expense_title = serializers.CharField(source='expense.title', read_only=True, allow_null=True)
     created_by_name = serializers.SerializerMethodField()
     date_jalali = serializers.SerializerMethodField()
 
@@ -1792,7 +1793,8 @@ class LiquidityCardTransactionSerializer(serializers.ModelSerializer):
             'id', 'card_type', 'card_type_display',
             'transaction_type', 'transaction_type_display',
             'amount', 'date', 'date_jalali',
-            'description', 'created_by', 'created_by_name', 'created_at'
+            'description', 'expense', 'expense_title',
+            'created_by', 'created_by_name', 'created_at'
         ]
         read_only_fields = ['id', 'created_by', 'created_at']
 
@@ -2031,6 +2033,14 @@ class LiquidityExpenseSummaryResponseSerializer(serializers.Serializer):
 
 
 class LiquidityCardTransactionCreateSerializer(serializers.Serializer):
+    card_type = serializers.ChoiceField(
+        choices=[
+            'SUPPLIER', 'SALARY', 'RENT', 'INSTALLMENTS', 'OTHER_EXPENSES',
+            'MANAGEMENT', 'SAVINGS', 'CHARITY', 'EQUIPMENT'
+        ],
+        required=False,
+        help_text="نوع کارت (اختیاری اگر در آدرس مشخص شده باشد)"
+    )
     transaction_type = serializers.ChoiceField(
         choices=['DEPOSIT', 'WITHDRAWAL'], required=True,
         help_text="نوع تراکنش: DEPOSIT (واریز) یا WITHDRAWAL (برداشت)"
@@ -2048,35 +2058,38 @@ class LiquidityCardTransactionCreateResponseSerializer(serializers.Serializer):
     transaction = LiquidityCardTransactionSerializer()
 
 
-class LiquidityExpenseCardOverviewSerializer(serializers.Serializer):
-    title = serializers.CharField(default="کارت هزینه‌ها")
-    total_allocated = serializers.FloatField(help_text="مجموع مبالغ ذخیره شده برای هزینه‌های فعال")
-    total_target = serializers.FloatField(help_text="مجموع مبلغ کل هزینه‌های پرداخت‌نشده")
-    remaining_needed = serializers.FloatField(help_text="مبلغ مانده مورد نیاز")
-    active_expenses_count = serializers.IntegerField(help_text="تعداد هزینه‌های جاری فعال")
-    description = serializers.CharField()
+class LiquiditySingleCardOverviewSerializer(serializers.Serializer):
+    card_type = serializers.CharField(help_text="کد نوع کارت و دسته‌بندی")
+    title = serializers.CharField(help_text="عنوان کارت")
+    balance = serializers.FloatField(help_text="اعتبار فعلی کارت (واریز منهای برداشت)")
+    total_deposits = serializers.FloatField(help_text="مجموع واریزی‌ها به این کارت")
+    total_withdrawals = serializers.FloatField(help_text="مجموع برداشت‌ها / پرداختی‌ها از این کارت")
+    total_expenses = serializers.FloatField(help_text="مجموع هزینه‌های پرداخت‌نشده این دسته تا ۳۰ روز آینده")
+    expenses_count = serializers.IntegerField(help_text="تعداد هزینه‌های پرداخت‌نشده این دسته تا ۳۰ روز آینده")
+    recent_transactions = LiquidityCardTransactionSerializer(many=True, help_text="آخرین تراکنش‌های کارت")
 
 
-class LiquidityPettyOrProfitCardOverviewSerializer(serializers.Serializer):
-    title = serializers.CharField()
-    balance = serializers.FloatField(help_text="مانده فعلی حساب")
-    total_deposits = serializers.FloatField(help_text="مجموع واریزی‌ها")
-    total_withdrawals = serializers.FloatField(help_text="مجموع برداشت‌ها")
-    recent_transactions = LiquidityCardTransactionSerializer(many=True, help_text="آخرین ۵ تراکنش")
+class LiquidityCardsSummarySerializer(serializers.Serializer):
+    total_balance = serializers.FloatField(help_text="مجموع موجودی و اعتبار تمام ۹ کارت")
+    total_expenses = serializers.FloatField(help_text="مجموع هزینه‌های پرداخت‌نشده تمام ۹ دسته تا ۳۰ روز آینده")
+    total_deposits = serializers.FloatField(help_text="مجموع کل واریزها")
+    total_withdrawals = serializers.FloatField(help_text="مجموع کل برداشت‌ها")
 
 
 class LiquidityCardsOverviewSerializer(serializers.Serializer):
-    expense_card = LiquidityExpenseCardOverviewSerializer()
-    petty_cash_card = LiquidityPettyOrProfitCardOverviewSerializer()
-    profit_card = LiquidityPettyOrProfitCardOverviewSerializer()
+    summary = LiquidityCardsSummarySerializer()
+    cards = LiquiditySingleCardOverviewSerializer(many=True, help_text="لیست مشخصات تمام ۹ کارت")
+    cards_by_type = serializers.DictField(child=LiquiditySingleCardOverviewSerializer(), help_text="نگاشت کارت‌ها بر اساس کد دسته")
 
 
 class LiquidityCardDetailResponseSerializer(serializers.Serializer):
-    card = serializers.CharField(help_text="نوع کارت: PETTY_CASH یا PROFIT")
+    card_type = serializers.CharField(help_text="کد دسته‌بندی و نوع کارت")
     title = serializers.CharField(help_text="عنوان کارت")
-    balance = serializers.FloatField(help_text="مانده فعلی")
+    balance = serializers.FloatField(help_text="مانده فعلی کارت")
     total_deposits = serializers.FloatField(help_text="مجموع واریزی‌ها")
     total_withdrawals = serializers.FloatField(help_text="مجموع برداشت‌ها")
+    total_expenses = serializers.FloatField(help_text="مجموع هزینه‌های پرداخت‌نشده تا ۳۰ روز آینده")
+    expenses_count = serializers.IntegerField(help_text="تعداد هزینه‌های پرداخت‌نشده تا ۳۰ روز آینده")
     transactions = LiquidityCardTransactionSerializer(many=True, help_text="تاریخچه کامل تراکنش‌ها")
 
 

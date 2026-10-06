@@ -70,116 +70,105 @@
 
 ---
 
-## 2️⃣ کارت‌های سه‌گانه نقدینگی (Cards API)
+## 2️⃣ کارت‌های ۹‌گانه نقدینگی (Cards API)
 
-### 2.1. مشاهده خلاصه همزمان هر سه کارت
+سامانه نقدینگی دارای ۹ کارت اختصاصی متناظر با دسته‌بندی‌های هزینه‌ها است:
+1. **تامین کننده** (`SUPPLIER`)
+2. **حقوق** (`SALARY`)
+3. **اجاره** (`RENT`)
+4. **اقساط** (`INSTALLMENTS`)
+5. **سایر هزینه ها** (`OTHER_EXPENSES`)
+6. **مدیریت** (`MANAGEMENT`)
+7. **پس انداز** (`SAVINGS`)
+8. **خیریه** (`CHARITY`)
+9. **تجهیزات** (`EQUIPMENT`)
+
+هر کارت شامل اطلاعات زیر است:
+- **`balance`:** مانده و اعتبار فعلی کارت (مجموع واریزی‌ها منهای مجموع برداشت‌ها).
+- **`total_expenses`:** مجموع مبالغ هزینه‌های **پرداخت‌نشده** مربوط به این دسته که تاریخ سررسید آن‌ها تا **۳۰ روز آینده** است (شامل هزینه‌های معوقه تسویه‌نشده). هزینه‌های با سررسید بیش از ۳۰ روز محاسبه نمی‌شوند تا وارد بازه ۳۰ روزه شوند.
+- **`expenses_count`:** تعداد هزینه‌های باز این دسته تا ۳۰ روز آینده.
+- **`total_deposits` و `total_withdrawals`:** مجموع مبالغ شارژ و خروجی.
+- **`recent_transactions`:** لیست آخرین تراکنش‌های انجام‌شده در این کارت.
+
+---
+
+### 2.1. مشاهده نمای کلی وضعیت هر ۹ کارت (Overview)
 - **متد:** `GET`
 - **آدرس:** `/api/liquidity/cards/` (یا `/api/liquidity/cards/overview/`)
 - **نمونه پاسخ:**
 ```json
 {
-  "expense_card": {
-    "title": "کارت هزینه‌ها",
-    "total_allocated": 115000000.0,
-    "total_target": 230000000.0,
-    "remaining_needed": 115000000.0,
-    "active_expenses_count": 2,
-    "description": "جمع مقادیر داده شده برای تمامی هزینه‌های پرداخت‌نشده جاری"
+  "summary": {
+    "total_balance": 250000000.0,
+    "total_expenses": 140000000.0,
+    "total_deposits": 300000000.0,
+    "total_withdrawals": 50000000.0
   },
-  "petty_cash_card": {
-    "title": "کارت تنخواه",
-    "balance": 7000000.0,
-    "total_deposits": 10000000.0,
-    "total_withdrawals": 3000000.0,
-    "recent_transactions": [
-      {
-        "id": "7f8c12a8-...",
-        "card_type": "PETTY_CASH",
-        "card_type_display": "تنخواه",
-        "transaction_type": "WITHDRAWAL",
-        "transaction_type_display": "برداشت / خرج از کارت",
-        "amount": "3000000.00",
-        "date": "2026-09-20",
-        "date_jalali": "1405/06/30",
-        "description": "خرید اقلام بهداشتی و چای",
-        "created_by_name": "مدیر مالی",
-        "created_at": "2026-09-20T21:00:00Z"
-      }
-    ]
-  },
-  "profit_card": {
-    "title": "کارت سود",
-    "balance": 5000000.0,
-    "total_deposits": 5000000.0,
-    "total_withdrawals": 0.0,
-    "recent_transactions": [
-      {
-        "id": "6a9b43d1-...",
-        "card_type": "PROFIT",
-        "card_type_display": "سود",
-        "transaction_type": "DEPOSIT",
-        "transaction_type_display": "واریز / پرداخت به کارت",
-        "amount": "5000000.00",
-        "date": "2026-09-20",
-        "date_jalali": "1405/06/30",
-        "description": "واریز مازاد فروش شنبه به سود",
-        "created_by_name": "مدیر مالی",
-        "created_at": "2026-09-20T21:15:00Z"
-      }
-    ]
+  "cards": [
+    {
+      "card_type": "RENT",
+      "title": "کارت اجاره",
+      "balance": 200000000.0,
+      "total_deposits": 200000000.0,
+      "total_withdrawals": 0.0,
+      "total_expenses": 60000000.0,
+      "expenses_count": 3,
+      "recent_transactions": [...]
+    },
+    {
+      "card_type": "SALARY",
+      "title": "کارت حقوق",
+      "balance": 50000000.0,
+      "total_deposits": 100000000.0,
+      "total_withdrawals": 50000000.0,
+      "total_expenses": 80000000.0,
+      "expenses_count": 2,
+      "recent_transactions": [...]
+    }
+  ],
+  "cards_by_type": {
+    "supplier": { ... },
+    "salary": { ... },
+    "rent": { ... },
+    "installments": { ... },
+    "other_expenses": { ... },
+    "management": { ... },
+    "savings": { ... },
+    "charity": { ... },
+    "equipment": { ... }
   }
 }
 ```
 
-> **نکته کلیدی کارت هزینه‌ها:**
-> کارت هزینه‌ها به طور زنده مجموع پول‌های ذخیره‌شده (`allocated_amount`) روی هزینه‌های پرداخت‌نشده را نشان می‌دهد. هر زمان هزینه پرداخت قطعی شود (`confirm-payment`)، مبلغ آن از این کارت کسر می‌گردد چون پول برای تسویه نهایی از شرکت خارج شده است.
-
 ---
 
-### 2.2. کارت تنخواه - مشاهده تاریخچه و تراکنش‌ها
+### 2.2. مشاهده جزئیات و تاریخچه تراکنش‌های یک کارت
 - **متد:** `GET`
-- **آدرس:** `/api/liquidity/cards/petty-cash/`
+- **آدرس:** `/api/liquidity/cards/{card_type}/`
+  *(مثال‌ها: `/api/liquidity/cards/rent/`، `/api/liquidity/cards/salary/`، `/api/liquidity/cards/other-expenses/`)*
 - **پارامترهای فیلتر (اختیاری):**
   - `?type=DEPOSIT` (فقط واریزها)
   - `?type=WITHDRAWAL` (فقط برداشت‌ها)
 
-### 2.3. کارت تنخواه - ثبت تراکنش واریز یا برداشت
+---
+
+### 2.3. ثبت تراکنش واریز یا برداشت کارت
 - **متد:** `POST`
-- **آدرس:** `/api/liquidity/cards/petty-cash/transactions/`
+- **آدرس:** `/api/liquidity/cards/{card_type}/transactions/` یا `/api/liquidity/cards/transactions/`
 - **نمونه بدنه درخواست:**
 ```json
 {
   "transaction_type": "DEPOSIT",
-  "amount": 5000000,
-  "date": "2026-09-21",
-  "description": "شارژ تنخواه از فروش نقدی روز قبل"
+  "amount": 50000000,
+  "date": "2026-10-06",
+  "description": "شارژ کارت اجاره از محل فروش نقدی"
 }
 ```
-*(مقدار `transaction_type` می‌تواند `DEPOSIT` یا `WITHDRAWAL` باشد)*
+*(مقدار `transaction_type` می‌تواند `DEPOSIT` (واریز) یا `WITHDRAWAL` (برداشت) باشد. در صورت ارسال به اندپوینت عمومی، فیلد `"card_type": "RENT"` در بدنه الزامی است).*
 
 ---
 
-### 2.4. کارت سود - مشاهده تاریخچه و تراکنش‌ها
-- **متد:** `GET`
-- **آدرس:** `/api/liquidity/cards/profit/`
-- **پارامترهای فیلتر (اختیاری):**
-  - `?type=DEPOSIT`
-  - `?type=WITHDRAWAL`
-
-### 2.5. کارت سود - ثبت تراکنش سود (واریز یا برداشت سود)
-- **متد:** `POST`
-- **آدرس:** `/api/liquidity/cards/profit/transactions/`
-- **نمونه بدنه درخواست:**
-```json
-{
-  "transaction_type": "DEPOSIT",
-  "amount": 10000000,
-  "date": "2026-09-21",
-  "description": "انتقال مازاد فروش به کارت سود"
-}
-```
-
-### 2.6. حذف یک تراکنش از کارت‌های تنخواه یا سود
+### 2.4. حذف یک تراکنش از کارت
 - **متد:** `DELETE`
 - **آدرس:** `/api/liquidity/cards/transactions/{tx_id}/`
 
@@ -196,20 +185,22 @@
   "name": "حقوق مهر پرسنل",
   "category": "SALARY",
   "amount": 200000000,
-  "due_date": "2026-10-07",
+  "due_date": "2026-10-25",
   "description": "حقوق پرسنل فروش و دفتر مرکزی"
 }
 ```
 *(کلید نام می‌تواند `name` یا `title` ارسال شود)*
 
 **دسته‌بندی‌های معتبر (`category`):**
+- `SUPPLIER` (تامین کننده)
 - `SALARY` (حقوق)
-- `DAILY` (روزانه)
 - `RENT` (اجاره)
-- `BILL` (قبض)
-- `CHEQUE` (چک)
-- `PURCHASE` (خرید)
-- `MISC` (متفرقه)
+- `INSTALLMENTS` (اقساط)
+- `OTHER_EXPENSES` (سایر هزینه ها)
+- `MANAGEMENT` (مدیریت)
+- `SAVINGS` (پس انداز)
+- `CHARITY` (خیریه)
+- `EQUIPMENT` (تجهیزات)
 
 ---
 
@@ -340,19 +331,30 @@ GET /api/liquidity/expenses/?status=CRITICAL
 ## 5️⃣ تسویه نهایی و تایید پرداخت هزینه (Settlement API)
 
 ### 5.1. تایید نهایی پرداخت هزینه (Confirm Payment)
-وقتی تاریخ پرداخت فرا برسد و مدیر مالی وجه را به طور کامل تسویه کند، با فراخوانی این اندپوینت هزینه تایید می‌شود:
+وقتی تاریخ پرداخت فرا برسد و مدیر مالی وجه را تسویه کند، با فراخوانی این اندپوینت تایید نهایی ثبت می‌شود:
 - **متد:** `POST`
 - **آدرس:** `/api/liquidity/expenses/{id}/confirm-payment/`
-- **نتیجه:**
-  - وضعیت هزینه به `PAID` تبدیل می‌شود.
-  - این هزینه از دایره هزینه‌های جاری خارج می‌شود.
-  - **مبلغ آن به طور خودکار از کارت هزینه‌ها کسر می‌گردد.**
-  - فیلدهای `is_paid: true` و `paid_at` مقداردهی می‌شوند.
+- **منطق و کنترل اعتبارسنجی سخت‌گیرانه (Strict Balance Check):**
+  1. سیستم ابتدا موجودی کارت متناظر با دسته‌بندی این هزینه (مثلاً کارت اجاره) را بررسی می‌کند.
+  2. **در صورت کسری موجودی کارت:** خطای `400 Bad Request` برمی‌گرداند و مانع پرداخت می‌شود:
+     ```json
+     {
+       "error": "موجودی کارت اجاره (20,000,000 تومان) برای پرداخت این هزینه (50,000,000 تومان) کافی نیست. ابتدا کارت را شارژ کنید."
+     }
+     ```
+  3. **در صورت کافی بودن موجودی کارت:**
+     - وضعیت هزینه به `is_paid: true` و `PAID` تبدیل می‌شود.
+     - به طور خودکار یک تراکنش **برداشت (`WITHDRAWAL`)** به مبلغ هزینه از کارت همان دسته کسر و ثبت می‌گردد (مثلاً مانده ۲۰۰ میلیون به ۱۵۰ میلیون تومان کاهش می‌یابد).
+     - این هزینه از فیلد **«مجموع هزینه» (`total_expenses`)** آن کارت خارج می‌شود.
 
 ### 5.2. بازگردانی وضعیت به پرداخت‌نشده (Unconfirm Payment)
 در صورتی که تایید پرداخت اشتباهاً ثبت شده باشد:
 - **متد:** `POST`
 - **آدرس:** `/api/liquidity/expenses/{id}/unconfirm-payment/`
+- **نتیجه:**
+  - وضعیت هزینه به `is_paid: false` بازمی‌گردد.
+  - تراکنش برداشت خودکار حذف/باطل می‌شود.
+  - مبلغ به موجودی کارت بازگردانده شده و هزینه مجدداً در «مجموع هزینه» کارت محاسبه می‌گردد.
 
 ---
 

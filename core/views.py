@@ -2981,40 +2981,80 @@ class LiquidityExpenseViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='confirm-payment')
     def confirm_payment(self, request, pk=None):
         """
-        تایید نهایی تسویه هزینه (خروج از کارت هزینه‌ها و انتقال به وضعیت پرداخت شده)
+        تایید نهایی تسویه هزینه:
+        1. بررسی عدم تایید قبلی
+        2. بررسی موجودی کارت متناظر (قفل سخت‌گیرانه): در صورت کسری، خطای 400 بازمی‌گرداند.
+        3. علامت‌گذاری is_paid = True
+        4. کسر خودکار مبلغ از اعتبار کارت متناظر با ثبت تراکنش WITHDRAWAL
         POST /api/liquidity/expenses/{id}/confirm-payment/
         """
         expense = self.get_object()
+        if expense.is_paid:
+            return Response({"error": "این هزینه قبلاً تایید و تسویه شده است."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # محاسبه موجودی فعلی کارت این دسته‌بندی
+        card_type = expense.category
+        tx_qs = LiquidityCardTransaction.objects.filter(card_type=card_type)
+        deposits = tx_qs.filter(transaction_type='DEPOSIT').aggregate(s=models.Sum('amount'))['s'] or Decimal('0.00')
+        withdrawals = tx_qs.filter(transaction_type='WITHDRAWAL').aggregate(s=models.Sum('amount'))['s'] or Decimal('0.00')
+        card_balance = deposits - withdrawals
+
+        card_title = dict(LiquidityCardTransaction.CARD_TYPE_CHOICES).get(card_type, card_type)
+
+        # قفل سخت‌گیرانه در صورت ناکافی بودن موجودی کارت
+        if card_balance < expense.amount:
+            return Response({
+                "error": f"موجودی {card_title} ({float(card_balance):,.0f} تومان) برای پرداخت این هزینه ({float(expense.amount):,.0f} تومان) کافی نیست. ابتدا کارت را شارژ کنید."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         expense.is_paid = True
         expense.paid_at = timezone.now()
         expense.save()
 
+        # ثبت خودکار تراکنش برداشت از کارت متناظر
+        LiquidityCardTransaction.objects.create(
+            card_type=card_type,
+            transaction_type='WITHDRAWAL',
+            amount=expense.amount,
+            date=datetime.date.today(),
+            description=f"تسویه و پرداخت هزینه: {expense.title}",
+            expense=expense,
+            created_by=request.user
+        )
+
         ctx = self.get_serializer_context()
         return Response({
-            "message": "هزینه با موفقیت به عنوان پرداخت‌شده تایید گردید.",
+            "message": "هزینه با موفقیت پرداخت شد و از اعتبار کارت کسر گردید.",
             "expense": LiquidityExpenseSerializer(expense, context=ctx).data
         }, status=status.HTTP_200_OK)
 
     @extend_schema(
         tags=['مدیریت نقدینگی - هزینه‌ها'],
-        summary="بازگردانی وضعیت هزینه از تسویه‌شده به جاری/فعال",
+        summary="بازگردانی وضعیت هزینه از تسویه‌شده به جاری/فعال (بازگشت اعتبار به کارت)",
         request=None,
         responses={200: LiquidityExpenseActionResponseSerializer}
     )
     @action(detail=True, methods=['post'], url_path='unconfirm-payment')
     def unconfirm_payment(self, request, pk=None):
         """
-        بازگردانی وضعیت هزینه از پرداخت‌شده به پرداخت‌نشده
+        بازگردانی وضعیت هزینه از پرداخت‌شده به پرداخت‌نشده:
+        ابطال تراکنش کسر از کارت و بازگردانی اعتبار به کارت
         POST /api/liquidity/expenses/{id}/unconfirm-payment/
         """
         expense = self.get_object()
+        if not expense.is_paid:
+            return Response({"error": "این هزینه پرداخت نشده است."}, status=status.HTTP_400_BAD_REQUEST)
+
         expense.is_paid = False
         expense.paid_at = None
         expense.save()
 
+        # حذف تراکنش‌های کسر مرتبط با این هزینه
+        expense.card_transactions.filter(transaction_type='WITHDRAWAL').delete()
+
         ctx = self.get_serializer_context()
         return Response({
-            "message": "وضعیت پرداخت هزینه با موفقیت بازگردانی شد.",
+            "message": "وضعیت پرداخت هزینه با موفقیت بازگردانی شد و مبلغ به کارت بازگشت.",
             "expense": LiquidityExpenseSerializer(expense, context=ctx).data
         }, status=status.HTTP_200_OK)
 
@@ -3070,77 +3110,100 @@ class LiquidityExpenseViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
 @extend_schema_view(
     list=extend_schema(
         tags=['مدیریت نقدینگی - کارت‌ها'],
-        summary="نمای کلی وضعیت هر سه کارت نقدینگی (هزینه‌ها، تنخواه، سود)",
+        summary="نمای کلی وضعیت هر ۹ کارت نقدینگی (هزینه‌ها، موجودی، واریز و برداشت)",
         responses={200: LiquidityCardsOverviewSerializer}
     )
 )
 class LiquidityCardsViewSet(viewsets.ViewSet):
     """
-    مدیریت کارت‌های سه‌گانه نقدینگی:
-    1. کارت هزینه‌ها: جمع مبالغ ذخیره شده برای هزینه‌های فعال
-    2. کارت تنخواه: مقدار، پرداخت‌ها، برداشت‌ها
-    3. کارت سود: پرداخت‌ها، برداشت‌ها
+    مدیریت کارت‌های ۹‌گانه نقدینگی:
+    تامین کننده، حقوق، اجاره، اقساط، سایر هزینه ها، مدیریت، پس انداز، خیریه، تجهیزات
+    شامل: موجودی، واریزها، برداشت‌ها، و مجموع هزینه‌های پرداخت‌نشده تا ۳۰ روز آینده.
     """
     permission_classes = [IsLiquidityManager]
+
+    def _normalize_card_type(self, raw_code):
+        if not raw_code:
+            return None
+        normalized = str(raw_code).upper().replace('-', '_')
+        valid_codes = [c[0] for c in LiquidityCardTransaction.CARD_TYPE_CHOICES]
+        if normalized in valid_codes:
+            return normalized
+        return None
+
+    def _get_card_data(self, card_code, card_title):
+        today = datetime.date.today()
+        month_limit = today + datetime.timedelta(days=30)
+
+        tx_qs = LiquidityCardTransaction.objects.filter(card_type=card_code)
+        deposits = tx_qs.filter(transaction_type='DEPOSIT').aggregate(s=models.Sum('amount'))['s'] or Decimal('0.00')
+        withdrawals = tx_qs.filter(transaction_type='WITHDRAWAL').aggregate(s=models.Sum('amount'))['s'] or Decimal('0.00')
+        balance = deposits - withdrawals
+
+        # هزینه‌های پرداخت نشده تا ۳۰ روز آینده (شامل معوقه‌ها)
+        expenses_qs = LiquidityExpense.objects.filter(
+            category=card_code,
+            is_paid=False,
+            due_date__lte=month_limit
+        )
+        total_expenses = expenses_qs.aggregate(s=models.Sum('amount'))['s'] or Decimal('0.00')
+        expenses_count = expenses_qs.count()
+
+        recent_tx = LiquidityCardTransactionSerializer(
+            tx_qs.order_by('-date', '-created_at')[:5], many=True
+        ).data
+
+        return {
+            "card_type": card_code,
+            "title": card_title,
+            "balance": float(balance),
+            "total_deposits": float(deposits),
+            "total_withdrawals": float(withdrawals),
+            "total_expenses": float(total_expenses),
+            "expenses_count": expenses_count,
+            "recent_transactions": recent_tx
+        }
 
     def list(self, request):
         return self.overview(request)
 
     @extend_schema(
         tags=['مدیریت نقدینگی - کارت‌ها'],
-        summary="خلاصه لحظه‌ای وضعیت هر سه کارت نقدینگی",
+        summary="خلاصه لحظه‌ای وضعیت هر ۹ کارت نقدینگی",
         responses={200: LiquidityCardsOverviewSerializer}
     )
     @action(detail=False, methods=['get'], url_path='overview')
     def overview(self, request):
-        # ۱. کارت هزینه‌ها (جمع مقدار داده شده همه هزینه‌های پرداخت نشده)
-        unpaid_expenses = LiquidityExpense.objects.filter(is_paid=False).prefetch_related('payments')
-        total_expenses_target = sum(e.amount for e in unpaid_expenses)
-        total_expenses_allocated = sum(e.allocated_amount for e in unpaid_expenses)
-        remaining_needed = max(Decimal('0.00'), total_expenses_target - total_expenses_allocated)
+        cards_list = []
+        cards_by_type = {}
+        total_balance = Decimal('0.00')
+        total_upcoming_expenses = Decimal('0.00')
+        total_all_deposits = Decimal('0.00')
+        total_all_withdrawals = Decimal('0.00')
 
-        # ۲. کارت تنخواه
-        petty_qs = LiquidityCardTransaction.objects.filter(card_type='PETTY_CASH')
-        petty_deposits = petty_qs.filter(transaction_type='DEPOSIT').aggregate(s=models.Sum('amount'))['s'] or Decimal('0.00')
-        petty_withdrawals = petty_qs.filter(transaction_type='WITHDRAWAL').aggregate(s=models.Sum('amount'))['s'] or Decimal('0.00')
-        petty_balance = petty_deposits - petty_withdrawals
-        petty_recent = LiquidityCardTransactionSerializer(petty_qs.order_by('-date', '-created_at')[:5], many=True).data
-
-        # ۳. کارت سود
-        profit_qs = LiquidityCardTransaction.objects.filter(card_type='PROFIT')
-        profit_deposits = profit_qs.filter(transaction_type='DEPOSIT').aggregate(s=models.Sum('amount'))['s'] or Decimal('0.00')
-        profit_withdrawals = profit_qs.filter(transaction_type='WITHDRAWAL').aggregate(s=models.Sum('amount'))['s'] or Decimal('0.00')
-        profit_balance = profit_deposits - profit_withdrawals
-        profit_recent = LiquidityCardTransactionSerializer(profit_qs.order_by('-date', '-created_at')[:5], many=True).data
+        for code, title in LiquidityCardTransaction.CARD_TYPE_CHOICES:
+            card_info = self._get_card_data(code, title)
+            cards_list.append(card_info)
+            cards_by_type[code.lower()] = card_info
+            total_balance += Decimal(str(card_info['balance']))
+            total_upcoming_expenses += Decimal(str(card_info['total_expenses']))
+            total_all_deposits += Decimal(str(card_info['total_deposits']))
+            total_all_withdrawals += Decimal(str(card_info['total_withdrawals']))
 
         return Response({
-            "expense_card": {
-                "title": "کارت هزینه‌ها",
-                "total_allocated": float(total_expenses_allocated),
-                "total_target": float(total_expenses_target),
-                "remaining_needed": float(remaining_needed),
-                "active_expenses_count": unpaid_expenses.count(),
-                "description": "جمع مقادیر داده شده برای تمامی هزینه‌های پرداخت‌نشده جاری"
+            "summary": {
+                "total_balance": float(total_balance),
+                "total_expenses": float(total_upcoming_expenses),
+                "total_deposits": float(total_all_deposits),
+                "total_withdrawals": float(total_all_withdrawals),
             },
-            "petty_cash_card": {
-                "title": "کارت تنخواه",
-                "balance": float(petty_balance),
-                "total_deposits": float(petty_deposits),
-                "total_withdrawals": float(petty_withdrawals),
-                "recent_transactions": petty_recent
-            },
-            "profit_card": {
-                "title": "کارت سود",
-                "balance": float(profit_balance),
-                "total_deposits": float(profit_deposits),
-                "total_withdrawals": float(profit_withdrawals),
-                "recent_transactions": profit_recent
-            }
+            "cards": cards_list,
+            "cards_by_type": cards_by_type
         }, status=status.HTTP_200_OK)
 
     @extend_schema(
         tags=['مدیریت نقدینگی - کارت‌ها'],
-        summary="جزئیات و تاریخچه تراکنش‌های کارت تنخواه",
+        summary="جزئیات و تاریخچه تراکنش‌های یک کارت نقدینگی",
         parameters=[
             OpenApiParameter(
                 name='type', type=OpenApiTypes.STR, location=OpenApiParameter.QUERY,
@@ -3150,103 +3213,88 @@ class LiquidityCardsViewSet(viewsets.ViewSet):
         ],
         responses={200: LiquidityCardDetailResponseSerializer}
     )
-    @action(detail=False, methods=['get'], url_path='petty-cash')
-    def petty_cash(self, request):
+    def retrieve(self, request, pk=None):
         """
-        جزئیات و تاریخچه تراکنش‌های کارت تنخواه
-        GET /api/liquidity/cards/petty-cash/
+        دریافت اطلاعات و تراکنش‌های یک کارت:
+        GET /api/liquidity/cards/{card_type}/
+        (مثلاً: salary, rent, supplier, installments, other_expenses, management, savings, charity, equipment)
         """
-        qs = LiquidityCardTransaction.objects.filter(card_type='PETTY_CASH').select_related('created_by')
+        card_code = self._normalize_card_type(pk)
+        if not card_code:
+            valid_list = [c[0] for c in LiquidityCardTransaction.CARD_TYPE_CHOICES]
+            return Response({
+                "error": f"کارت نامعتبر است. کارت‌های معتبر: {', '.join(valid_list)}"
+            }, status=status.HTTP_404_NOT_FOUND)
 
+        card_title = dict(LiquidityCardTransaction.CARD_TYPE_CHOICES).get(card_code, card_code)
+        card_data = self._get_card_data(card_code, card_title)
+
+        qs = LiquidityCardTransaction.objects.filter(card_type=card_code).select_related('created_by', 'expense')
         tx_type = request.query_params.get('type')
         if tx_type:
             qs = qs.filter(transaction_type=tx_type.upper())
 
-        deposits = qs.filter(transaction_type='DEPOSIT').aggregate(s=models.Sum('amount'))['s'] or Decimal('0.00')
-        withdrawals = qs.filter(transaction_type='WITHDRAWAL').aggregate(s=models.Sum('amount'))['s'] or Decimal('0.00')
-        balance = deposits - withdrawals
-
         transactions = LiquidityCardTransactionSerializer(qs.order_by('-date', '-created_at'), many=True).data
+
         return Response({
-            "card": "PETTY_CASH",
-            "title": "کارت تنخواه",
-            "balance": float(balance),
-            "total_deposits": float(deposits),
-            "total_withdrawals": float(withdrawals),
+            "card_type": card_code,
+            "title": card_title,
+            "balance": card_data['balance'],
+            "total_deposits": card_data['total_deposits'],
+            "total_withdrawals": card_data['total_withdrawals'],
+            "total_expenses": card_data['total_expenses'],
+            "expenses_count": card_data['expenses_count'],
             "transactions": transactions
         }, status=status.HTTP_200_OK)
 
     @extend_schema(
         tags=['مدیریت نقدینگی - کارت‌ها'],
-        summary="ثبت تراکنش واریز یا برداشت کارت تنخواه",
+        summary="ثبت تراکنش واریز یا برداشت کارت نقدینگی",
         request=LiquidityCardTransactionCreateSerializer,
         responses={201: LiquidityCardTransactionCreateResponseSerializer}
     )
-    @action(detail=False, methods=['post'], url_path='petty-cash/transactions')
-    def add_petty_cash_transaction(self, request):
+    @action(detail=True, methods=['post'], url_path='transactions')
+    def add_card_transaction(self, request, pk=None):
         """
-        ثبت تراکنش واریز یا برداشت کارت تنخواه
-        POST /api/liquidity/cards/petty-cash/transactions/
-        body: {"transaction_type": "DEPOSIT", "amount": 5000000, "date": "2026-09-21", "description": "شارژ تنخواه"}
+        ثبت تراکنش واریز یا برداشت برای یک کارت:
+        POST /api/liquidity/cards/{card_type}/transactions/
         """
-        return self._add_card_transaction(request, 'PETTY_CASH')
+        card_code = self._normalize_card_type(pk)
+        if not card_code:
+            valid_list = [c[0] for c in LiquidityCardTransaction.CARD_TYPE_CHOICES]
+            return Response({
+                "error": f"کارت نامعتبر است. کارت‌های معتبر: {', '.join(valid_list)}"
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        return self._add_card_transaction(request, card_code)
 
     @extend_schema(
         tags=['مدیریت نقدینگی - کارت‌ها'],
-        summary="جزئیات و تاریخچه تراکنش‌های کارت سود",
-        parameters=[
-            OpenApiParameter(
-                name='type', type=OpenApiTypes.STR, location=OpenApiParameter.QUERY,
-                description="فیلتر بر اساس نوع تراکنش: DEPOSIT (واریز) یا WITHDRAWAL (برداشت)",
-                enum=['DEPOSIT', 'WITHDRAWAL']
-            )
-        ],
-        responses={200: LiquidityCardDetailResponseSerializer}
-    )
-    @action(detail=False, methods=['get'], url_path='profit')
-    def profit(self, request):
-        """
-        جزئیات و تاریخچه تراکنش‌های کارت سود
-        GET /api/liquidity/cards/profit/
-        """
-        qs = LiquidityCardTransaction.objects.filter(card_type='PROFIT').select_related('created_by')
-
-        tx_type = request.query_params.get('type')
-        if tx_type:
-            qs = qs.filter(transaction_type=tx_type.upper())
-
-        deposits = qs.filter(transaction_type='DEPOSIT').aggregate(s=models.Sum('amount'))['s'] or Decimal('0.00')
-        withdrawals = qs.filter(transaction_type='WITHDRAWAL').aggregate(s=models.Sum('amount'))['s'] or Decimal('0.00')
-        balance = deposits - withdrawals
-
-        transactions = LiquidityCardTransactionSerializer(qs.order_by('-date', '-created_at'), many=True).data
-        return Response({
-            "card": "PROFIT",
-            "title": "کارت سود",
-            "balance": float(balance),
-            "total_deposits": float(deposits),
-            "total_withdrawals": float(withdrawals),
-            "transactions": transactions
-        }, status=status.HTTP_200_OK)
-
-    @extend_schema(
-        tags=['مدیریت نقدینگی - کارت‌ها'],
-        summary="ثبت تراکنش واریز یا برداشت کارت سود",
+        summary="ثبت تراکنش عمومی در کارت‌های نقدینگی با تعیین نوع کارت در بدنه",
         request=LiquidityCardTransactionCreateSerializer,
         responses={201: LiquidityCardTransactionCreateResponseSerializer}
     )
-    @action(detail=False, methods=['post'], url_path='profit/transactions')
-    def add_profit_transaction(self, request):
+    @action(detail=False, methods=['post'], url_path='transactions')
+    def add_general_transaction(self, request):
         """
-        ثبت تراکنش واریز یا برداشت کارت سود
-        POST /api/liquidity/cards/profit/transactions/
-        body: {"transaction_type": "DEPOSIT", "amount": 5000000, "date": "2026-09-21", "description": "واریز سود مازاد"}
+        ثبت تراکنش واریز یا برداشت کارت با ارسال card_type در بدنه:
+        POST /api/liquidity/cards/transactions/
         """
-        return self._add_card_transaction(request, 'PROFIT')
+        raw_card = request.data.get('card_type')
+        if not raw_card:
+            return Response({"error": "فیلد card_type الزامی است."}, status=status.HTTP_400_BAD_REQUEST)
+        card_code = self._normalize_card_type(raw_card)
+        if not card_code:
+            valid_list = [c[0] for c in LiquidityCardTransaction.CARD_TYPE_CHOICES]
+            return Response({
+                "error": f"نوع کارت نامعتبر است. کارت‌های معتبر: {', '.join(valid_list)}"
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        return self._add_card_transaction(request, card_code)
 
     @extend_schema(
         tags=['مدیریت نقدینگی - کارت‌ها'],
-        summary="حذف یک تراکنش از کارت‌های تنخواه یا سود",
+        summary="حذف یک تراکنش از کارت‌های نقدینگی",
         parameters=[
             OpenApiParameter(
                 name='tx_id', type=OpenApiTypes.UUID, location=OpenApiParameter.PATH,
@@ -3258,7 +3306,7 @@ class LiquidityCardsViewSet(viewsets.ViewSet):
     @action(detail=False, methods=['delete'], url_path=r'transactions/(?P<tx_id>[^/.]+)')
     def delete_transaction(self, request, tx_id=None):
         """
-        حذف یک تراکنش از کارت‌های تنخواه یا سود
+        حذف یک تراکنش از کارت‌های نقدینگی
         DELETE /api/liquidity/cards/transactions/{tx_id}/
         """
         try:
