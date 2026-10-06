@@ -83,6 +83,9 @@ class CustomUser(AbstractUser):
     roles  = models.ManyToManyField(Role, related_name='users', blank=True)
     branch = models.CharField(max_length=50, choices=BRANCH_CHOICES, blank=True, null=True)
     is_profile_completed = models.BooleanField(default=False)
+    is_deleted = models.BooleanField(default=False, verbose_name="آیا حذف شده است؟")
+    deleted_at = models.DateTimeField(null=True, blank=True, verbose_name="زمان حذف")
+    original_username = models.CharField(max_length=150, blank=True, null=True, verbose_name="نام کاربری اولیه")
     
     # ─── فیلد جدید برای تعریف افراد بالادستی ───
     superiors = models.ManyToManyField(
@@ -97,10 +100,16 @@ class CustomUser(AbstractUser):
     user_permissions = models.ManyToManyField('auth.Permission', related_name='custom_users_permissions', blank=True)
 
     def __str__(self):
-        if self.first_name or self.last_name:
-            return f"{self.username} ({self.first_name} {self.last_name})".strip()
-        roles_str = ", ".join([r.get_code_display() for r in self.roles.all()])
-        return f"{self.username} ({roles_str})"
+        name_part = f"{self.first_name} {self.last_name}".strip()
+        uname = self.original_username or self.username
+        if name_part:
+            res = f"{uname} ({name_part})"
+        else:
+            roles_str = ", ".join([r.get_code_display() for r in self.roles.all()])
+            res = f"{uname} ({roles_str})"
+        if self.is_deleted:
+            res += " [حذف شده]"
+        return res
 
     def is_superior_to(self, target_user) -> bool:
         """

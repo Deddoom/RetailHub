@@ -54,7 +54,7 @@ class CustomStatelessAuthentication(BaseAuthentication):
         except CustomUser.DoesNotExist:
             raise AuthenticationFailed('کاربر یافت نشد.')
 
-        if not user.is_active:
+        if not user.is_active or getattr(user, 'is_deleted', False):
             raise AuthenticationFailed('حساب کاربری غیرفعال است.')
 
         return (user, None)

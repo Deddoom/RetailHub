@@ -188,7 +188,7 @@ class AuthTokenView(APIView):
         if not user.check_password(password):
             return Response({"error": "مشخصات نامعتبر است."}, status=status.HTTP_401_UNAUTHORIZED)
 
-        if not user.is_active:
+        if not user.is_active or user.is_deleted:
             return Response({"error": "حساب کاربری غیرفعال است."}, status=status.HTTP_403_FORBIDDEN)
 
         access_token = StatelessTokenService.generate_token(user)
@@ -220,7 +220,7 @@ class BranchListView(APIView):
 
 # ── Users ─────────────────────────────────────────────────────────────────────
 
-class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
+class UserViewSet(viewsets.ModelViewSet):
     serializer_class = UserSerializer
 
     def get_permissions(self):
@@ -241,6 +241,10 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         branch_param    = self.request.query_params.get('branch')
         is_active_param = self.request.query_params.get('is_active')
         search_param    = self.request.query_params.get('search')
+        include_deleted = self.request.query_params.get('include_deleted', 'false').lower() == 'true'
+
+        if self.action != 'restore' and not include_deleted:
+            qs = qs.filter(is_deleted=False)
 
         if role_param:
             qs = qs.filter(roles__code=role_param)
@@ -251,11 +255,105 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         if search_param:
             qs = qs.filter(
                 Q(username__icontains=search_param) |
+                Q(original_username__icontains=search_param) |
                 Q(first_name__icontains=search_param) |
                 Q(last_name__icontains=search_param)
             )
 
         return qs.distinct()
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+
+        # بررسی عدم حذف حساب کاربری خود ادمین/درخواست‌دهنده
+        if instance.pk == request.user.pk:
+            return Response(
+                {"error": "شما نمی‌توانید حساب کاربری خودتان را حذف کنید."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if getattr(instance, 'is_deleted', False):
+            return Response(
+                {"message": "این کاربر قبلاً حذف شده است."},
+                status=status.HTTP_200_OK
+            )
+
+        try:
+            # ۱. تلاش برای حذف سخت (Hard Delete) در صورتی که کاربر هیچ سابقه وابسته‌ای نداشته باشد
+            with transaction.atomic():
+                instance.delete()
+            return Response(
+                {
+                    "message": "کاربر بدون سابقه وابسته بوده و با موفقیت کلاً از سیستم پاک شد.",
+                    "soft_deleted": False
+                },
+                status=status.HTTP_200_OK
+            )
+        except ProtectedError:
+            # ۲. کاربر دارای سوابق و اسناد وابسته مالی/عملیاتی است -> حذف نرم هوشمند
+            with transaction.atomic():
+                now = timezone.now()
+                timestamp = int(now.timestamp())
+                old_username = instance.username
+
+                instance.is_deleted = True
+                instance.is_active = False
+                instance.deleted_at = now
+                instance.original_username = old_username
+                # آزاد کردن نام کاربری برای استفاده و ثبت مجدد در آینده
+                instance.username = f"deleted_{timestamp}_{old_username}"
+
+                # قطع پیوندهای سلسله‌مراتبی
+                instance.superiors.clear()
+                instance.subordinate_users.clear()
+
+                instance.save(update_fields=[
+                    'is_deleted', 'is_active', 'deleted_at',
+                    'original_username', 'username'
+                ])
+
+            return Response(
+                {
+                    "message": "کاربر با موفقیت حذف گردید (با توجه به وجود سوابق گذشته، اطلاعات کاربر به آرشیو منتقل، غیرفعال و نام کاربری برای استفاده مجدد آزاد شد).",
+                    "soft_deleted": True
+                },
+                status=status.HTTP_200_OK
+            )
+
+    @extend_schema(
+        summary="بازیابی کاربر حذف شده",
+        description="بازیابی کاربری که قبلاً به صورت نرم حذف شده است و بازگرداندن نام کاربری اصلی در صورت آزاد بودن آن."
+    )
+    @action(detail=True, methods=['post'], url_path='restore', permission_classes=[IsAdminUser])
+    def restore(self, request, pk=None):
+        instance = self.get_object()
+
+        if not instance.is_deleted:
+            return Response(
+                {"error": "این کاربر حذف نشده است."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        target_username = instance.original_username or instance.username
+        if CustomUser.objects.filter(username=target_username).exclude(pk=instance.pk).exists():
+            return Response(
+                {"error": f"نام کاربری اصلی '{target_username}' هم‌اکنون توسط کاربر دیگری در حال استفاده است."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        with transaction.atomic():
+            instance.is_deleted = False
+            instance.is_active = True
+            instance.deleted_at = None
+            if instance.original_username:
+                instance.username = instance.original_username
+                instance.original_username = None
+            instance.save(update_fields=['is_deleted', 'is_active', 'deleted_at', 'username', 'original_username'])
+
+        return Response(
+            {"message": "کاربر با موفقیت بازیابی شد.", "user": self.get_serializer(instance).data},
+            status=status.HTTP_200_OK
+        )
 
     @action(detail=False, methods=['get'], url_path='subordinates')
     def subordinates(self, request):
@@ -263,10 +361,10 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
 
         # ادمین و مدیر مالی دسترسی کامل به تمام کاربران دارند
         if current_user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in current_user.roles.all()):
-            subordinate_users = CustomUser.objects.exclude(pk=current_user.pk).prefetch_related('roles', 'superiors')
+            subordinate_users = CustomUser.objects.filter(is_deleted=False).exclude(pk=current_user.pk).prefetch_related('roles', 'superiors')
         else:
             # سایر مدیران و بالادستی‌ها فقط و فقط یک لایه پایین‌تر (زیردستان مستقیم) را می‌بینند
-            subordinate_users = current_user.subordinate_users.all().prefetch_related('roles', 'superiors')
+            subordinate_users = current_user.subordinate_users.filter(is_deleted=False).prefetch_related('roles', 'superiors')
 
         serializer = self.get_serializer(subordinate_users, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
@@ -321,7 +419,7 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         """
         دریافت لیست تمامی کاربرانی که نقش سرپرست (SUPERVISOR) دارند
         """
-        supervisors = CustomUser.objects.filter(roles__code='SUPERVISOR', is_active=True).distinct()
+        supervisors = CustomUser.objects.filter(roles__code='SUPERVISOR', is_active=True, is_deleted=False).distinct()
         serializer = self.get_serializer(supervisors, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -672,7 +770,7 @@ class UserViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         elif period:
             return Response({"error": "بازه زمانی نامعتبر است."}, status=status.HTTP_400_BAD_REQUEST)
 
-        users_qs = CustomUser.objects.filter(is_active=True).prefetch_related('roles').order_by('branch', 'first_name')
+        users_qs = CustomUser.objects.filter(is_active=True, is_deleted=False).prefetch_related('roles').order_by('branch', 'first_name')
 
         branch_param = request.query_params.get('branch')
         role_param   = request.query_params.get('role')
@@ -2273,7 +2371,7 @@ class SellerCommissionConfigViewSet(viewsets.ModelViewSet):
 
         # برای سایر کاربران: اگر خود فروشنده است، یا بالادستی فروشنده است
         seller_ids = [
-            u.id for u in CustomUser.objects.filter(roles__code='SELLER_STAFF')
+            u.id for u in CustomUser.objects.filter(roles__code='SELLER_STAFF', is_deleted=False)
             if user.is_superior_to(u) or u.pk == user.pk
         ]
         return self.queryset.filter(seller_id__in=seller_ids)

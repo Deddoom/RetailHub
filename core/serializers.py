@@ -89,23 +89,28 @@ class UserSerializer(serializers.ModelSerializer):
         source='roles', write_only=True, required=False
     )
     superior_ids = serializers.PrimaryKeyRelatedField(
-        many=True, queryset=CustomUser.objects.all(),
+        many=True, queryset=CustomUser.objects.filter(is_deleted=False),
         source='superiors', write_only=True, required=False
     )
     superiors_info = serializers.SerializerMethodField(read_only=True)
+    display_username = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model        = CustomUser
         fields       = [
-            'id', 'username', 'first_name', 'last_name',
-            'is_profile_completed', 'roles', 'role_ids', 'role_codes',
+            'id', 'username', 'display_username', 'first_name', 'last_name',
+            'is_profile_completed', 'is_deleted', 'deleted_at', 'roles', 'role_ids', 'role_codes',
             'branch', 'is_active', 'password',
             'superiors_info', 'superior_ids'
         ]
-        read_only_fields = ['is_profile_completed']
+        read_only_fields = ['is_profile_completed', 'is_deleted', 'deleted_at', 'display_username']
         extra_kwargs = {
             'password': {'write_only': True, 'required': False},
         }
+
+    @extend_schema_field(serializers.CharField())
+    def get_display_username(self, obj):
+        return obj.original_username or obj.username
 
     @extend_schema_field(serializers.ListField(child=serializers.DictField()))
     def get_superiors_info(self, obj):
@@ -1445,7 +1450,7 @@ class AdvanceRequestSerializer(serializers.ModelSerializer):
     requester_name = serializers.CharField(source='requester.get_full_name', read_only=True)
     target_superior_name = serializers.CharField(source='target_superior.get_full_name', read_only=True)
     superior_id = serializers.PrimaryKeyRelatedField(
-        queryset=CustomUser.objects.all(), source='target_superior', write_only=True, required=False, allow_null=True
+        queryset=CustomUser.objects.filter(is_deleted=False), source='target_superior', write_only=True, required=False, allow_null=True
     )
     superior_reviewer_name = serializers.CharField(source='superior_reviewer.get_full_name', read_only=True)
     admin_reviewer_name = serializers.CharField(source='admin_reviewer.get_full_name', read_only=True)
@@ -1684,7 +1689,7 @@ class DailySaleItemSerializer(serializers.Serializer):
 
 
 class SellerDailySaleBulkSerializer(serializers.Serializer):
-    seller = serializers.PrimaryKeyRelatedField(queryset=CustomUser.objects.all())
+    seller = serializers.PrimaryKeyRelatedField(queryset=CustomUser.objects.filter(is_deleted=False))
     shamsi_year = serializers.IntegerField(min_value=1300, max_value=1500)
     shamsi_month = serializers.IntegerField(min_value=1, max_value=12)
     daily_sales = DailySaleItemSerializer(many=True)
