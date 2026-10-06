@@ -2,13 +2,33 @@ openapi: 3.0.3
 info:
   title: RetailHub API
   version: 2.0.0
-  description: مستندات تعاملی وب‌سرویس جامع مدیریت خرده‌فروشی RetailHub
+  description: مستندات تعاملی وب‌سرویس جامع مدیریت خرده‌فروشی و نقدینگی RetailHub
+    (نسخه ۲.۰)
 paths:
   /api/advance-requests/:
     get:
       operationId: advance_requests_list
+      summary: لیست درخواست‌های مساعده من
+      parameters:
+      - in: query
+        name: from_date
+        schema:
+          type: string
+          format: date
+        description: از تاریخ ثبت (YYYY-MM-DD)
+      - in: query
+        name: status
+        schema:
+          type: string
+        description: فیلتر وضعیت درخواست مساعده
+      - in: query
+        name: to_date
+        schema:
+          type: string
+          format: date
+        description: تا تاریخ ثبت (YYYY-MM-DD)
       tags:
-      - advance-requests
+      - مساعده کارکنان
       security:
       - BearerAuth: []
       responses:
@@ -22,8 +42,9 @@ paths:
           description: ''
     post:
       operationId: advance_requests_create
+      summary: ثبت درخواست مساعده جدید
       tags:
-      - advance-requests
+      - مساعده کارکنان
       requestBody:
         content:
           application/json:
@@ -48,14 +69,17 @@ paths:
   /api/advance-requests/{id}/:
     get:
       operationId: advance_requests_retrieve
+      summary: مشاهده جزئیات کامل درخواست مساعده
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این advance request را شناسایی میکند.
         required: true
       tags:
-      - advance-requests
+      - مساعده کارکنان
       security:
       - BearerAuth: []
       responses:
@@ -67,14 +91,17 @@ paths:
           description: ''
     put:
       operationId: advance_requests_update
+      summary: ویرایش کامل درخواست مساعده
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این advance request را شناسایی میکند.
         required: true
       tags:
-      - advance-requests
+      - مساعده کارکنان
       requestBody:
         content:
           application/json:
@@ -98,14 +125,17 @@ paths:
           description: ''
     patch:
       operationId: advance_requests_partial_update
+      summary: ویرایش جزئی درخواست مساعده
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این advance request را شناسایی میکند.
         required: true
       tags:
-      - advance-requests
+      - مساعده کارکنان
       requestBody:
         content:
           application/json:
@@ -128,14 +158,17 @@ paths:
           description: ''
     delete:
       operationId: advance_requests_destroy
+      summary: حذف درخواست مساعده
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این advance request را شناسایی میکند.
         required: true
       tags:
-      - advance-requests
+      - مساعده کارکنان
       security:
       - BearerAuth: []
       responses:
@@ -144,25 +177,28 @@ paths:
   /api/advance-requests/{id}/admin-review/:
     post:
       operationId: advance_requests_admin_review_create
+      summary: بررسی و تایید یا رد درخواست مساعده توسط مدیریت (ادمین)
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این advance request را شناسایی میکند.
         required: true
       tags:
-      - advance-requests
+      - مساعده کارکنان
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AdvanceRequestRequest'
+              $ref: '#/components/schemas/AdvanceReviewRequestRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/AdvanceRequestRequest'
+              $ref: '#/components/schemas/AdvanceReviewRequestRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/AdvanceRequestRequest'
+              $ref: '#/components/schemas/AdvanceReviewRequestRequest'
         required: true
       security:
       - BearerAuth: []
@@ -171,30 +207,34 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AdvanceRequest'
+                type: object
+                additionalProperties: {}
           description: ''
   /api/advance-requests/{id}/finance-pay/:
     post:
       operationId: advance_requests_finance_pay_create
+      summary: ثبت واریز و پرداخت نهایی مساعده توسط مدیر مالی
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این advance request را شناسایی میکند.
         required: true
       tags:
-      - advance-requests
+      - مساعده کارکنان
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AdvanceRequestRequest'
+              $ref: '#/components/schemas/AdvancePayRequestRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/AdvanceRequestRequest'
+              $ref: '#/components/schemas/AdvancePayRequestRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/AdvanceRequestRequest'
+              $ref: '#/components/schemas/AdvancePayRequestRequest'
         required: true
       security:
       - BearerAuth: []
@@ -203,30 +243,34 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AdvanceRequest'
+                type: object
+                additionalProperties: {}
           description: ''
   /api/advance-requests/{id}/superior-review/:
     post:
       operationId: advance_requests_superior_review_create
+      summary: بررسی و تایید یا رد درخواست مساعده توسط بالادستی
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این advance request را شناسایی میکند.
         required: true
       tags:
-      - advance-requests
+      - مساعده کارکنان
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AdvanceRequestRequest'
+              $ref: '#/components/schemas/AdvanceReviewRequestRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/AdvanceRequestRequest'
+              $ref: '#/components/schemas/AdvanceReviewRequestRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/AdvanceRequestRequest'
+              $ref: '#/components/schemas/AdvanceReviewRequestRequest'
         required: true
       security:
       - BearerAuth: []
@@ -235,16 +279,53 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AdvanceRequest'
+                type: object
+                additionalProperties: {}
           description: ''
   /api/advance-requests/admin-list/:
     get:
-      operationId: advance_requests_admin_list_retrieve
+      operationId: advance_requests_admin_list_list
       description: |-
         لیست کامل درخواست‌های مساعده برای ادمین و مدیر مالی.
         پشتیبانی از فیلترهای: status, from_date, to_date, search (نام/یوزرنیم), superior_id, requester_id
+      summary: لیست جامع کلیه درخواست‌های مساعده سیستم جهت مدیریت و مالی
+      parameters:
+      - in: query
+        name: from_date
+        schema:
+          type: string
+          format: date
+        description: از تاریخ ثبت (YYYY-MM-DD)
+      - in: query
+        name: requester_id
+        schema:
+          type: string
+          format: uuid
+        description: شناسه کاربر متقاضی
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: جستجو در نام یا نام کاربری
+      - in: query
+        name: status
+        schema:
+          type: string
+        description: فیلتر وضعیت
+      - in: query
+        name: superior_id
+        schema:
+          type: string
+          format: uuid
+        description: شناسه کاربر بالادستی
+      - in: query
+        name: to_date
+        schema:
+          type: string
+          format: date
+        description: تا تاریخ ثبت (YYYY-MM-DD)
       tags:
-      - advance-requests
+      - مساعده کارکنان
       security:
       - BearerAuth: []
       responses:
@@ -252,17 +333,43 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AdvanceRequest'
+                type: array
+                items:
+                  $ref: '#/components/schemas/AdvanceRequestInbox'
           description: ''
   /api/advance-requests/my-inbox/:
     get:
-      operationId: advance_requests_my_inbox_retrieve
+      operationId: advance_requests_my_inbox_list
       description: |-
         کارتابل اختصاصی بالادستی:
         فقط درخواست‌هایی که target_superior=me هستند برمی‌گردد.
         این endpoint برای بالادستی‌ها طراحی شده تا «inbox» خود را ببینند.
+      summary: کارتابل درخواست‌های مساعده ارجاع‌شده به کاربر جاری (بالادستی)
+      parameters:
+      - in: query
+        name: from_date
+        schema:
+          type: string
+          format: date
+        description: از تاریخ ثبت (YYYY-MM-DD)
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: جستجو در نام یا نام کاربری
+      - in: query
+        name: status
+        schema:
+          type: string
+        description: فیلتر وضعیت
+      - in: query
+        name: to_date
+        schema:
+          type: string
+          format: date
+        description: تا تاریخ ثبت (YYYY-MM-DD)
       tags:
-      - advance-requests
+      - مساعده کارکنان
       security:
       - BearerAuth: []
       responses:
@@ -270,34 +377,110 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AdvanceRequest'
+                type: array
+                items:
+                  $ref: '#/components/schemas/AdvanceRequestInbox'
           description: ''
   /api/auth/token/:
     post:
       operationId: auth_token_create
+      description: ورود با نام کاربری یا شماره موبایل و رمز عبور. در صورت صحت اطلاعات،
+        توکن دسترسی Stateless JWT و مشخصات نقش و کاربر بازگردانده می‌شود.
+      summary: ورود به سیستم و دریافت توکن JWT
       tags:
-      - auth
+      - احراز هویت و دسترسی
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthLoginRequestRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AuthLoginRequestRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AuthLoginRequestRequest'
+        required: true
       security:
       - BearerAuth: []
       - {}
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthLoginResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
   /api/branches/:
     get:
-      operationId: branches_retrieve
+      operationId: branches_list
+      description: دریافت لیست تمام شعب معتبر و ثبت‌شده در سیستم جهت استفاده در فیلترها
+        و فرم‌های انتخاب شعبه.
+      summary: لیست شعب تعریف‌شده در سیستم
       tags:
-      - branches
+      - شعب
       security:
       - BearerAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BranchItem'
+          description: ''
   /api/checklist-logs/:
     get:
       operationId: checklist_logs_list
+      summary: لیست لاگ‌ها و تاریخچه انجام چک‌لیست‌ها
+      parameters:
+      - in: query
+        name: assigned_to
+        schema:
+          type: string
+          format: uuid
+        description: فیلتر بر اساس شناسه کاربر مسئول
+      - in: query
+        name: frequency
+        schema:
+          type: string
+        description: فیلتر بر اساس دوره تناوب (DAILY, WEEKLY, MONTHLY)
+      - in: query
+        name: from_date
+        schema:
+          type: string
+          format: date
+        description: از تاریخ بازه (YYYY-MM-DD)
+      - in: query
+        name: to_date
+        schema:
+          type: string
+          format: date
+        description: تا تاریخ بازه (YYYY-MM-DD)
       tags:
-      - checklist-logs
+      - چک‌لیست‌ها و وظایف
       security:
       - BearerAuth: []
       responses:
@@ -312,14 +495,17 @@ paths:
   /api/checklist-logs/{id}/:
     get:
       operationId: checklist_logs_retrieve
+      summary: مشاهده جزئیات لاگ چک‌لیست
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این checklist log را شناسایی میکند.
         required: true
       tags:
-      - checklist-logs
+      - چک‌لیست‌ها و وظایف
       security:
       - BearerAuth: []
       responses:
@@ -332,8 +518,16 @@ paths:
   /api/checklists/:
     get:
       operationId: checklists_list
+      summary: لیست چک‌لیست‌ها
+      parameters:
+      - in: query
+        name: assigned_to
+        schema:
+          type: string
+          format: uuid
+        description: فیلتر بر اساس کاربر مسئول
       tags:
-      - checklists
+      - چک‌لیست‌ها و وظایف
       security:
       - BearerAuth: []
       responses:
@@ -347,8 +541,9 @@ paths:
           description: ''
     post:
       operationId: checklists_create
+      summary: تعریف چک‌لیست جدید
       tags:
-      - checklists
+      - چک‌لیست‌ها و وظایف
       requestBody:
         content:
           application/json:
@@ -373,14 +568,17 @@ paths:
   /api/checklists/{id}/:
     get:
       operationId: checklists_retrieve
+      summary: مشاهده جزئیات چک‌لیست
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این checklist را شناسایی میکند.
         required: true
       tags:
-      - checklists
+      - چک‌لیست‌ها و وظایف
       security:
       - BearerAuth: []
       responses:
@@ -392,14 +590,17 @@ paths:
           description: ''
     put:
       operationId: checklists_update
+      summary: ویرایش کامل چک‌لیست
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این checklist را شناسایی میکند.
         required: true
       tags:
-      - checklists
+      - چک‌لیست‌ها و وظایف
       requestBody:
         content:
           application/json:
@@ -423,14 +624,17 @@ paths:
           description: ''
     patch:
       operationId: checklists_partial_update
+      summary: ویرایش جزئی چک‌لیست
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این checklist را شناسایی میکند.
         required: true
       tags:
-      - checklists
+      - چک‌لیست‌ها و وظایف
       requestBody:
         content:
           application/json:
@@ -453,14 +657,17 @@ paths:
           description: ''
     delete:
       operationId: checklists_destroy
+      summary: حذف چک‌لیست
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این checklist را شناسایی میکند.
         required: true
       tags:
-      - checklists
+      - چک‌لیست‌ها و وظایف
       security:
       - BearerAuth: []
       responses:
@@ -469,8 +676,21 @@ paths:
   /api/claims/:
     get:
       operationId: claims_list
+      summary: لیست مطالبات معوق
+      parameters:
+      - in: query
+        name: assigned_to
+        schema:
+          type: string
+          format: uuid
+        description: فیلتر بر اساس کاربر پیگیری‌کننده
+      - in: query
+        name: status
+        schema:
+          type: string
+        description: فیلتر بر اساس وضعیت مطالبه
       tags:
-      - claims
+      - مطالبات و پیگیری‌ها
       security:
       - BearerAuth: []
       responses:
@@ -484,8 +704,9 @@ paths:
           description: ''
     post:
       operationId: claims_create
+      summary: ثبت پرونده مطالبه جدید
       tags:
-      - claims
+      - مطالبات و پیگیری‌ها
       requestBody:
         content:
           application/json:
@@ -510,14 +731,17 @@ paths:
   /api/claims/{id}/:
     get:
       operationId: claims_retrieve
+      summary: مشاهده جزئیات مطالبه و پیگیری‌ها
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این claim را شناسایی میکند.
         required: true
       tags:
-      - claims
+      - مطالبات و پیگیری‌ها
       security:
       - BearerAuth: []
       responses:
@@ -529,14 +753,17 @@ paths:
           description: ''
     put:
       operationId: claims_update
+      summary: ویرایش کامل پرونده مطالبه
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این claim را شناسایی میکند.
         required: true
       tags:
-      - claims
+      - مطالبات و پیگیری‌ها
       requestBody:
         content:
           application/json:
@@ -560,14 +787,17 @@ paths:
           description: ''
     patch:
       operationId: claims_partial_update
+      summary: ویرایش جزئی پرونده مطالبه
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این claim را شناسایی میکند.
         required: true
       tags:
-      - claims
+      - مطالبات و پیگیری‌ها
       requestBody:
         content:
           application/json:
@@ -590,14 +820,17 @@ paths:
           description: ''
     delete:
       operationId: claims_destroy
+      summary: حذف پرونده مطالبه
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این claim را شناسایی میکند.
         required: true
       tags:
-      - claims
+      - مطالبات و پیگیری‌ها
       security:
       - BearerAuth: []
       responses:
@@ -606,34 +839,37 @@ paths:
   /api/claims/{id}/add-follow-up/:
     post:
       operationId: claims_add_follow_up_create
+      summary: ثبت اقدام پیگیری جدید برای یک مطالبه
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این claim را شناسایی میکند.
         required: true
       tags:
-      - claims
+      - مطالبات و پیگیری‌ها
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ClaimRequest'
+              $ref: '#/components/schemas/ClaimFollowUpRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/ClaimRequest'
+              $ref: '#/components/schemas/ClaimFollowUpRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/ClaimRequest'
+              $ref: '#/components/schemas/ClaimFollowUpRequest'
         required: true
       security:
       - BearerAuth: []
       responses:
-        '200':
+        '201':
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Claim'
+                $ref: '#/components/schemas/ClaimFollowUp'
           description: ''
   /api/customers/:
     get:
@@ -664,7 +900,7 @@ paths:
           type: string
         description: جستجو در نام و شماره تماس مشتری
       tags:
-      - customers
+      - مشتریان
       security:
       - BearerAuth: []
       responses:
@@ -676,8 +912,9 @@ paths:
           description: ''
     post:
       operationId: customers_create
+      summary: ثبت مشتری جدید
       tags:
-      - customers
+      - مشتریان
       requestBody:
         content:
           application/json:
@@ -702,6 +939,7 @@ paths:
   /api/customers/{id}/:
     get:
       operationId: customers_retrieve
+      summary: مشاهده جزئیات مشتری
       parameters:
       - in: path
         name: id
@@ -711,7 +949,7 @@ paths:
         description: یک رشته UUID که این customer را شناسایی میکند.
         required: true
       tags:
-      - customers
+      - مشتریان
       security:
       - BearerAuth: []
       responses:
@@ -723,6 +961,7 @@ paths:
           description: ''
     put:
       operationId: customers_update
+      summary: ویرایش کامل مشتری
       parameters:
       - in: path
         name: id
@@ -732,7 +971,7 @@ paths:
         description: یک رشته UUID که این customer را شناسایی میکند.
         required: true
       tags:
-      - customers
+      - مشتریان
       requestBody:
         content:
           application/json:
@@ -756,6 +995,7 @@ paths:
           description: ''
     patch:
       operationId: customers_partial_update
+      summary: ویرایش جزئی مشتری
       parameters:
       - in: path
         name: id
@@ -765,7 +1005,7 @@ paths:
         description: یک رشته UUID که این customer را شناسایی میکند.
         required: true
       tags:
-      - customers
+      - مشتریان
       requestBody:
         content:
           application/json:
@@ -788,6 +1028,7 @@ paths:
           description: ''
     delete:
       operationId: customers_destroy
+      summary: حذف مشتری
       parameters:
       - in: path
         name: id
@@ -797,7 +1038,7 @@ paths:
         description: یک رشته UUID که این customer را شناسایی میکند.
         required: true
       tags:
-      - customers
+      - مشتریان
       security:
       - BearerAuth: []
       responses:
@@ -806,8 +1047,32 @@ paths:
   /api/damage-registrations/:
     get:
       operationId: damage_registrations_list
+      summary: لیست ثبت‌های خسارت و ضایعات
+      parameters:
+      - in: query
+        name: branch
+        schema:
+          type: string
+        description: فیلتر بر اساس نام شعبه
+      - in: query
+        name: from_date
+        schema:
+          type: string
+          format: date
+        description: از تاریخ ثبت (YYYY-MM-DD)
+      - in: query
+        name: reason
+        schema:
+          type: string
+        description: فیلتر بر اساس علت ضایعات
+      - in: query
+        name: to_date
+        schema:
+          type: string
+          format: date
+        description: تا تاریخ ثبت (YYYY-MM-DD)
       tags:
-      - damage-registrations
+      - خسارت و ضایعات
       security:
       - BearerAuth: []
       responses:
@@ -821,8 +1086,9 @@ paths:
           description: ''
     post:
       operationId: damage_registrations_create
+      summary: ثبت خسارت و اقلام ضایعات جدید
       tags:
-      - damage-registrations
+      - خسارت و ضایعات
       requestBody:
         content:
           application/json:
@@ -847,6 +1113,7 @@ paths:
   /api/damage-registrations/{id}/:
     get:
       operationId: damage_registrations_retrieve
+      summary: مشاهده جزئیات ثبت خسارت
       parameters:
       - in: path
         name: id
@@ -856,7 +1123,7 @@ paths:
         description: یک رشته UUID که این damage registration را شناسایی میکند.
         required: true
       tags:
-      - damage-registrations
+      - خسارت و ضایعات
       security:
       - BearerAuth: []
       responses:
@@ -868,6 +1135,7 @@ paths:
           description: ''
     put:
       operationId: damage_registrations_update
+      summary: ویرایش کامل ثبت خسارت
       parameters:
       - in: path
         name: id
@@ -877,7 +1145,7 @@ paths:
         description: یک رشته UUID که این damage registration را شناسایی میکند.
         required: true
       tags:
-      - damage-registrations
+      - خسارت و ضایعات
       requestBody:
         content:
           application/json:
@@ -901,6 +1169,7 @@ paths:
           description: ''
     patch:
       operationId: damage_registrations_partial_update
+      summary: ویرایش جزئی ثبت خسارت
       parameters:
       - in: path
         name: id
@@ -910,7 +1179,7 @@ paths:
         description: یک رشته UUID که این damage registration را شناسایی میکند.
         required: true
       tags:
-      - damage-registrations
+      - خسارت و ضایعات
       requestBody:
         content:
           application/json:
@@ -933,6 +1202,7 @@ paths:
           description: ''
     delete:
       operationId: damage_registrations_destroy
+      summary: حذف ثبت خسارت
       parameters:
       - in: path
         name: id
@@ -942,7 +1212,7 @@ paths:
         description: یک رشته UUID که این damage registration را شناسایی میکند.
         required: true
       tags:
-      - damage-registrations
+      - خسارت و ضایعات
       security:
       - BearerAuth: []
       responses:
@@ -951,8 +1221,9 @@ paths:
   /api/damage-reports/:
     get:
       operationId: damage_reports_list
+      summary: لیست گزارش‌های خسارت
       tags:
-      - damage-reports
+      - خسارت و ضایعات
       security:
       - BearerAuth: []
       responses:
@@ -966,8 +1237,9 @@ paths:
           description: ''
     post:
       operationId: damage_reports_create
+      summary: ثبت گزارش خسارت جدید
       tags:
-      - damage-reports
+      - خسارت و ضایعات
       requestBody:
         content:
           application/json:
@@ -992,6 +1264,7 @@ paths:
   /api/damage-reports/{id}/:
     get:
       operationId: damage_reports_retrieve
+      summary: جزئیات گزارش خسارت
       parameters:
       - in: path
         name: id
@@ -1001,7 +1274,7 @@ paths:
         description: یک رشته UUID که این damage report را شناسایی میکند.
         required: true
       tags:
-      - damage-reports
+      - خسارت و ضایعات
       security:
       - BearerAuth: []
       responses:
@@ -1013,6 +1286,7 @@ paths:
           description: ''
     put:
       operationId: damage_reports_update
+      summary: ویرایش کامل گزارش خسارت
       parameters:
       - in: path
         name: id
@@ -1022,7 +1296,7 @@ paths:
         description: یک رشته UUID که این damage report را شناسایی میکند.
         required: true
       tags:
-      - damage-reports
+      - خسارت و ضایعات
       requestBody:
         content:
           application/json:
@@ -1046,6 +1320,7 @@ paths:
           description: ''
     patch:
       operationId: damage_reports_partial_update
+      summary: ویرایش جزئی گزارش خسارت
       parameters:
       - in: path
         name: id
@@ -1055,7 +1330,7 @@ paths:
         description: یک رشته UUID که این damage report را شناسایی میکند.
         required: true
       tags:
-      - damage-reports
+      - خسارت و ضایعات
       requestBody:
         content:
           application/json:
@@ -1078,6 +1353,7 @@ paths:
           description: ''
     delete:
       operationId: damage_reports_destroy
+      summary: حذف گزارش خسارت
       parameters:
       - in: path
         name: id
@@ -1087,7 +1363,7 @@ paths:
         description: یک رشته UUID که این damage report را شناسایی میکند.
         required: true
       tags:
-      - damage-reports
+      - خسارت و ضایعات
       security:
       - BearerAuth: []
       responses:
@@ -1096,8 +1372,42 @@ paths:
   /api/deposit-orders/:
     get:
       operationId: deposit_orders_list
+      summary: لیست سفارش‌های بیعانه
+      parameters:
+      - in: query
+        name: branch
+        schema:
+          type: string
+        description: فیلتر بر اساس نام شعبه
+      - in: query
+        name: customer
+        schema:
+          type: integer
+        description: فیلتر بر اساس شناسه مشتری
+      - in: query
+        name: from_date
+        schema:
+          type: string
+          format: date
+        description: فیلتر از تاریخ میلادی (YYYY-MM-DD)
+      - in: query
+        name: seller
+        schema:
+          type: integer
+        description: فیلتر بر اساس شناسه فروشنده
+      - in: query
+        name: status
+        schema:
+          type: string
+        description: فیلتر بر اساس وضعیت سفارش
+      - in: query
+        name: to_date
+        schema:
+          type: string
+          format: date
+        description: فیلتر تا تاریخ میلادی (YYYY-MM-DD)
       tags:
-      - deposit-orders
+      - سفارش‌های بیعانه
       security:
       - BearerAuth: []
       responses:
@@ -1111,8 +1421,9 @@ paths:
           description: ''
     post:
       operationId: deposit_orders_create
+      summary: ثبت سفارش بیعانه جدید
       tags:
-      - deposit-orders
+      - سفارش‌های بیعانه
       requestBody:
         content:
           application/json:
@@ -1137,14 +1448,17 @@ paths:
   /api/deposit-orders/{id}/:
     get:
       operationId: deposit_orders_retrieve
+      summary: جزئیات سفارش بیعانه
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این deposit order را شناسایی میکند.
         required: true
       tags:
-      - deposit-orders
+      - سفارش‌های بیعانه
       security:
       - BearerAuth: []
       responses:
@@ -1156,14 +1470,17 @@ paths:
           description: ''
     put:
       operationId: deposit_orders_update
+      summary: ویرایش کامل سفارش بیعانه
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این deposit order را شناسایی میکند.
         required: true
       tags:
-      - deposit-orders
+      - سفارش‌های بیعانه
       requestBody:
         content:
           application/json:
@@ -1187,14 +1504,17 @@ paths:
           description: ''
     patch:
       operationId: deposit_orders_partial_update
+      summary: ویرایش جزئی سفارش بیعانه
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این deposit order را شناسایی میکند.
         required: true
       tags:
-      - deposit-orders
+      - سفارش‌های بیعانه
       requestBody:
         content:
           application/json:
@@ -1217,14 +1537,17 @@ paths:
           description: ''
     delete:
       operationId: deposit_orders_destroy
+      summary: حذف سفارش بیعانه
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این deposit order را شناسایی میکند.
         required: true
       tags:
-      - deposit-orders
+      - سفارش‌های بیعانه
       security:
       - BearerAuth: []
       responses:
@@ -1238,6 +1561,8 @@ paths:
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این deposit order را شناسایی میکند.
         required: true
       tags:
       - deposit-orders
@@ -1264,8 +1589,9 @@ paths:
   /api/expenses/:
     get:
       operationId: expenses_list
+      summary: لیست هزینه‌های عمومی فروشگاه
       tags:
-      - expenses
+      - هزینه‌های عمومی
       security:
       - BearerAuth: []
       responses:
@@ -1279,8 +1605,9 @@ paths:
           description: ''
     post:
       operationId: expenses_create
+      summary: ثبت هزینه عمومی جدید
       tags:
-      - expenses
+      - هزینه‌های عمومی
       requestBody:
         content:
           application/json:
@@ -1305,14 +1632,17 @@ paths:
   /api/expenses/{id}/:
     get:
       operationId: expenses_retrieve
+      summary: جزئیات هزینه عمومی
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این expense را شناسایی میکند.
         required: true
       tags:
-      - expenses
+      - هزینه‌های عمومی
       security:
       - BearerAuth: []
       responses:
@@ -1324,14 +1654,17 @@ paths:
           description: ''
     put:
       operationId: expenses_update
+      summary: ویرایش کامل هزینه عمومی
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این expense را شناسایی میکند.
         required: true
       tags:
-      - expenses
+      - هزینه‌های عمومی
       requestBody:
         content:
           application/json:
@@ -1355,14 +1688,17 @@ paths:
           description: ''
     patch:
       operationId: expenses_partial_update
+      summary: ویرایش جزئی هزینه عمومی
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این expense را شناسایی میکند.
         required: true
       tags:
-      - expenses
+      - هزینه‌های عمومی
       requestBody:
         content:
           application/json:
@@ -1385,14 +1721,17 @@ paths:
           description: ''
     delete:
       operationId: expenses_destroy
+      summary: حذف هزینه عمومی
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این expense را شناسایی میکند.
         required: true
       tags:
-      - expenses
+      - هزینه‌های عمومی
       security:
       - BearerAuth: []
       responses:
@@ -1401,8 +1740,9 @@ paths:
   /api/item-exits/:
     get:
       operationId: item_exits_list
+      summary: لیست مجوزهای خروج کالا
       tags:
-      - item-exits
+      - انبار و خروج کالا
       security:
       - BearerAuth: []
       responses:
@@ -1416,8 +1756,9 @@ paths:
           description: ''
     post:
       operationId: item_exits_create
+      summary: ثبت مجوز خروج کالا
       tags:
-      - item-exits
+      - انبار و خروج کالا
       requestBody:
         content:
           application/json:
@@ -1442,6 +1783,7 @@ paths:
   /api/item-exits/{id}/:
     get:
       operationId: item_exits_retrieve
+      summary: جزئیات مجوز خروج کالا
       parameters:
       - in: path
         name: id
@@ -1451,7 +1793,7 @@ paths:
         description: یک رشته UUID که این item exit را شناسایی میکند.
         required: true
       tags:
-      - item-exits
+      - انبار و خروج کالا
       security:
       - BearerAuth: []
       responses:
@@ -1463,6 +1805,7 @@ paths:
           description: ''
     put:
       operationId: item_exits_update
+      summary: ویرایش کامل مجوز خروج کالا
       parameters:
       - in: path
         name: id
@@ -1472,7 +1815,7 @@ paths:
         description: یک رشته UUID که این item exit را شناسایی میکند.
         required: true
       tags:
-      - item-exits
+      - انبار و خروج کالا
       requestBody:
         content:
           application/json:
@@ -1496,6 +1839,7 @@ paths:
           description: ''
     patch:
       operationId: item_exits_partial_update
+      summary: ویرایش جزئی مجوز خروج کالا
       parameters:
       - in: path
         name: id
@@ -1505,7 +1849,7 @@ paths:
         description: یک رشته UUID که این item exit را شناسایی میکند.
         required: true
       tags:
-      - item-exits
+      - انبار و خروج کالا
       requestBody:
         content:
           application/json:
@@ -1528,6 +1872,7 @@ paths:
           description: ''
     delete:
       operationId: item_exits_destroy
+      summary: حذف مجوز خروج کالا
       parameters:
       - in: path
         name: id
@@ -1537,7 +1882,7 @@ paths:
         description: یک رشته UUID که این item exit را شناسایی میکند.
         required: true
       tags:
-      - item-exits
+      - انبار و خروج کالا
       security:
       - BearerAuth: []
       responses:
@@ -1577,6 +1922,8 @@ paths:
         name: id
         schema:
           type: string
+        description: 'کد نوع کارت نقدینگی (مانند: supplier, salary, rent, installments,
+          other_expenses, management, savings, charity, equipment)'
         required: true
       - in: query
         name: type
@@ -1599,16 +1946,18 @@ paths:
           description: ''
   /api/liquidity/cards/{id}/transactions/:
     post:
-      operationId: liquidity_cards_transactions_create_2
+      operationId: liquidity_card_specific_transaction_create
       description: |-
         ثبت تراکنش واریز یا برداشت برای یک کارت:
         POST /api/liquidity/cards/{card_type}/transactions/
-      summary: ثبت تراکنش واریز یا برداشت کارت نقدینگی
+      summary: ثبت تراکنش واریز یا برداشت برای کارت مشخص
       parameters:
       - in: path
         name: id
         schema:
           type: string
+        description: 'کد نوع کارت نقدینگی (مانند: supplier, salary, rent, installments,
+          other_expenses, management, savings, charity, equipment)'
         required: true
       tags:
       - مدیریت نقدینگی - کارت‌ها
@@ -1654,7 +2003,7 @@ paths:
           description: ''
   /api/liquidity/cards/transactions/:
     post:
-      operationId: liquidity_cards_transactions_create
+      operationId: liquidity_cards_general_transaction_create
       description: |-
         ثبت تراکنش واریز یا برداشت کارت با ارسال card_type در بدنه:
         POST /api/liquidity/cards/transactions/
@@ -1969,15 +2318,18 @@ paths:
         schema:
           type: string
           enum:
-          - BILL
-          - CHEQUE
-          - DAILY
-          - MISC
-          - PURCHASE
+          - CHARITY
+          - EQUIPMENT
+          - INSTALLMENTS
+          - MANAGEMENT
+          - OTHER_EXPENSES
           - RENT
           - SALARY
-        description: 'دسته‌بندی هزینه: SALARY (حقوق), DAILY (روزانه), RENT (اجاره),
-          BILL (قبض), CHEQUE (چک), PURCHASE (خرید), MISC (متفرقه)'
+          - SAVINGS
+          - SUPPLIER
+        description: 'دسته‌بندی هزینه: SUPPLIER (تامین‌کننده), SALARY (حقوق), RENT
+          (اجاره), INSTALLMENTS (اقساط), OTHER_EXPENSES (سایر هزینه‌ها), MANAGEMENT
+          (مدیریت), SAVINGS (پس‌انداز), CHARITY (خیریه), EQUIPMENT (تجهیزات)'
       - in: query
         name: is_paid
         schema:
@@ -2334,7 +2686,14 @@ paths:
   /api/missions/:
     get:
       operationId: missions_list
+      summary: لیست ماموریت‌ها
       parameters:
+      - in: query
+        name: assigned_to
+        schema:
+          type: string
+          format: uuid
+        description: فیلتر بر اساس شناسه کاربر مامور
       - name: search
         required: false
         in: query
@@ -2342,7 +2701,7 @@ paths:
         schema:
           type: string
       tags:
-      - missions
+      - ماموریت‌ها
       security:
       - BearerAuth: []
       responses:
@@ -2356,8 +2715,9 @@ paths:
           description: ''
     post:
       operationId: missions_create
+      summary: تعریف ماموریت جدید
       tags:
-      - missions
+      - ماموریت‌ها
       requestBody:
         content:
           application/json:
@@ -2382,14 +2742,17 @@ paths:
   /api/missions/{id}/:
     get:
       operationId: missions_retrieve
+      summary: مشاهده جزئیات ماموریت
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این mission را شناسایی میکند.
         required: true
       tags:
-      - missions
+      - ماموریت‌ها
       security:
       - BearerAuth: []
       responses:
@@ -2401,14 +2764,17 @@ paths:
           description: ''
     put:
       operationId: missions_update
+      summary: ویرایش کامل ماموریت
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این mission را شناسایی میکند.
         required: true
       tags:
-      - missions
+      - ماموریت‌ها
       requestBody:
         content:
           application/json:
@@ -2432,14 +2798,17 @@ paths:
           description: ''
     patch:
       operationId: missions_partial_update
+      summary: ویرایش جزئی ماموریت
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این mission را شناسایی میکند.
         required: true
       tags:
-      - missions
+      - ماموریت‌ها
       requestBody:
         content:
           application/json:
@@ -2462,14 +2831,17 @@ paths:
           description: ''
     delete:
       operationId: missions_destroy
+      summary: حذف ماموریت
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این mission را شناسایی میکند.
         required: true
       tags:
-      - missions
+      - ماموریت‌ها
       security:
       - BearerAuth: []
       responses:
@@ -2478,8 +2850,26 @@ paths:
   /api/report-definitions/:
     get:
       operationId: report_definitions_list
+      summary: لیست تعاریف الگوهای گزارش‌دهی
+      parameters:
+      - in: query
+        name: is_active
+        schema:
+          type: boolean
+        description: وضعیت فعال/غیرفعال بودن گزارش
+      - in: query
+        name: report_type
+        schema:
+          type: string
+        description: نوع گزارش (DAILY, WEEKLY, MONTHLY, ON_DEMAND)
+      - in: query
+        name: subordinate
+        schema:
+          type: string
+          format: uuid
+        description: فیلتر بر اساس کاربر موظف (زیردستی)
       tags:
-      - report-definitions
+      - گزارش‌های دوره‌ای و مهلت‌دار
       security:
       - BearerAuth: []
       responses:
@@ -2493,8 +2883,9 @@ paths:
           description: ''
     post:
       operationId: report_definitions_create
+      summary: تعریف الگوی گزارش‌دهی جدید برای زیردستی
       tags:
-      - report-definitions
+      - گزارش‌های دوره‌ای و مهلت‌دار
       requestBody:
         content:
           application/json:
@@ -2519,14 +2910,17 @@ paths:
   /api/report-definitions/{id}/:
     get:
       operationId: report_definitions_retrieve
+      summary: مشاهده جزئیات الگوی گزارش
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این report definition را شناسایی میکند.
         required: true
       tags:
-      - report-definitions
+      - گزارش‌های دوره‌ای و مهلت‌دار
       security:
       - BearerAuth: []
       responses:
@@ -2538,14 +2932,17 @@ paths:
           description: ''
     put:
       operationId: report_definitions_update
+      summary: ویرایش کامل الگوی گزارش
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این report definition را شناسایی میکند.
         required: true
       tags:
-      - report-definitions
+      - گزارش‌های دوره‌ای و مهلت‌دار
       requestBody:
         content:
           application/json:
@@ -2569,14 +2966,17 @@ paths:
           description: ''
     patch:
       operationId: report_definitions_partial_update
+      summary: ویرایش جزئی الگوی گزارش
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این report definition را شناسایی میکند.
         required: true
       tags:
-      - report-definitions
+      - گزارش‌های دوره‌ای و مهلت‌دار
       requestBody:
         content:
           application/json:
@@ -2599,14 +2999,17 @@ paths:
           description: ''
     delete:
       operationId: report_definitions_destroy
+      summary: حذف الگوی گزارش
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این report definition را شناسایی میکند.
         required: true
       tags:
-      - report-definitions
+      - گزارش‌های دوره‌ای و مهلت‌دار
       security:
       - BearerAuth: []
       responses:
@@ -2617,30 +3020,32 @@ paths:
       operationId: report_definitions_duplicate_create
       description: ایجاد یک گزارش جدید (فعال) از روی لاگ گزارش قدیمی (استفاده مجدد
         از موضوع)
+      summary: ایجاد مجدد گزارش از روی الگوی قبلی (تکرار موضوع)
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این report definition را شناسایی میکند.
         required: true
       tags:
-      - report-definitions
+      - گزارش‌های دوره‌ای و مهلت‌دار
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ReportDefinitionRequest'
+              $ref: '#/components/schemas/ReportDuplicateRequestRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/ReportDefinitionRequest'
+              $ref: '#/components/schemas/ReportDuplicateRequestRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/ReportDefinitionRequest'
-        required: true
+              $ref: '#/components/schemas/ReportDuplicateRequestRequest'
       security:
       - BearerAuth: []
       responses:
-        '200':
+        '201':
           content:
             application/json:
               schema:
@@ -2649,25 +3054,17 @@ paths:
   /api/report-definitions/{id}/toggle-active/:
     patch:
       operationId: report_definitions_toggle_active_partial_update
+      summary: تغییر وضعیت فعال/غیرفعال بودن یک الگوی گزارش
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این report definition را شناسایی میکند.
         required: true
       tags:
-      - report-definitions
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/PatchedReportDefinitionRequest'
-          application/x-www-form-urlencoded:
-            schema:
-              $ref: '#/components/schemas/PatchedReportDefinitionRequest'
-          multipart/form-data:
-            schema:
-              $ref: '#/components/schemas/PatchedReportDefinitionRequest'
+      - گزارش‌های دوره‌ای و مهلت‌دار
       security:
       - BearerAuth: []
       responses:
@@ -2675,13 +3072,39 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ReportDefinition'
+                type: object
+                additionalProperties: {}
           description: ''
   /api/report-submissions/:
     get:
       operationId: report_submissions_list
+      summary: لیست گزارش‌های ارسال‌شده توسط کارکنان
+      parameters:
+      - in: query
+        name: definition
+        schema:
+          type: integer
+        description: فیلتر بر اساس شناسه الگوی گزارش
+      - in: query
+        name: from_date
+        schema:
+          type: string
+          format: date
+        description: از تاریخ ثبت (YYYY-MM-DD)
+      - in: query
+        name: submitted_by
+        schema:
+          type: string
+          format: uuid
+        description: فیلتر بر اساس ارسال‌کننده
+      - in: query
+        name: to_date
+        schema:
+          type: string
+          format: date
+        description: تا تاریخ ثبت (YYYY-MM-DD)
       tags:
-      - report-submissions
+      - گزارش‌های دوره‌ای و مهلت‌دار
       security:
       - BearerAuth: []
       responses:
@@ -2695,8 +3118,9 @@ paths:
           description: ''
     post:
       operationId: report_submissions_create
+      summary: ارسال گزارش کاری و پیوست تصاویر
       tags:
-      - report-submissions
+      - گزارش‌های دوره‌ای و مهلت‌دار
       requestBody:
         content:
           application/json:
@@ -2721,14 +3145,17 @@ paths:
   /api/report-submissions/{id}/:
     get:
       operationId: report_submissions_retrieve
+      summary: مشاهده جزئیات و تصاویر گزارش ارسالی
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این report submission را شناسایی میکند.
         required: true
       tags:
-      - report-submissions
+      - گزارش‌های دوره‌ای و مهلت‌دار
       security:
       - BearerAuth: []
       responses:
@@ -2740,14 +3167,17 @@ paths:
           description: ''
     put:
       operationId: report_submissions_update
+      summary: ویرایش گزارش ارسالی
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این report submission را شناسایی میکند.
         required: true
       tags:
-      - report-submissions
+      - گزارش‌های دوره‌ای و مهلت‌دار
       requestBody:
         content:
           application/json:
@@ -2771,14 +3201,17 @@ paths:
           description: ''
     patch:
       operationId: report_submissions_partial_update
+      summary: ویرایش جزئی گزارش ارسالی
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این report submission را شناسایی میکند.
         required: true
       tags:
-      - report-submissions
+      - گزارش‌های دوره‌ای و مهلت‌دار
       requestBody:
         content:
           application/json:
@@ -2801,14 +3234,17 @@ paths:
           description: ''
     delete:
       operationId: report_submissions_destroy
+      summary: حذف گزارش ارسالی
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این report submission را شناسایی میکند.
         required: true
       tags:
-      - report-submissions
+      - گزارش‌های دوره‌ای و مهلت‌دار
       security:
       - BearerAuth: []
       responses:
@@ -2817,8 +3253,15 @@ paths:
   /api/return-requests/:
     get:
       operationId: return_requests_list
+      summary: لیست درخواست‌های مرجوعی کالا
+      parameters:
+      - in: query
+        name: status
+        schema:
+          type: string
+        description: 'فیلتر وضعیت: PENDING, APPROVED, REJECTED, COMPLETED'
       tags:
-      - return-requests
+      - برگشتی کالا و وجه
       security:
       - BearerAuth: []
       responses:
@@ -2832,8 +3275,9 @@ paths:
           description: ''
     post:
       operationId: return_requests_create
+      summary: ثبت درخواست مرجوعی جدید
       tags:
-      - return-requests
+      - برگشتی کالا و وجه
       requestBody:
         content:
           application/json:
@@ -2858,6 +3302,7 @@ paths:
   /api/return-requests/{id}/:
     get:
       operationId: return_requests_retrieve
+      summary: مشاهده جزئیات درخواست مرجوعی
       parameters:
       - in: path
         name: id
@@ -2867,7 +3312,7 @@ paths:
         description: یک رشته UUID که این return request را شناسایی میکند.
         required: true
       tags:
-      - return-requests
+      - برگشتی کالا و وجه
       security:
       - BearerAuth: []
       responses:
@@ -2879,6 +3324,7 @@ paths:
           description: ''
     put:
       operationId: return_requests_update
+      summary: ویرایش کامل درخواست مرجوعی
       parameters:
       - in: path
         name: id
@@ -2888,7 +3334,7 @@ paths:
         description: یک رشته UUID که این return request را شناسایی میکند.
         required: true
       tags:
-      - return-requests
+      - برگشتی کالا و وجه
       requestBody:
         content:
           application/json:
@@ -2912,6 +3358,7 @@ paths:
           description: ''
     patch:
       operationId: return_requests_partial_update
+      summary: ویرایش جزئی درخواست مرجوعی
       parameters:
       - in: path
         name: id
@@ -2921,7 +3368,7 @@ paths:
         description: یک رشته UUID که این return request را شناسایی میکند.
         required: true
       tags:
-      - return-requests
+      - برگشتی کالا و وجه
       requestBody:
         content:
           application/json:
@@ -2944,6 +3391,7 @@ paths:
           description: ''
     delete:
       operationId: return_requests_destroy
+      summary: حذف درخواست مرجوعی
       parameters:
       - in: path
         name: id
@@ -2953,7 +3401,7 @@ paths:
         description: یک رشته UUID که این return request را شناسایی میکند.
         required: true
       tags:
-      - return-requests
+      - برگشتی کالا و وجه
       security:
       - BearerAuth: []
       responses:
@@ -2962,6 +3410,7 @@ paths:
   /api/return-requests/{id}/approve/:
     post:
       operationId: return_requests_approve_create
+      summary: تایید درخواست برگشتی توسط مدیریت
       parameters:
       - in: path
         name: id
@@ -2971,19 +3420,7 @@ paths:
         description: یک رشته UUID که این return request را شناسایی میکند.
         required: true
       tags:
-      - return-requests
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ReturnRequestRequest'
-          application/x-www-form-urlencoded:
-            schema:
-              $ref: '#/components/schemas/ReturnRequestRequest'
-          multipart/form-data:
-            schema:
-              $ref: '#/components/schemas/ReturnRequestRequest'
-        required: true
+      - برگشتی کالا و وجه
       security:
       - BearerAuth: []
       responses:
@@ -2991,11 +3428,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ReturnRequest'
+                type: object
+                additionalProperties: {}
           description: ''
   /api/return-requests/{id}/finalize-refund/:
     post:
       operationId: return_requests_finalize_refund_create
+      summary: ثبت نهایی واریزی و عودت وجه به مشتری
       parameters:
       - in: path
         name: id
@@ -3005,18 +3444,18 @@ paths:
         description: یک رشته UUID که این return request را شناسایی میکند.
         required: true
       tags:
-      - return-requests
+      - برگشتی کالا و وجه
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ReturnRequestRequest'
+              $ref: '#/components/schemas/ReturnRefundFinalizeRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/ReturnRequestRequest'
+              $ref: '#/components/schemas/ReturnRefundFinalizeRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/ReturnRequestRequest'
+              $ref: '#/components/schemas/ReturnRefundFinalizeRequest'
         required: true
       security:
       - BearerAuth: []
@@ -3025,13 +3464,15 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ReturnRequest'
+                type: object
+                additionalProperties: {}
           description: ''
   /api/roles/:
     get:
       operationId: roles_list
+      summary: لیست نقش‌های سیستم
       tags:
-      - roles
+      - مدیریت کاربران
       security:
       - BearerAuth: []
       responses:
@@ -3046,6 +3487,7 @@ paths:
   /api/roles/{id}/:
     get:
       operationId: roles_retrieve
+      summary: مشاهده جزئیات نقش
       parameters:
       - in: path
         name: id
@@ -3055,7 +3497,7 @@ paths:
         description: یک رشته UUID که این role را شناسایی میکند.
         required: true
       tags:
-      - roles
+      - مدیریت کاربران
       security:
       - BearerAuth: []
       responses:
@@ -3068,8 +3510,37 @@ paths:
   /api/sales/:
     get:
       operationId: sales_list
+      summary: لیست فاکتورهای فروش
+      parameters:
+      - in: query
+        name: branch
+        schema:
+          type: string
+        description: فیلتر بر اساس نام شعبه
+      - in: query
+        name: customer
+        schema:
+          type: integer
+        description: فیلتر بر اساس شناسه مشتری
+      - in: query
+        name: from_date
+        schema:
+          type: string
+          format: date
+        description: فیلتر از تاریخ میلادی (YYYY-MM-DD)
+      - in: query
+        name: seller
+        schema:
+          type: integer
+        description: فیلتر بر اساس شناسه فروشنده
+      - in: query
+        name: to_date
+        schema:
+          type: string
+          format: date
+        description: فیلتر تا تاریخ میلادی (YYYY-MM-DD)
       tags:
-      - sales
+      - فروش و فاکتورها
       security:
       - BearerAuth: []
       responses:
@@ -3083,8 +3554,9 @@ paths:
           description: ''
     post:
       operationId: sales_create
+      summary: ثبت فاکتور فروش جدید
       tags:
-      - sales
+      - فروش و فاکتورها
       requestBody:
         content:
           application/json:
@@ -3109,14 +3581,17 @@ paths:
   /api/sales/{id}/:
     get:
       operationId: sales_retrieve
+      summary: جزئیات فاکتور فروش
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این sale را شناسایی میکند.
         required: true
       tags:
-      - sales
+      - فروش و فاکتورها
       security:
       - BearerAuth: []
       responses:
@@ -3128,14 +3603,17 @@ paths:
           description: ''
     put:
       operationId: sales_update
+      summary: ویرایش کامل فاکتور فروش
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این sale را شناسایی میکند.
         required: true
       tags:
-      - sales
+      - فروش و فاکتورها
       requestBody:
         content:
           application/json:
@@ -3159,14 +3637,17 @@ paths:
           description: ''
     patch:
       operationId: sales_partial_update
+      summary: ویرایش جزئی فاکتور فروش
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این sale را شناسایی میکند.
         required: true
       tags:
-      - sales
+      - فروش و فاکتورها
       requestBody:
         content:
           application/json:
@@ -3189,14 +3670,17 @@ paths:
           description: ''
     delete:
       operationId: sales_destroy
+      summary: حذف فاکتور فروش
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این sale را شناسایی میکند.
         required: true
       tags:
-      - sales
+      - فروش و فاکتورها
       security:
       - BearerAuth: []
       responses:
@@ -3212,7 +3696,7 @@ paths:
         - اکشن استعلام جامع وضعیت و محاسبه خودکار پورسانت
       summary: لیست قوانین پورسانت و پاداش
       tags:
-      - پورسانت و فروشندگان
+      - فروشندگان و پورسانت
       security:
       - BearerAuth: []
       responses:
@@ -3233,7 +3717,7 @@ paths:
         - اکشن استعلام جامع وضعیت و محاسبه خودکار پورسانت
       summary: ثبت قوانین پورسانت جدید برای فروشنده
       tags:
-      - پورسانت و فروشندگان
+      - فروشندگان و پورسانت
       requestBody:
         content:
           application/json:
@@ -3273,7 +3757,7 @@ paths:
         description: یک رشته UUID که این تنظیمات پورسانت فروشنده را شناسایی میکند.
         required: true
       tags:
-      - پورسانت و فروشندگان
+      - فروشندگان و پورسانت
       security:
       - BearerAuth: []
       responses:
@@ -3300,7 +3784,7 @@ paths:
         description: یک رشته UUID که این تنظیمات پورسانت فروشنده را شناسایی میکند.
         required: true
       tags:
-      - پورسانت و فروشندگان
+      - فروشندگان و پورسانت
       requestBody:
         content:
           application/json:
@@ -3339,7 +3823,7 @@ paths:
         description: یک رشته UUID که این تنظیمات پورسانت فروشنده را شناسایی میکند.
         required: true
       tags:
-      - پورسانت و فروشندگان
+      - فروشندگان و پورسانت
       requestBody:
         content:
           application/json:
@@ -3377,7 +3861,7 @@ paths:
         description: یک رشته UUID که این تنظیمات پورسانت فروشنده را شناسایی میکند.
         required: true
       tags:
-      - پورسانت و فروشندگان
+      - فروشندگان و پورسانت
       security:
       - BearerAuth: []
       responses:
@@ -3412,7 +3896,7 @@ paths:
           type: integer
         description: 'سال شمسی (پیش‌فرض: سال جاری)'
       tags:
-      - پورسانت و فروشندگان
+      - فروشندگان و پورسانت
       security:
       - BearerAuth: []
       responses:
@@ -3431,7 +3915,7 @@ paths:
         - پشتیبانی از اکشن bulk-save برای ثبت کل روزهای ماه در یک درخواست
       summary: لیست فروش‌های روزانه فروشندگان
       tags:
-      - پورسانت و فروشندگان
+      - فروشندگان و پورسانت
       security:
       - BearerAuth: []
       responses:
@@ -3451,7 +3935,7 @@ paths:
         - پشتیبانی از اکشن bulk-save برای ثبت کل روزهای ماه در یک درخواست
       summary: ثبت یک رکورد فروش روزانه برای فروشنده
       tags:
-      - پورسانت و فروشندگان
+      - فروشندگان و پورسانت
       requestBody:
         content:
           application/json:
@@ -3490,7 +3974,7 @@ paths:
         description: یک رشته UUID که این فروش روزانه فروشنده را شناسایی میکند.
         required: true
       tags:
-      - پورسانت و فروشندگان
+      - فروشندگان و پورسانت
       security:
       - BearerAuth: []
       responses:
@@ -3516,7 +4000,7 @@ paths:
         description: یک رشته UUID که این فروش روزانه فروشنده را شناسایی میکند.
         required: true
       tags:
-      - پورسانت و فروشندگان
+      - فروشندگان و پورسانت
       requestBody:
         content:
           application/json:
@@ -3554,7 +4038,7 @@ paths:
         description: یک رشته UUID که این فروش روزانه فروشنده را شناسایی میکند.
         required: true
       tags:
-      - پورسانت و فروشندگان
+      - فروشندگان و پورسانت
       requestBody:
         content:
           application/json:
@@ -3591,7 +4075,7 @@ paths:
         description: یک رشته UUID که این فروش روزانه فروشنده را شناسایی میکند.
         required: true
       tags:
-      - پورسانت و فروشندگان
+      - فروشندگان و پورسانت
       security:
       - BearerAuth: []
       responses:
@@ -3614,7 +4098,7 @@ paths:
         }
       summary: ثبت تجمیعی (Bulk) فروش‌های روزانه کل ماه برای یک فروشنده
       tags:
-      - پورسانت و فروشندگان
+      - فروشندگان و پورسانت
       requestBody:
         content:
           application/json:
@@ -3639,8 +4123,9 @@ paths:
   /api/sellers/:
     get:
       operationId: sellers_list
+      summary: لیست فروشندگان
       tags:
-      - sellers
+      - فروشندگان و پورسانت
       security:
       - BearerAuth: []
       responses:
@@ -3654,8 +4139,9 @@ paths:
           description: ''
     post:
       operationId: sellers_create
+      summary: ثبت فروشنده جدید
       tags:
-      - sellers
+      - فروشندگان و پورسانت
       requestBody:
         content:
           application/json:
@@ -3680,6 +4166,7 @@ paths:
   /api/sellers/{id}/:
     get:
       operationId: sellers_retrieve
+      summary: مشاهده جزئیات فروشنده
       parameters:
       - in: path
         name: id
@@ -3689,7 +4176,7 @@ paths:
         description: یک رشته UUID که این seller را شناسایی میکند.
         required: true
       tags:
-      - sellers
+      - فروشندگان و پورسانت
       security:
       - BearerAuth: []
       responses:
@@ -3701,6 +4188,7 @@ paths:
           description: ''
     put:
       operationId: sellers_update
+      summary: ویرایش کامل فروشنده
       parameters:
       - in: path
         name: id
@@ -3710,7 +4198,7 @@ paths:
         description: یک رشته UUID که این seller را شناسایی میکند.
         required: true
       tags:
-      - sellers
+      - فروشندگان و پورسانت
       requestBody:
         content:
           application/json:
@@ -3734,6 +4222,7 @@ paths:
           description: ''
     patch:
       operationId: sellers_partial_update
+      summary: ویرایش جزئی فروشنده
       parameters:
       - in: path
         name: id
@@ -3743,7 +4232,7 @@ paths:
         description: یک رشته UUID که این seller را شناسایی میکند.
         required: true
       tags:
-      - sellers
+      - فروشندگان و پورسانت
       requestBody:
         content:
           application/json:
@@ -3766,6 +4255,7 @@ paths:
           description: ''
     delete:
       operationId: sellers_destroy
+      summary: حذف فروشنده
       parameters:
       - in: path
         name: id
@@ -3775,7 +4265,7 @@ paths:
         description: یک رشته UUID که این seller را شناسایی میکند.
         required: true
       tags:
-      - sellers
+      - فروشندگان و پورسانت
       security:
       - BearerAuth: []
       responses:
@@ -3784,8 +4274,9 @@ paths:
   /api/sellers/lookup/:
     get:
       operationId: sellers_lookup_retrieve
+      summary: لیست سریع فروشندگان جهت انتخاب در فرم‌ها
       tags:
-      - sellers
+      - فروشندگان و پورسانت
       security:
       - BearerAuth: []
       responses:
@@ -3798,8 +4289,9 @@ paths:
   /api/tasks/:
     get:
       operationId: tasks_list
+      summary: لیست وظایف/تسک‌ها
       tags:
-      - tasks
+      - چک‌لیست‌ها و وظایف
       security:
       - BearerAuth: []
       responses:
@@ -3813,8 +4305,9 @@ paths:
           description: ''
     post:
       operationId: tasks_create
+      summary: ثبت وظیفه جدید
       tags:
-      - tasks
+      - چک‌لیست‌ها و وظایف
       requestBody:
         content:
           application/json:
@@ -3839,14 +4332,17 @@ paths:
   /api/tasks/{id}/:
     get:
       operationId: tasks_retrieve
+      summary: مشاهده جزئیات وظیفه
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این task را شناسایی میکند.
         required: true
       tags:
-      - tasks
+      - چک‌لیست‌ها و وظایف
       security:
       - BearerAuth: []
       responses:
@@ -3858,14 +4354,17 @@ paths:
           description: ''
     put:
       operationId: tasks_update
+      summary: ویرایش کامل وظیفه یا ثبت انجام
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این task را شناسایی میکند.
         required: true
       tags:
-      - tasks
+      - چک‌لیست‌ها و وظایف
       requestBody:
         content:
           application/json:
@@ -3889,14 +4388,17 @@ paths:
           description: ''
     patch:
       operationId: tasks_partial_update
+      summary: ویرایش جزئی وظیفه
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این task را شناسایی میکند.
         required: true
       tags:
-      - tasks
+      - چک‌لیست‌ها و وظایف
       requestBody:
         content:
           application/json:
@@ -3919,14 +4421,17 @@ paths:
           description: ''
     delete:
       operationId: tasks_destroy
+      summary: حذف وظیفه
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این task را شناسایی میکند.
         required: true
       tags:
-      - tasks
+      - چک‌لیست‌ها و وظایف
       security:
       - BearerAuth: []
       responses:
@@ -3935,22 +4440,37 @@ paths:
   /api/transfers/:
     get:
       operationId: transfers_list
-      description: |-
-        انتقال بین شعب
-
-        وضعیت‌ها:
-          PENDING_SENDER   → ثبت درخواست توسط صندوقدار
-          PENDING_RECEIVER → تایید سرپرست مبدا، در انتظار گیرنده
-          APPROVED         → تایید هر دو سرپرست
-          REJECTED         → رد شده (قابل ویرایش و بازارسال)
-
-        اکشن‌ها:
-          POST /transfers/{id}/approve_sender/  — تایید توسط سرپرست مبدا
-          POST /transfers/{id}/reject_sender/   — رد توسط سرپرست مبدا
-          POST /transfers/{id}/approve_receiver/— تایید توسط سرپرست مقصد
-          POST /transfers/{id}/reject_receiver/ — رد توسط سرپرست مقصد
+      summary: لیست حواله‌ها و انتقال کالا بین شعب
+      parameters:
+      - in: query
+        name: destination_branch
+        schema:
+          type: string
+        description: شعبه مقصد
+      - in: query
+        name: from_date
+        schema:
+          type: string
+          format: date
+        description: از تاریخ (YYYY-MM-DD)
+      - in: query
+        name: source_branch
+        schema:
+          type: string
+        description: شعبه مبدا
+      - in: query
+        name: status
+        schema:
+          type: string
+        description: فیلتر وضعیت (PENDING_SENDER, PENDING_RECEIVER, APPROVED, REJECTED)
+      - in: query
+        name: to_date
+        schema:
+          type: string
+          format: date
+        description: تا تاریخ (YYYY-MM-DD)
       tags:
-      - transfers
+      - حواله و انتقال بین شعب
       security:
       - BearerAuth: []
       responses:
@@ -3964,22 +4484,9 @@ paths:
           description: ''
     post:
       operationId: transfers_create
-      description: |-
-        انتقال بین شعب
-
-        وضعیت‌ها:
-          PENDING_SENDER   → ثبت درخواست توسط صندوقدار
-          PENDING_RECEIVER → تایید سرپرست مبدا، در انتظار گیرنده
-          APPROVED         → تایید هر دو سرپرست
-          REJECTED         → رد شده (قابل ویرایش و بازارسال)
-
-        اکشن‌ها:
-          POST /transfers/{id}/approve_sender/  — تایید توسط سرپرست مبدا
-          POST /transfers/{id}/reject_sender/   — رد توسط سرپرست مبدا
-          POST /transfers/{id}/approve_receiver/— تایید توسط سرپرست مقصد
-          POST /transfers/{id}/reject_receiver/ — رد توسط سرپرست مقصد
+      summary: ثبت درخواست انتقال کالای جدید بین شعب
       tags:
-      - transfers
+      - حواله و انتقال بین شعب
       requestBody:
         content:
           application/json:
@@ -4004,28 +4511,17 @@ paths:
   /api/transfers/{id}/:
     get:
       operationId: transfers_retrieve
-      description: |-
-        انتقال بین شعب
-
-        وضعیت‌ها:
-          PENDING_SENDER   → ثبت درخواست توسط صندوقدار
-          PENDING_RECEIVER → تایید سرپرست مبدا، در انتظار گیرنده
-          APPROVED         → تایید هر دو سرپرست
-          REJECTED         → رد شده (قابل ویرایش و بازارسال)
-
-        اکشن‌ها:
-          POST /transfers/{id}/approve_sender/  — تایید توسط سرپرست مبدا
-          POST /transfers/{id}/reject_sender/   — رد توسط سرپرست مبدا
-          POST /transfers/{id}/approve_receiver/— تایید توسط سرپرست مقصد
-          POST /transfers/{id}/reject_receiver/ — رد توسط سرپرست مقصد
+      summary: مشاهده جزئیات کامل و لاگ‌های انتقال کالا
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این branch transfer را شناسایی میکند.
         required: true
       tags:
-      - transfers
+      - حواله و انتقال بین شعب
       security:
       - BearerAuth: []
       responses:
@@ -4037,28 +4533,17 @@ paths:
           description: ''
     put:
       operationId: transfers_update
-      description: |-
-        انتقال بین شعب
-
-        وضعیت‌ها:
-          PENDING_SENDER   → ثبت درخواست توسط صندوقدار
-          PENDING_RECEIVER → تایید سرپرست مبدا، در انتظار گیرنده
-          APPROVED         → تایید هر دو سرپرست
-          REJECTED         → رد شده (قابل ویرایش و بازارسال)
-
-        اکشن‌ها:
-          POST /transfers/{id}/approve_sender/  — تایید توسط سرپرست مبدا
-          POST /transfers/{id}/reject_sender/   — رد توسط سرپرست مبدا
-          POST /transfers/{id}/approve_receiver/— تایید توسط سرپرست مقصد
-          POST /transfers/{id}/reject_receiver/ — رد توسط سرپرست مقصد
+      summary: ویرایش انتقال کالا
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این branch transfer را شناسایی میکند.
         required: true
       tags:
-      - transfers
+      - حواله و انتقال بین شعب
       requestBody:
         content:
           application/json:
@@ -4082,28 +4567,17 @@ paths:
           description: ''
     patch:
       operationId: transfers_partial_update
-      description: |-
-        انتقال بین شعب
-
-        وضعیت‌ها:
-          PENDING_SENDER   → ثبت درخواست توسط صندوقدار
-          PENDING_RECEIVER → تایید سرپرست مبدا، در انتظار گیرنده
-          APPROVED         → تایید هر دو سرپرست
-          REJECTED         → رد شده (قابل ویرایش و بازارسال)
-
-        اکشن‌ها:
-          POST /transfers/{id}/approve_sender/  — تایید توسط سرپرست مبدا
-          POST /transfers/{id}/reject_sender/   — رد توسط سرپرست مبدا
-          POST /transfers/{id}/approve_receiver/— تایید توسط سرپرست مقصد
-          POST /transfers/{id}/reject_receiver/ — رد توسط سرپرست مقصد
+      summary: ویرایش جزئی انتقال کالا
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این branch transfer را شناسایی میکند.
         required: true
       tags:
-      - transfers
+      - حواله و انتقال بین شعب
       requestBody:
         content:
           application/json:
@@ -4126,28 +4600,17 @@ paths:
           description: ''
     delete:
       operationId: transfers_destroy
-      description: |-
-        انتقال بین شعب
-
-        وضعیت‌ها:
-          PENDING_SENDER   → ثبت درخواست توسط صندوقدار
-          PENDING_RECEIVER → تایید سرپرست مبدا، در انتظار گیرنده
-          APPROVED         → تایید هر دو سرپرست
-          REJECTED         → رد شده (قابل ویرایش و بازارسال)
-
-        اکشن‌ها:
-          POST /transfers/{id}/approve_sender/  — تایید توسط سرپرست مبدا
-          POST /transfers/{id}/reject_sender/   — رد توسط سرپرست مبدا
-          POST /transfers/{id}/approve_receiver/— تایید توسط سرپرست مقصد
-          POST /transfers/{id}/reject_receiver/ — رد توسط سرپرست مقصد
+      summary: حذف درخواست انتقال کالا
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این branch transfer را شناسایی میکند.
         required: true
       tags:
-      - transfers
+      - حواله و انتقال بین شعب
       security:
       - BearerAuth: []
       responses:
@@ -4157,26 +4620,28 @@ paths:
     post:
       operationId: transfers_approve_receiver_create
       description: تایید نهایی انتقال توسط سرپرست مقصد
+      summary: تایید نهایی انتقال توسط سرپرست مقصد
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این branch transfer را شناسایی میکند.
         required: true
       tags:
-      - transfers
+      - حواله و انتقال بین شعب
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/BranchTransferRequest'
+              $ref: '#/components/schemas/BranchTransferNoteRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/BranchTransferRequest'
+              $ref: '#/components/schemas/BranchTransferNoteRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/BranchTransferRequest'
-        required: true
+              $ref: '#/components/schemas/BranchTransferNoteRequest'
       security:
       - BearerAuth: []
       responses:
@@ -4184,32 +4649,35 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BranchTransfer'
+                type: object
+                additionalProperties: {}
           description: ''
   /api/transfers/{id}/approve-sender/:
     post:
       operationId: transfers_approve_sender_create
       description: تایید انتقال توسط سرپرست مبدا
+      summary: تایید انتقال توسط سرپرست مبدا
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این branch transfer را شناسایی میکند.
         required: true
       tags:
-      - transfers
+      - حواله و انتقال بین شعب
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/BranchTransferRequest'
+              $ref: '#/components/schemas/BranchTransferNoteRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/BranchTransferRequest'
+              $ref: '#/components/schemas/BranchTransferNoteRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/BranchTransferRequest'
-        required: true
+              $ref: '#/components/schemas/BranchTransferNoteRequest'
       security:
       - BearerAuth: []
       responses:
@@ -4217,31 +4685,35 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BranchTransfer'
+                type: object
+                additionalProperties: {}
           description: ''
   /api/transfers/{id}/reject-receiver/:
     post:
       operationId: transfers_reject_receiver_create
       description: رد انتقال توسط سرپرست مقصد
+      summary: رد انتقال توسط سرپرست مقصد
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این branch transfer را شناسایی میکند.
         required: true
       tags:
-      - transfers
+      - حواله و انتقال بین شعب
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/BranchTransferRequest'
+              $ref: '#/components/schemas/BranchTransferRejectRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/BranchTransferRequest'
+              $ref: '#/components/schemas/BranchTransferRejectRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/BranchTransferRequest'
+              $ref: '#/components/schemas/BranchTransferRejectRequest'
         required: true
       security:
       - BearerAuth: []
@@ -4250,31 +4722,35 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BranchTransfer'
+                type: object
+                additionalProperties: {}
           description: ''
   /api/transfers/{id}/reject-sender/:
     post:
       operationId: transfers_reject_sender_create
       description: رد انتقال توسط سرپرست مبدا
+      summary: رد انتقال توسط سرپرست مبدا
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این branch transfer را شناسایی میکند.
         required: true
       tags:
-      - transfers
+      - حواله و انتقال بین شعب
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/BranchTransferRequest'
+              $ref: '#/components/schemas/BranchTransferRejectRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/BranchTransferRequest'
+              $ref: '#/components/schemas/BranchTransferRejectRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/BranchTransferRequest'
+              $ref: '#/components/schemas/BranchTransferRejectRequest'
         required: true
       security:
       - BearerAuth: []
@@ -4283,7 +4759,8 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BranchTransfer'
+                type: object
+                additionalProperties: {}
           description: ''
   /api/upload/:
     post:
@@ -4346,8 +4823,37 @@ paths:
   /api/users/:
     get:
       operationId: users_list
+      description: دریافت لیست تمام کاربران فعال و غیرحذف‌شده سیستم. برای مشاهده کاربران
+        حذف‌شده پارامتر include_deleted=true را ارسال نمایید.
+      summary: لیست کاربران سامانه با فیلتر و جستجو
+      parameters:
+      - in: query
+        name: branch
+        schema:
+          type: string
+        description: فیلتر بر اساس نام شعبه
+      - in: query
+        name: include_deleted
+        schema:
+          type: boolean
+        description: 'نمایش کاربران حذف‌شده در لیست (پیش‌فرض: false)'
+      - in: query
+        name: is_active
+        schema:
+          type: boolean
+        description: فیلتر بر اساس وضعیت فعال/غیرفعال بودن حساب
+      - in: query
+        name: role
+        schema:
+          type: string
+        description: فیلتر بر اساس کد نقش (مانند ADMIN, CASHIER, SUPERVISOR)
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: جستجو در نام، نام خانوادگی و نام کاربری
       tags:
-      - users
+      - مدیریت کاربران
       security:
       - BearerAuth: []
       responses:
@@ -4361,8 +4867,9 @@ paths:
           description: ''
     post:
       operationId: users_create
+      summary: ثبت کاربر جدید در سامانه
       tags:
-      - users
+      - مدیریت کاربران
       requestBody:
         content:
           application/json:
@@ -4387,6 +4894,7 @@ paths:
   /api/users/{id}/:
     get:
       operationId: users_retrieve
+      summary: دریافت مشخصات کامل یک کاربر
       parameters:
       - in: path
         name: id
@@ -4396,7 +4904,7 @@ paths:
         description: یک رشته UUID که این کاربر را شناسایی میکند.
         required: true
       tags:
-      - users
+      - مدیریت کاربران
       security:
       - BearerAuth: []
       responses:
@@ -4408,6 +4916,7 @@ paths:
           description: ''
     put:
       operationId: users_update
+      summary: ویرایش کامل اطلاعات کاربر
       parameters:
       - in: path
         name: id
@@ -4417,7 +4926,7 @@ paths:
         description: یک رشته UUID که این کاربر را شناسایی میکند.
         required: true
       tags:
-      - users
+      - مدیریت کاربران
       requestBody:
         content:
           application/json:
@@ -4441,6 +4950,7 @@ paths:
           description: ''
     patch:
       operationId: users_partial_update
+      summary: ویرایش جزئی اطلاعات کاربر
       parameters:
       - in: path
         name: id
@@ -4450,7 +4960,7 @@ paths:
         description: یک رشته UUID که این کاربر را شناسایی میکند.
         required: true
       tags:
-      - users
+      - مدیریت کاربران
       requestBody:
         content:
           application/json:
@@ -4473,6 +4983,10 @@ paths:
           description: ''
     delete:
       operationId: users_destroy
+      description: اگر کاربر سابقه وابسته نداشته باشد کلاً حذف می‌شود؛ در صورت داشتن
+        سوابق فاکتور و حسابداری، حساب کاربر نرم حذف شده و نام کاربری‌اش برای استفاده
+        مجدد آزاد می‌گردد.
+      summary: حذف هوشمند کاربر (پاکسازی کامل یا آرشیو نرم)
       parameters:
       - in: path
         name: id
@@ -4482,28 +4996,7 @@ paths:
         description: یک رشته UUID که این کاربر را شناسایی میکند.
         required: true
       tags:
-      - users
-      security:
-      - BearerAuth: []
-      responses:
-        '204':
-          description: No response body
-  /api/users/{id}/performance/:
-    get:
-      operationId: users_performance_retrieve
-      description: |-
-        دریافت آمار عملکرد کاربر (چک‌لیست‌ها، ماموریت‌ها و گزارش‌ها)
-        پارامتر period می‌تواند یکی از مقادیر daily, weekly, monthly باشد. (پیش‌فرض: daily)
-      parameters:
-      - in: path
-        name: id
-        schema:
-          type: string
-          format: uuid
-        description: یک رشته UUID که این کاربر را شناسایی میکند.
-        required: true
-      tags:
-      - users
+      - مدیریت کاربران
       security:
       - BearerAuth: []
       responses:
@@ -4511,16 +5004,62 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/User'
+                $ref: '#/components/schemas/UserDeleteResponse'
+          description: ''
+  /api/users/{id}/performance/:
+    get:
+      operationId: users_performance_retrieve
+      description: دریافت آمار عملکرد یک کاربر خاص بر اساس بازه زمانی روزانه، هفتگی
+        یا ماهانه.
+      summary: آمار عملکرد کاربر (چک‌لیست‌ها، ماموریت‌ها و گزارش‌ها)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: یک رشته UUID که این کاربر را شناسایی میکند.
+        required: true
+      - in: query
+        name: period
+        schema:
+          type: string
+          enum:
+          - daily
+          - monthly
+          - weekly
+        description: 'بازه زمانی: daily, weekly, monthly'
+      tags:
+      - مدیریت کاربران
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
           description: ''
   /api/users/{id}/reports/:
     get:
       operationId: users_reports_retrieve
-      description: |-
-        دریافت گزارشات یک کاربر خاص (شامل تمام تعاریف گزارش و ارسال‌های کاربر به همراه آمار تجمیعی)
-        URL: GET /api/users/{id}/reports/
-        یا برای کاربر جاری: GET /api/users/me/reports/
+      description: شامل تمام تعاریف گزارش و ارسال‌های کاربر به همراه آمار تجمیعی.
+        برای کاربر جاری از شناسه me استفاده کنید.
+      summary: دریافت گزارشات یک کاربر خاص یا کاربر جاری (me)
       parameters:
+      - in: query
+        name: definition_id
+        schema:
+          type: string
+          format: uuid
+        description: شناسه تعریف گزارش خاص
+      - in: query
+        name: from_date
+        schema:
+          type: string
+          format: date
+        description: فیلتر از تاریخ
       - in: path
         name: id
         schema:
@@ -4528,8 +5067,27 @@ paths:
           format: uuid
         description: یک رشته UUID که این کاربر را شناسایی میکند.
         required: true
+      - in: query
+        name: is_active
+        schema:
+          type: boolean
+        description: فیلتر وضعیت فعال بودن
+      - in: query
+        name: report_type
+        schema:
+          type: string
+          enum:
+          - DEADLINE
+          - RECURRING
+        description: 'نوع گزارش: RECURRING یا DEADLINE'
+      - in: query
+        name: to_date
+        schema:
+          type: string
+          format: date
+        description: فیلتر تا تاریخ
       tags:
-      - users
+      - مدیریت کاربران
       security:
       - BearerAuth: []
       responses:
@@ -4537,7 +5095,8 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/User'
+                type: object
+                additionalProperties: {}
           description: ''
   /api/users/{id}/restore/:
     post:
@@ -4554,7 +5113,7 @@ paths:
         description: یک رشته UUID که این کاربر را شناسایی میکند.
         required: true
       tags:
-      - users
+      - مدیریت کاربران
       requestBody:
         content:
           application/json:
@@ -4574,13 +5133,43 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/User'
+                $ref: '#/components/schemas/UserRestoreResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
           description: ''
   /api/users/all-users-status/:
     get:
       operationId: users_all_users_status_retrieve
+      description: آمار جامع انجام ماموریت‌ها، چک‌لیست‌ها، گزارش‌ها و وضعیت آنلاین
+        بودن روزانه کاربران فعال.
+      summary: وضعیت و آمار لحظه‌ای تمام کاربران و لاگ حضور و غیاب ۷ روز اخیر
+      parameters:
+      - in: query
+        name: branch
+        schema:
+          type: string
+        description: فیلتر بر اساس نام شعبه
+      - in: query
+        name: period
+        schema:
+          type: string
+          enum:
+          - daily
+          - monthly
+          - weekly
+        description: 'بازه زمانی آمار: daily, weekly, monthly'
+      - in: query
+        name: role
+        schema:
+          type: string
+        description: فیلتر بر اساس کد نقش
       tags:
-      - users
+      - مدیریت کاربران
       security:
       - BearerAuth: []
       responses:
@@ -4588,24 +5177,30 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/User'
+                type: object
+                additionalProperties: {}
           description: ''
   /api/users/complete-profile/:
     patch:
       operationId: users_complete_profile_partial_update
+      description: تکمیل مشخصات اولیه پروفایل شامل نام و نام خانوادگی کاربر.
+      summary: تکمیل پروفایل (نام و نام خانوادگی)
       tags:
-      - users
+      - مدیریت کاربران
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PatchedUserRequest'
+              type: object
+              additionalProperties: {}
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/PatchedUserRequest'
+              type: object
+              additionalProperties: {}
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PatchedUserRequest'
+              type: object
+              additionalProperties: {}
       security:
       - BearerAuth: []
       responses:
@@ -4613,7 +5208,8 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/User'
+                type: object
+                additionalProperties: {}
           description: ''
   /api/users/mark-online/:
     post:
@@ -4622,7 +5218,7 @@ paths:
         انجام‌نشده، گزارش‌های کامل‌نشده و چک‌لیست‌های پرنشده
       summary: اعلام آنلاین شدن کاربر در اپلیکیشن همراه با دریافت آمار وظایف باز
       tags:
-      - users
+      - مدیریت کاربران
       requestBody:
         content:
           application/json:
@@ -4650,7 +5246,7 @@ paths:
       description: تعداد ماموریت‌های باز، چک‌لیست‌های پرنشده و گزارش‌های کامل‌نشده
       summary: دریافت آمار وظایف انجام‌نشده کاربر جاری (بج‌ها و داشبورد اولیه)
       tags:
-      - users
+      - مدیریت کاربران
       security:
       - BearerAuth: []
       responses:
@@ -4662,9 +5258,12 @@ paths:
           description: ''
   /api/users/subordinates/:
     get:
-      operationId: users_subordinates_retrieve
+      operationId: users_subordinates_list
+      description: برای ادمین و مدیر مالی تمام کاربران سیستم، و برای سایر سرپرستان
+        کاربران زیردست مستقیم نمایش داده می‌شوند.
+      summary: دریافت لیست کاربران زیردست مستقیم
       tags:
-      - users
+      - مدیریت کاربران
       security:
       - BearerAuth: []
       responses:
@@ -4672,14 +5271,17 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/User'
+                type: array
+                items:
+                  $ref: '#/components/schemas/User'
           description: ''
   /api/users/supervisors/:
     get:
-      operationId: users_supervisors_retrieve
-      description: دریافت لیست تمامی کاربرانی که نقش سرپرست (SUPERVISOR) دارند
+      operationId: users_supervisors_list
+      description: دریافت لیست تمامی کاربرانی که نقش سرپرست (SUPERVISOR) فعال دارند.
+      summary: لیست سرپرستان فعال سیستم
       tags:
-      - users
+      - مدیریت کاربران
       security:
       - BearerAuth: []
       responses:
@@ -4687,24 +5289,31 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/User'
+                type: array
+                items:
+                  $ref: '#/components/schemas/User'
           description: ''
   /api/users/update-branch/:
     patch:
       operationId: users_update_branch_partial_update
+      description: بروزرسانی شعبه کاربر احراز هویت شده با یکی از شعب مجاز.
+      summary: تغییر شعبه کاربر جاری
       tags:
-      - users
+      - مدیریت کاربران
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PatchedUserRequest'
+              type: object
+              additionalProperties: {}
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/PatchedUserRequest'
+              type: object
+              additionalProperties: {}
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PatchedUserRequest'
+              type: object
+              additionalProperties: {}
       security:
       - BearerAuth: []
       responses:
@@ -4712,25 +5321,39 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/User'
+                type: object
+                additionalProperties: {}
           description: ''
   /api/waste-reports/:
     get:
       operationId: waste_reports_list
-      description: |-
-        گزارش ضایعات (جایگزین DamageRegistration)
-
-        وضعیت‌ها:
-          PENDING                → ثبت توسط سرپرست، در انتظار انباردار
-          APPROVED_BY_WAREHOUSE  → تایید انباردار، در انتظار مدیریت
-          REJECTED_BY_WAREHOUSE  → رد توسط انباردار
-          CLOSED                 → تعیین تکلیف توسط ادمین
-
-        اکشن‌ها:
-          POST /waste-reports/{id}/warehouse-review/ — بررسی انباردار
-          POST /waste-reports/{id}/admin-decision/   — دستور مدیریت
+      summary: لیست گزارش‌های ضایعات و اقلام اسقاطی
+      parameters:
+      - in: query
+        name: branch
+        schema:
+          type: string
+        description: شعبه مورد نظر
+      - in: query
+        name: from_date
+        schema:
+          type: string
+          format: date
+        description: از تاریخ ثبت ضایعات (YYYY-MM-DD)
+      - in: query
+        name: status
+        schema:
+          type: string
+        description: 'فیلتر وضعیت: PENDING, APPROVED_BY_WAREHOUSE, REJECTED_BY_WAREHOUSE,
+          CLOSED'
+      - in: query
+        name: to_date
+        schema:
+          type: string
+          format: date
+        description: تا تاریخ ثبت ضایعات (YYYY-MM-DD)
       tags:
-      - waste-reports
+      - خسارت و ضایعات
       security:
       - BearerAuth: []
       responses:
@@ -4744,20 +5367,9 @@ paths:
           description: ''
     post:
       operationId: waste_reports_create
-      description: |-
-        گزارش ضایعات (جایگزین DamageRegistration)
-
-        وضعیت‌ها:
-          PENDING                → ثبت توسط سرپرست، در انتظار انباردار
-          APPROVED_BY_WAREHOUSE  → تایید انباردار، در انتظار مدیریت
-          REJECTED_BY_WAREHOUSE  → رد توسط انباردار
-          CLOSED                 → تعیین تکلیف توسط ادمین
-
-        اکشن‌ها:
-          POST /waste-reports/{id}/warehouse-review/ — بررسی انباردار
-          POST /waste-reports/{id}/admin-decision/   — دستور مدیریت
+      summary: ثبت گزارش ضایعات جدید توسط سرپرست
       tags:
-      - waste-reports
+      - خسارت و ضایعات
       requestBody:
         content:
           application/json:
@@ -4782,26 +5394,17 @@ paths:
   /api/waste-reports/{id}/:
     get:
       operationId: waste_reports_retrieve
-      description: |-
-        گزارش ضایعات (جایگزین DamageRegistration)
-
-        وضعیت‌ها:
-          PENDING                → ثبت توسط سرپرست، در انتظار انباردار
-          APPROVED_BY_WAREHOUSE  → تایید انباردار، در انتظار مدیریت
-          REJECTED_BY_WAREHOUSE  → رد توسط انباردار
-          CLOSED                 → تعیین تکلیف توسط ادمین
-
-        اکشن‌ها:
-          POST /waste-reports/{id}/warehouse-review/ — بررسی انباردار
-          POST /waste-reports/{id}/admin-decision/   — دستور مدیریت
+      summary: مشاهده جزئیات کامل گزارش ضایعات و اقلام آن
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این waste report را شناسایی میکند.
         required: true
       tags:
-      - waste-reports
+      - خسارت و ضایعات
       security:
       - BearerAuth: []
       responses:
@@ -4813,26 +5416,17 @@ paths:
           description: ''
     put:
       operationId: waste_reports_update
-      description: |-
-        گزارش ضایعات (جایگزین DamageRegistration)
-
-        وضعیت‌ها:
-          PENDING                → ثبت توسط سرپرست، در انتظار انباردار
-          APPROVED_BY_WAREHOUSE  → تایید انباردار، در انتظار مدیریت
-          REJECTED_BY_WAREHOUSE  → رد توسط انباردار
-          CLOSED                 → تعیین تکلیف توسط ادمین
-
-        اکشن‌ها:
-          POST /waste-reports/{id}/warehouse-review/ — بررسی انباردار
-          POST /waste-reports/{id}/admin-decision/   — دستور مدیریت
+      summary: ویرایش گزارش ضایعات
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این waste report را شناسایی میکند.
         required: true
       tags:
-      - waste-reports
+      - خسارت و ضایعات
       requestBody:
         content:
           application/json:
@@ -4856,26 +5450,17 @@ paths:
           description: ''
     patch:
       operationId: waste_reports_partial_update
-      description: |-
-        گزارش ضایعات (جایگزین DamageRegistration)
-
-        وضعیت‌ها:
-          PENDING                → ثبت توسط سرپرست، در انتظار انباردار
-          APPROVED_BY_WAREHOUSE  → تایید انباردار، در انتظار مدیریت
-          REJECTED_BY_WAREHOUSE  → رد توسط انباردار
-          CLOSED                 → تعیین تکلیف توسط ادمین
-
-        اکشن‌ها:
-          POST /waste-reports/{id}/warehouse-review/ — بررسی انباردار
-          POST /waste-reports/{id}/admin-decision/   — دستور مدیریت
+      summary: ویرایش جزئی گزارش ضایعات
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این waste report را شناسایی میکند.
         required: true
       tags:
-      - waste-reports
+      - خسارت و ضایعات
       requestBody:
         content:
           application/json:
@@ -4898,26 +5483,17 @@ paths:
           description: ''
     delete:
       operationId: waste_reports_destroy
-      description: |-
-        گزارش ضایعات (جایگزین DamageRegistration)
-
-        وضعیت‌ها:
-          PENDING                → ثبت توسط سرپرست، در انتظار انباردار
-          APPROVED_BY_WAREHOUSE  → تایید انباردار، در انتظار مدیریت
-          REJECTED_BY_WAREHOUSE  → رد توسط انباردار
-          CLOSED                 → تعیین تکلیف توسط ادمین
-
-        اکشن‌ها:
-          POST /waste-reports/{id}/warehouse-review/ — بررسی انباردار
-          POST /waste-reports/{id}/admin-decision/   — دستور مدیریت
+      summary: حذف گزارش ضایعات
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این waste report را شناسایی میکند.
         required: true
       tags:
-      - waste-reports
+      - خسارت و ضایعات
       security:
       - BearerAuth: []
       responses:
@@ -4926,30 +5502,28 @@ paths:
   /api/waste-reports/{id}/admin-decision/:
     post:
       operationId: waste_reports_admin_decision_create
-      description: |-
-        تعیین تکلیف توسط مدیریت (ادمین)
-
-        body:
-          instruction : دستور/توضیحات مدیریت (اجباری)
+      summary: دستور و تعیین تکلیف نهایی ضایعات توسط مدیریت
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این waste report را شناسایی میکند.
         required: true
       tags:
-      - waste-reports
+      - خسارت و ضایعات
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/WasteReportRequest'
+              $ref: '#/components/schemas/WasteDecisionRequestRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/WasteReportRequest'
+              $ref: '#/components/schemas/WasteDecisionRequestRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/WasteReportRequest'
+              $ref: '#/components/schemas/WasteDecisionRequestRequest'
         required: true
       security:
       - BearerAuth: []
@@ -4958,36 +5532,34 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/WasteReport'
+                type: object
+                additionalProperties: {}
           description: ''
   /api/waste-reports/{id}/warehouse-review/:
     post:
       operationId: waste_reports_warehouse_review_create
-      description: |-
-        بررسی انباردار: تایید یا رد گزارش ضایعات
-
-        body:
-          action  : 'approve' | 'reject'
-          comment : توضیحات (اجباری برای رد، اختیاری برای تایید)
+      summary: بررسی، تایید یا رد گزارش ضایعات توسط انباردار
       parameters:
       - in: path
         name: id
         schema:
           type: string
+          format: uuid
+        description: یک رشته UUID که این waste report را شناسایی میکند.
         required: true
       tags:
-      - waste-reports
+      - خسارت و ضایعات
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/WasteReportRequest'
+              $ref: '#/components/schemas/WasteReviewRequestRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/WasteReportRequest'
+              $ref: '#/components/schemas/WasteReviewRequestRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/WasteReportRequest'
+              $ref: '#/components/schemas/WasteReviewRequestRequest'
         required: true
       security:
       - BearerAuth: []
@@ -4996,10 +5568,19 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/WasteReport'
+                type: object
+                additionalProperties: {}
           description: ''
 components:
   schemas:
+    ActionEnum:
+      enum:
+      - approve
+      - reject
+      type: string
+      description: |-
+        * `approve` - approve
+        * `reject` - reject
     ActionTypeEnum:
       enum:
       - REFUND
@@ -5010,6 +5591,18 @@ components:
         * `REFUND` - فقط برگشت پول
         * `EXCHANGE` - فقط تعویض کالا
         * `BOTH` - هم برگشت پول هم تعویض کالا
+    AdvancePayRequestRequest:
+      type: object
+      properties:
+        payment_date:
+          type: string
+          format: date
+          description: تاریخ انجام واریز مساعده
+        note:
+          type: string
+          description: توضیحات مدیر مالی
+      required:
+      - payment_date
     AdvanceRequest:
       type: object
       properties:
@@ -5121,6 +5714,136 @@ components:
       - requester
       - requester_name
       - status
+      - superior_note
+      - superior_reviewer
+      - superior_reviewer_name
+      - target_superior
+      - target_superior_name
+      - updated_at
+    AdvanceRequestInbox:
+      type: object
+      description: |-
+        سریالایزر کارتابل بالادستی و لیست ادمین.
+        شامل جزئیات کامل‌تری نسبت به AdvanceRequestListSerializer است.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        requester:
+          type: string
+          format: uuid
+          readOnly: true
+          title: درخواست‌کننده
+        requester_name:
+          type: string
+          readOnly: true
+        requester_username:
+          type: string
+          readOnly: true
+        target_superior:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+          title: بالادستی انتخاب‌شده
+        target_superior_name:
+          type: string
+          readOnly: true
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+          readOnly: true
+          title: مبلغ درخواستی
+        description:
+          type: string
+          readOnly: true
+          title: توضیحات کاربر
+        status:
+          allOf:
+          - $ref: '#/components/schemas/AdvanceRequestStatusEnum'
+          readOnly: true
+          title: وضعیت
+        status_display:
+          type: string
+          readOnly: true
+        superior_reviewer:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        superior_reviewer_name:
+          type: string
+          readOnly: true
+        superior_note:
+          type: string
+          readOnly: true
+          nullable: true
+          title: توضیحات بالادستی
+        admin_reviewer:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        admin_reviewer_name:
+          type: string
+          readOnly: true
+        admin_note:
+          type: string
+          readOnly: true
+          nullable: true
+          title: توضیحات ادمین
+        finance_reviewer:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        finance_reviewer_name:
+          type: string
+          readOnly: true
+        payment_date:
+          type: string
+          format: date
+          readOnly: true
+          nullable: true
+          title: تاریخ پرداخت
+        finance_note:
+          type: string
+          readOnly: true
+          nullable: true
+          title: توضیحات مدیر مالی
+        logs:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdvanceRequestLog'
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - admin_note
+      - admin_reviewer
+      - admin_reviewer_name
+      - amount
+      - created_at
+      - description
+      - finance_note
+      - finance_reviewer
+      - finance_reviewer_name
+      - id
+      - logs
+      - payment_date
+      - requester
+      - requester_name
+      - requester_username
+      - status
+      - status_display
       - superior_note
       - superior_reviewer
       - superior_reviewer_name
@@ -5242,6 +5965,72 @@ components:
         * `REJECTED_BY_ADMIN` - رد شده توسط ادمین
         * `PENDING_FINANCE` - در انتظار پرداخت (مدیر مالی)
         * `PAID` - پرداخت شده
+    AdvanceReviewRequestRequest:
+      type: object
+      properties:
+        action:
+          allOf:
+          - $ref: '#/components/schemas/ActionEnum'
+          description: |-
+            تایید یا رد درخواست مساعده
+
+            * `approve` - approve
+            * `reject` - reject
+        note:
+          type: string
+          description: توضیحات و علت (اجباری در صورت رد)
+      required:
+      - action
+    AuthLoginRequestRequest:
+      type: object
+      properties:
+        username:
+          type: string
+          minLength: 1
+          description: نام کاربری یا شماره موبایل
+        password:
+          type: string
+          writeOnly: true
+          minLength: 1
+          description: کلمه عبور کاربر
+      required:
+      - password
+      - username
+    AuthLoginResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+          description: توکن دسترسی بدون‌حالت (Stateless JWT)
+        roles:
+          type: array
+          items:
+            type: string
+          description: لیست کدهای نقش کاربر (مانند ADMIN, CASHIER)
+        branch:
+          type: string
+          nullable: true
+          description: شعبه تخصیص‌یافته به کاربر
+        id:
+          type: string
+          description: شناسه یکتای UUID کاربر
+        first_name:
+          type: string
+          description: نام کوچک
+        last_name:
+          type: string
+          description: نام خانوادگی
+        is_profile_completed:
+          type: boolean
+          description: آیا مشخصات پروفایل تکمیل شده است؟
+      required:
+      - access_token
+      - branch
+      - first_name
+      - id
+      - is_profile_completed
+      - last_name
+      - roles
     BlankEnum:
       enum:
       - ''
@@ -5257,6 +6046,18 @@ components:
         * `شعبه مدرس` - شعبه مدرس
         * `شعبه سپیده` - شعبه سپیده
         * `شعبه کاجستان` - شعبه کاجستان
+    BranchItem:
+      type: object
+      properties:
+        value:
+          type: string
+          description: کد لاتین یا کلید شناسه شعبه
+        label:
+          type: string
+          description: عنوان فارسی و نام رسمی شعبه
+      required:
+      - label
+      - value
     BranchTransfer:
       type: object
       description: سریالایزر کامل برای ایجاد/ویرایش/جزئیات انتقال
@@ -5434,6 +6235,21 @@ components:
       - source_cashier
       - source_cashier_name
       - transfer_date
+    BranchTransferNoteRequest:
+      type: object
+      properties:
+        note:
+          type: string
+          description: یادداشت و توضیحات سرپرست
+    BranchTransferRejectRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          description: علت رد درخواست انتقال
+      required:
+      - reason
     BranchTransferRequest:
       type: object
       description: سریالایزر کامل برای ایجاد/ویرایش/جزئیات انتقال
@@ -5846,6 +6662,7 @@ components:
           nullable: true
         assigned_to_name:
           type: string
+          nullable: true
           readOnly: true
         created_by:
           type: string
@@ -7489,7 +8306,7 @@ components:
           readOnly: true
         status:
           allOf:
-          - $ref: '#/components/schemas/StatusF2bEnum'
+          - $ref: '#/components/schemas/LiquidityExpenseStatusEnum'
           readOnly: true
         status_display:
           type: string
@@ -7614,7 +8431,7 @@ components:
           readOnly: true
         status:
           allOf:
-          - $ref: '#/components/schemas/StatusF2bEnum'
+          - $ref: '#/components/schemas/LiquidityExpenseStatusEnum'
           readOnly: true
         status_display:
           type: string
@@ -7779,6 +8596,22 @@ components:
       - amount
       - due_date
       - title
+    LiquidityExpenseStatusEnum:
+      enum:
+      - EXCELLENT
+      - NORMAL
+      - WARNING
+      - CRITICAL
+      - OVERDUE
+      - PAID
+      type: string
+      description: |-
+        * `EXCELLENT` - عالی
+        * `NORMAL` - عادی
+        * `WARNING` - هشدار
+        * `CRITICAL` - بحرانی
+        * `OVERDUE` - معوقه
+        * `PAID` - پرداخت شده
     LiquidityExpenseSummaryResponse:
       type: object
       properties:
@@ -8942,6 +9775,21 @@ components:
       - report_type
       - subordinate
       - title
+    ReportDuplicateRequestRequest:
+      type: object
+      properties:
+        subordinate:
+          type: string
+          format: uuid
+          description: شناسه کاربر زیردستی (اختیاری)
+        deadline:
+          type: string
+          format: date
+          description: مهلت ارسال گزارش جدید (اختیاری)
+        title:
+          type: string
+          minLength: 1
+          description: عنوان جدید گزارش (اختیاری)
     ReportImage:
       type: object
       properties:
@@ -9146,6 +9994,20 @@ components:
       - item_name
       - quantity
       - unit_price
+    ReturnRefundFinalizeRequest:
+      type: object
+      properties:
+        refund_date:
+          type: string
+          format: date
+          description: تاریخ واریز وجه عودتی
+        refund_method:
+          type: string
+          minLength: 1
+          description: روش واریز (کارت، پوز، شبا و ...)
+      required:
+      - refund_date
+      - refund_method
     ReturnRequest:
       type: object
       properties:
@@ -9787,22 +10649,6 @@ components:
       required:
       - branch
       - name
-    StatusF2bEnum:
-      enum:
-      - EXCELLENT
-      - NORMAL
-      - WARNING
-      - CRITICAL
-      - OVERDUE
-      - PAID
-      type: string
-      description: |-
-        * `EXCELLENT` - EXCELLENT
-        * `NORMAL` - NORMAL
-        * `WARNING` - WARNING
-        * `CRITICAL` - CRITICAL
-        * `OVERDUE` - OVERDUE
-        * `PAID` - PAID
     Task:
       type: object
       properties:
@@ -10012,6 +10858,19 @@ components:
       - roles
       - superiors_info
       - username
+    UserDeleteResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          description: پیام وضعیت عملیات حذف
+        soft_deleted:
+          type: boolean
+          description: 'true: کاربر دارای سوابق گذشته بوده و به صورت نرم غیرفعال و
+            آرشیو شد | false: کاربر کاملاً از دیتابیس پاک شد'
+      required:
+      - message
+      - soft_deleted
     UserOnlineResponse:
       type: object
       description: پاسخ ثبت وضعیت آنلاین کاربر همراه با شمارنده وظایف باز
@@ -10120,6 +10979,28 @@ components:
           writeOnly: true
       required:
       - username
+    UserRestoreResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          description: پیام وضعیت بازیابی
+        user:
+          allOf:
+          - $ref: '#/components/schemas/User'
+          description: اطلاعات کاربر پس از بازیابی موفق
+      required:
+      - message
+      - user
+    WasteDecisionRequestRequest:
+      type: object
+      properties:
+        instruction:
+          type: string
+          minLength: 1
+          description: دستور و تعیین تکلیف نهایی مدیریت
+      required:
+      - instruction
     WasteItem:
       type: object
       properties:
@@ -10358,20 +11239,73 @@ components:
         * `APPROVED_BY_WAREHOUSE` - تایید انباردار — در انتظار مدیریت
         * `REJECTED_BY_WAREHOUSE` - رد شده توسط انباردار
         * `CLOSED` - تعیین تکلیف توسط مدیریت
+    WasteReviewRequestRequest:
+      type: object
+      properties:
+        action:
+          allOf:
+          - $ref: '#/components/schemas/ActionEnum'
+          description: |-
+            تایید یا رد گزارش ضایعات
+
+            * `approve` - approve
+            * `reject` - reject
+        comment:
+          type: string
+          description: توضیحات انباردار (اجباری در صورت رد)
+      required:
+      - action
   securitySchemes:
     BearerAuth:
       type: http
       scheme: bearer
 tags:
-- name: مدیریت نقدینگی - هزینه‌ها
-  description: ثبت، لیست، فیلتر، پرداخت‌های مرحله‌ای و تسویه نهایی هزینه‌های تعهدشده
+- name: احراز هویت و دسترسی
+  description: ورود به سیستم و دریافت توکن دسترسی بدون‌حالت (Stateless JWT)
+- name: مدیریت کاربران
+  description: مدیریت کاربران، نقش‌ها، حذف هوشمند (کامل/نرم)، بازیابی حساب، و ساختار
+    سلسله‌مراتبی
+- name: شعب
+  description: لیست شعب معتبر و تغییر شعبه فعال کاربران
 - name: مدیریت نقدینگی - کارت‌ها
-  description: کارت هزینه‌ها، کارت تنخواه و کارت سود (برداشت، واریز و گردش مالی)
+  description: مدیریت ۹ کارت اختصاصی (تامین‌کننده، حقوق، اجاره، اقساط، سایر هزینه‌ها،
+    مدیریت، پس‌انداز، خیریه، تجهیزات)، موجودی و تراکنش‌ها
+- name: مدیریت نقدینگی - هزینه‌ها
+  description: ثبت، لیست، فیلترهای هوشمند، تسویه نهایی با کسر خودکار از کارت، و پرداخت‌های
+    مرحله‌ای
 - name: مدیریت نقدینگی - درآمد روزانه
   description: تنظیم و دریافت تک‌مقدار درآمد روزانه کسب‌وکار جهت فرمول‌های محاسباتی
 - name: مدیریت نقدینگی - شارژ روزانه
   description: ثبت و مشاهده لیست مبالغ شارژ شده روزانه نقدینگی به همراه تاریخ و ساعت
-- name: پورسانت و فروشندگان
-  description: تعریف مدل‌های پورسانت، ثبت فروش‌های روزانه و استعلام وضعیت ماهانه
+- name: فروش و فاکتورها
+  description: ثبت و مدیریت فاکتورهای فروش، تسویه‌های نقدی، پوز، چکی و اتصال به بیعانه
+- name: فروشندگان و پورسانت
+  description: تعریف مدل‌های پورسانت، ثبت فروش‌های روزانه و استعلام جامع ماهانه فروشنده
+- name: مشتریان
+  description: مدیریت بانک اطلاعاتی مشتریان، سوابق خرید و جستجو
+- name: هزینه‌های عمومی
+  description: ثبت و مدیریت هزینه‌های عمومی فروشگاه، چک‌های صادره و تنخواه
+- name: چک‌لیست‌ها و وظایف
+  description: مدیریت و نظارت بر انجام وظایف و چک‌لیست‌های روزانه، هفتگی و ماهانه
+    پرسنل
+- name: ماموریت‌ها
+  description: تعریف، تخصیص و پیگیری وضعیت ماموریت‌های اداری و عملیاتی پرسنل
+- name: گزارش‌های دوره‌ای و مهلت‌دار
+  description: تعریف الگوهای گزارش‌دهی و ارسال گزارش‌های متنی و تصویری کارکنان
+- name: مساعده کارکنان
+  description: فرآیند ثبت و تایید چندمرحله‌ای (سرپرست، ادمین، مدیر مالی) درخواست‌های
+    مساعده
+- name: خسارت و ضایعات
+  description: ثبت خسارت‌ها و گزارش ضایعات اقلام و تاییدیه انباردار
+- name: مطالبات و پیگیری‌ها
+  description: ثبت مطالبات معوق، ثبت پیگیری‌ها و تعیین وضعیت تسویه
+- name: برگشتی کالا و وجه
+  description: درخواست‌های مرجوعی کالا، عودت وجه یا تعویض جنس
+- name: حواله و انتقال بین شعب
+  description: انتقال کالا بین شعب فروشگاه با تایید مبدا و مقصد
+- name: سفارش‌های بیعانه
+  description: مدیریت سفارش‌های همراه با بیعانه و تسویه در فاکتور نهایی
+- name: انبار و خروج کالا
+  description: ثبت و پیگیری خروج کالاهای امانی، نمونه و اداری از فروشگاه
 - name: مدیریت فایل‌ها و رسانه
-  description: سرویس آپلود تصاویر، اسناد و مدارک
+  description: سرویس آپلود تصاویر، اسناد، فاکتورها و مدارک با فرمت‌های مجاز

@@ -684,6 +684,7 @@ class ClaimSerializer(serializers.ModelSerializer):
     created_by_name  = serializers.CharField(source='created_by.username', read_only=True)
     assigned_to_name = serializers.SerializerMethodField()
 
+    @extend_schema_field(serializers.CharField(allow_null=True))
     def get_assigned_to_name(self, obj):
         return obj.assigned_to.username if obj.assigned_to else None
 
@@ -1859,7 +1860,7 @@ class LiquidityExpenseSerializer(serializers.ModelSerializer):
             mutable_data['title'] = mutable_data['name']
         return super().to_internal_value(mutable_data)
 
-    @extend_schema_field(serializers.ChoiceField(choices=['EXCELLENT', 'NORMAL', 'WARNING', 'CRITICAL', 'OVERDUE', 'PAID']))
+    @extend_schema_field(serializers.ChoiceField(choices=LiquidityExpense.EXPENSE_STATUS_CHOICES))
     def get_status(self, obj):
         daily_revenue = self.context.get('daily_revenue')
         return obj.calculate_status(daily_revenue=daily_revenue)
@@ -1948,7 +1949,7 @@ class LiquidityExpenseListSerializer(serializers.ModelSerializer):
             'payments_count', 'created_at'
         ]
 
-    @extend_schema_field(serializers.ChoiceField(choices=['EXCELLENT', 'NORMAL', 'WARNING', 'CRITICAL', 'OVERDUE', 'PAID']))
+    @extend_schema_field(serializers.ChoiceField(choices=LiquidityExpense.EXPENSE_STATUS_CHOICES))
     def get_status(self, obj):
         daily_revenue = self.context.get('daily_revenue')
         return obj.calculate_status(daily_revenue=daily_revenue)
@@ -2181,6 +2182,80 @@ class LiquidityDailyChargeCreateSerializer(serializers.ModelSerializer):
         if value <= Decimal('0'):
             raise serializers.ValidationError("مبلغ شارژ روزانه باید بزرگتر از صفر باشد.")
         return value
+
+
+# ── Swagger / OpenAPI Documentation Helper Serializers ────────────────────────
+
+class AuthLoginRequestSerializer(serializers.Serializer):
+    username = serializers.CharField(required=True, help_text="نام کاربری یا شماره موبایل")
+    password = serializers.CharField(required=True, write_only=True, help_text="کلمه عبور کاربر")
+
+
+class AuthLoginResponseSerializer(serializers.Serializer):
+    access_token = serializers.CharField(help_text="توکن دسترسی بدون‌حالت (Stateless JWT)")
+    roles = serializers.ListField(child=serializers.CharField(), help_text="لیست کدهای نقش کاربر (مانند ADMIN, CASHIER)")
+    branch = serializers.CharField(allow_null=True, help_text="شعبه تخصیص‌یافته به کاربر")
+    id = serializers.CharField(help_text="شناسه یکتای UUID کاربر")
+    first_name = serializers.CharField(allow_blank=True, help_text="نام کوچک")
+    last_name = serializers.CharField(allow_blank=True, help_text="نام خانوادگی")
+    is_profile_completed = serializers.BooleanField(help_text="آیا مشخصات پروفایل تکمیل شده است؟")
+
+
+class BranchItemSerializer(serializers.Serializer):
+    value = serializers.CharField(help_text="کد لاتین یا کلید شناسه شعبه")
+    label = serializers.CharField(help_text="عنوان فارسی و نام رسمی شعبه")
+
+
+class UserDeleteResponseSerializer(serializers.Serializer):
+    message = serializers.CharField(help_text="پیام وضعیت عملیات حذف")
+    soft_deleted = serializers.BooleanField(
+        help_text="true: کاربر دارای سوابق گذشته بوده و به صورت نرم غیرفعال و آرشیو شد | false: کاربر کاملاً از دیتابیس پاک شد"
+    )
+
+
+class UserRestoreResponseSerializer(serializers.Serializer):
+    message = serializers.CharField(help_text="پیام وضعیت بازیابی")
+    user = UserSerializer(help_text="اطلاعات کاربر پس از بازیابی موفق")
+
+
+class BranchTransferNoteSerializer(serializers.Serializer):
+    note = serializers.CharField(required=False, allow_blank=True, help_text="یادداشت و توضیحات سرپرست")
+
+
+class BranchTransferRejectSerializer(serializers.Serializer):
+    reason = serializers.CharField(required=True, help_text="علت رد درخواست انتقال")
+
+
+class ReturnRefundFinalizeSerializer(serializers.Serializer):
+    refund_date = serializers.DateField(required=True, help_text="تاریخ واریز وجه عودتی")
+    refund_method = serializers.CharField(required=True, help_text="روش واریز (کارت، پوز، شبا و ...)")
+
+
+class ReportDuplicateRequestSerializer(serializers.Serializer):
+    subordinate = serializers.UUIDField(required=False, help_text="شناسه کاربر زیردستی (اختیاری)")
+    deadline = serializers.DateField(required=False, help_text="مهلت ارسال گزارش جدید (اختیاری)")
+    title = serializers.CharField(required=False, help_text="عنوان جدید گزارش (اختیاری)")
+
+
+class WasteReviewRequestSerializer(serializers.Serializer):
+    action = serializers.ChoiceField(choices=['approve', 'reject'], help_text="تایید یا رد گزارش ضایعات")
+    comment = serializers.CharField(required=False, allow_blank=True, help_text="توضیحات انباردار (اجباری در صورت رد)")
+
+
+class WasteDecisionRequestSerializer(serializers.Serializer):
+    instruction = serializers.CharField(required=True, help_text="دستور و تعیین تکلیف نهایی مدیریت")
+
+
+class AdvanceReviewRequestSerializer(serializers.Serializer):
+    action = serializers.ChoiceField(choices=['approve', 'reject'], help_text="تایید یا رد درخواست مساعده")
+    note = serializers.CharField(required=False, allow_blank=True, help_text="توضیحات و علت (اجباری در صورت رد)")
+
+
+class AdvancePayRequestSerializer(serializers.Serializer):
+    payment_date = serializers.DateField(required=True, help_text="تاریخ انجام واریز مساعده")
+    note = serializers.CharField(required=False, allow_blank=True, help_text="توضیحات مدیر مالی")
+
+
 
 
 

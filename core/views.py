@@ -57,6 +57,12 @@ from core.serializers import (
     LiquiditySimpleMessageResponseSerializer,
     UserPendingCountsResponseSerializer, UserOnlineResponseSerializer,
     LiquidityDailyChargeSerializer, LiquidityDailyChargeCreateSerializer,
+    AuthLoginRequestSerializer, AuthLoginResponseSerializer, BranchItemSerializer,
+    UserDeleteResponseSerializer, UserRestoreResponseSerializer,
+    BranchTransferNoteSerializer, BranchTransferRejectSerializer,
+    ReturnRefundFinalizeSerializer, ReportDuplicateRequestSerializer,
+    WasteReviewRequestSerializer, WasteDecisionRequestSerializer,
+    AdvanceReviewRequestSerializer, AdvancePayRequestSerializer,
 )
 from core.pagination import OptionalPageNumberPagination
 from drf_spectacular.utils import (
@@ -167,6 +173,18 @@ class FileUploadView(APIView):
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
+@extend_schema(
+    tags=['احراز هویت و دسترسی'],
+    summary="ورود به سیستم و دریافت توکن JWT",
+    description="ورود با نام کاربری یا شماره موبایل و رمز عبور. در صورت صحت اطلاعات، توکن دسترسی Stateless JWT و مشخصات نقش و کاربر بازگردانده می‌شود.",
+    request=AuthLoginRequestSerializer,
+    responses={
+        200: AuthLoginResponseSerializer,
+        400: OpenApiTypes.OBJECT,
+        401: OpenApiTypes.OBJECT,
+        403: OpenApiTypes.OBJECT,
+    }
+)
 class AuthTokenView(APIView):
     permission_classes = [permissions.AllowAny]
 
@@ -210,6 +228,12 @@ class AuthTokenView(APIView):
 
 # ── Branches ──────────────────────────────────────────────────────────────────
 
+@extend_schema(
+    tags=['شعب'],
+    summary="لیست شعب تعریف‌شده در سیستم",
+    description="دریافت لیست تمام شعب معتبر و ثبت‌شده در سیستم جهت استفاده در فیلترها و فرم‌های انتخاب شعبه.",
+    responses={200: BranchItemSerializer(many=True)}
+)
 class BranchListView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -220,7 +244,44 @@ class BranchListView(APIView):
 
 # ── Users ─────────────────────────────────────────────────────────────────────
 
+@extend_schema_view(
+    list=extend_schema(
+        tags=['مدیریت کاربران'],
+        summary="لیست کاربران سامانه با فیلتر و جستجو",
+        description="دریافت لیست تمام کاربران فعال و غیرحذف‌شده سیستم. برای مشاهده کاربران حذف‌شده پارامتر include_deleted=true را ارسال نمایید.",
+        parameters=[
+            OpenApiParameter('include_deleted', OpenApiTypes.BOOL, OpenApiParameter.QUERY, description="نمایش کاربران حذف‌شده در لیست (پیش‌فرض: false)"),
+            OpenApiParameter('search', OpenApiTypes.STR, OpenApiParameter.QUERY, description="جستجو در نام، نام خانوادگی و نام کاربری"),
+            OpenApiParameter('role', OpenApiTypes.STR, OpenApiParameter.QUERY, description="فیلتر بر اساس کد نقش (مانند ADMIN, CASHIER, SUPERVISOR)"),
+            OpenApiParameter('branch', OpenApiTypes.STR, OpenApiParameter.QUERY, description="فیلتر بر اساس نام شعبه"),
+            OpenApiParameter('is_active', OpenApiTypes.BOOL, OpenApiParameter.QUERY, description="فیلتر بر اساس وضعیت فعال/غیرفعال بودن حساب"),
+        ]
+    ),
+    retrieve=extend_schema(
+        tags=['مدیریت کاربران'],
+        summary="دریافت مشخصات کامل یک کاربر",
+    ),
+    create=extend_schema(
+        tags=['مدیریت کاربران'],
+        summary="ثبت کاربر جدید در سامانه",
+    ),
+    update=extend_schema(
+        tags=['مدیریت کاربران'],
+        summary="ویرایش کامل اطلاعات کاربر",
+    ),
+    partial_update=extend_schema(
+        tags=['مدیریت کاربران'],
+        summary="ویرایش جزئی اطلاعات کاربر",
+    ),
+    destroy=extend_schema(
+        tags=['مدیریت کاربران'],
+        summary="حذف هوشمند کاربر (پاکسازی کامل یا آرشیو نرم)",
+        description="اگر کاربر سابقه وابسته نداشته باشد کلاً حذف می‌شود؛ در صورت داشتن سوابق فاکتور و حسابداری، حساب کاربر نرم حذف شده و نام کاربری‌اش برای استفاده مجدد آزاد می‌گردد.",
+        responses={200: UserDeleteResponseSerializer}
+    ),
+)
 class UserViewSet(viewsets.ModelViewSet):
+    queryset = CustomUser.objects.all()
     serializer_class = UserSerializer
 
     def get_permissions(self):
@@ -235,6 +296,9 @@ class UserViewSet(viewsets.ModelViewSet):
         return [IsAdminUser()]
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return CustomUser.objects.none()
+
         qs = CustomUser.objects.all().prefetch_related('roles', 'superiors').order_by('-date_joined')
 
         role_param      = self.request.query_params.get('role')
@@ -321,8 +385,10 @@ class UserViewSet(viewsets.ModelViewSet):
             )
 
     @extend_schema(
+        tags=['مدیریت کاربران'],
         summary="بازیابی کاربر حذف شده",
-        description="بازیابی کاربری که قبلاً به صورت نرم حذف شده است و بازگرداندن نام کاربری اصلی در صورت آزاد بودن آن."
+        description="بازیابی کاربری که قبلاً به صورت نرم حذف شده است و بازگرداندن نام کاربری اصلی در صورت آزاد بودن آن.",
+        responses={200: UserRestoreResponseSerializer, 400: OpenApiTypes.OBJECT}
     )
     @action(detail=True, methods=['post'], url_path='restore', permission_classes=[IsAdminUser])
     def restore(self, request, pk=None):
@@ -355,6 +421,12 @@ class UserViewSet(viewsets.ModelViewSet):
             status=status.HTTP_200_OK
         )
 
+    @extend_schema(
+        tags=['مدیریت کاربران'],
+        summary="دریافت لیست کاربران زیردست مستقیم",
+        description="برای ادمین و مدیر مالی تمام کاربران سیستم، و برای سایر سرپرستان کاربران زیردست مستقیم نمایش داده می‌شوند.",
+        responses={200: UserSerializer(many=True)}
+    )
     @action(detail=False, methods=['get'], url_path='subordinates')
     def subordinates(self, request):
         current_user = request.user
@@ -369,7 +441,13 @@ class UserViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(subordinate_users, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
-
+    @extend_schema(
+        tags=['مدیریت کاربران'],
+        summary="تغییر شعبه کاربر جاری",
+        description="بروزرسانی شعبه کاربر احراز هویت شده با یکی از شعب مجاز.",
+        request=OpenApiTypes.OBJECT,
+        responses={200: OpenApiTypes.OBJECT}
+    )
     @action(detail=False, methods=['patch'], url_path='update-branch')
     def update_branch(self, request):
         user       = request.user
@@ -389,6 +467,13 @@ class UserViewSet(viewsets.ModelViewSet):
             status=status.HTTP_200_OK
         )
 
+    @extend_schema(
+        tags=['مدیریت کاربران'],
+        summary="تکمیل پروفایل (نام و نام خانوادگی)",
+        description="تکمیل مشخصات اولیه پروفایل شامل نام و نام خانوادگی کاربر.",
+        request=OpenApiTypes.OBJECT,
+        responses={200: OpenApiTypes.OBJECT}
+    )
     @action(detail=False, methods=['patch'], url_path='complete-profile')
     def complete_profile(self, request):
         user       = request.user
@@ -414,6 +499,13 @@ class UserViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_200_OK
         )
+
+    @extend_schema(
+        tags=['مدیریت کاربران'],
+        summary="لیست سرپرستان فعال سیستم",
+        description="دریافت لیست تمامی کاربرانی که نقش سرپرست (SUPERVISOR) فعال دارند.",
+        responses={200: UserSerializer(many=True)}
+    )
     @action(detail=False, methods=['get'], url_path='supervisors')
     def supervisors(self, request):
         """
@@ -423,6 +515,15 @@ class UserViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(supervisors, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+    @extend_schema(
+        tags=['مدیریت کاربران'],
+        summary="آمار عملکرد کاربر (چک‌لیست‌ها، ماموریت‌ها و گزارش‌ها)",
+        description="دریافت آمار عملکرد یک کاربر خاص بر اساس بازه زمانی روزانه، هفتگی یا ماهانه.",
+        parameters=[
+            OpenApiParameter('period', OpenApiTypes.STR, OpenApiParameter.QUERY, description="بازه زمانی: daily, weekly, monthly", enum=['daily', 'weekly', 'monthly'])
+        ],
+        responses={200: OpenApiTypes.OBJECT}
+    )
     @action(detail=True, methods=['get'], url_path='performance')
     def performance(self, request, pk=None):
         """
@@ -511,6 +612,19 @@ class UserViewSet(viewsets.ModelViewSet):
             }
         }, status=status.HTTP_200_OK)
 
+    @extend_schema(
+        tags=['مدیریت کاربران'],
+        summary="دریافت گزارشات یک کاربر خاص یا کاربر جاری (me)",
+        description="شامل تمام تعاریف گزارش و ارسال‌های کاربر به همراه آمار تجمیعی. برای کاربر جاری از شناسه me استفاده کنید.",
+        parameters=[
+            OpenApiParameter('from_date', OpenApiTypes.DATE, OpenApiParameter.QUERY, description="فیلتر از تاریخ"),
+            OpenApiParameter('to_date', OpenApiTypes.DATE, OpenApiParameter.QUERY, description="فیلتر تا تاریخ"),
+            OpenApiParameter('report_type', OpenApiTypes.STR, OpenApiParameter.QUERY, description="نوع گزارش: RECURRING یا DEADLINE", enum=['RECURRING', 'DEADLINE']),
+            OpenApiParameter('is_active', OpenApiTypes.BOOL, OpenApiParameter.QUERY, description="فیلتر وضعیت فعال بودن"),
+            OpenApiParameter('definition_id', OpenApiTypes.UUID, OpenApiParameter.QUERY, description="شناسه تعریف گزارش خاص"),
+        ],
+        responses={200: OpenApiTypes.OBJECT}
+    )
     @action(detail=True, methods=['get'], url_path='reports')
     def reports(self, request, pk=None):
         """
@@ -690,6 +804,7 @@ class UserViewSet(viewsets.ModelViewSet):
         }
 
     @extend_schema(
+        tags=['مدیریت کاربران'],
         summary="اعلام آنلاین شدن کاربر در اپلیکیشن همراه با دریافت آمار وظایف باز",
         description="ثبت حضور و زمان آخرین بازدید روزانه کاربر، و بازگرداندن تعداد ماموریت‌های انجام‌نشده، گزارش‌های کامل‌نشده و چک‌لیست‌های پرنشده",
         responses={200: UserOnlineResponseSerializer}
@@ -736,6 +851,7 @@ class UserViewSet(viewsets.ModelViewSet):
         )
 
     @extend_schema(
+        tags=['مدیریت کاربران'],
         summary="دریافت آمار وظایف انجام‌نشده کاربر جاری (بج‌ها و داشبورد اولیه)",
         description="تعداد ماموریت‌های باز، چک‌لیست‌های پرنشده و گزارش‌های کامل‌نشده",
         responses={200: UserPendingCountsResponseSerializer}
@@ -748,6 +864,17 @@ class UserViewSet(viewsets.ModelViewSet):
         counts = self._get_user_pending_counts(request.user)
         return Response(counts, status=status.HTTP_200_OK)
 
+    @extend_schema(
+        tags=['مدیریت کاربران'],
+        summary="وضعیت و آمار لحظه‌ای تمام کاربران و لاگ حضور و غیاب ۷ روز اخیر",
+        description="آمار جامع انجام ماموریت‌ها، چک‌لیست‌ها، گزارش‌ها و وضعیت آنلاین بودن روزانه کاربران فعال.",
+        parameters=[
+            OpenApiParameter('period', OpenApiTypes.STR, OpenApiParameter.QUERY, description="بازه زمانی آمار: daily, weekly, monthly", enum=['daily', 'weekly', 'monthly']),
+            OpenApiParameter('branch', OpenApiTypes.STR, OpenApiParameter.QUERY, description="فیلتر بر اساس نام شعبه"),
+            OpenApiParameter('role', OpenApiTypes.STR, OpenApiParameter.QUERY, description="فیلتر بر اساس کد نقش"),
+        ],
+        responses={200: OpenApiTypes.OBJECT}
+    )
     @action(detail=False, methods=['get'], url_path='all-users-status')
     def all_users_status(self, request):
         from django.db.models import Count, F
@@ -915,6 +1042,14 @@ class UserViewSet(viewsets.ModelViewSet):
 
 # ── Sellers ───────────────────────────────────────────────────────────────────
 
+@extend_schema_view(
+    list=extend_schema(tags=['فروشندگان و پورسانت'], summary="لیست فروشندگان"),
+    retrieve=extend_schema(tags=['فروشندگان و پورسانت'], summary="مشاهده جزئیات فروشنده"),
+    create=extend_schema(tags=['فروشندگان و پورسانت'], summary="ثبت فروشنده جدید"),
+    update=extend_schema(tags=['فروشندگان و پورسانت'], summary="ویرایش کامل فروشنده"),
+    partial_update=extend_schema(tags=['فروشندگان و پورسانت'], summary="ویرایش جزئی فروشنده"),
+    destroy=extend_schema(tags=['فروشندگان و پورسانت'], summary="حذف فروشنده"),
+)
 class SellerViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     queryset         = Seller.objects.all()
     serializer_class = SellerSerializer
@@ -924,6 +1059,7 @@ class SellerViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
             return [permissions.IsAuthenticated()]
         return [IsAdminUser()]
 
+    @extend_schema(tags=['فروشندگان و پورسانت'], summary="لیست سریع فروشندگان جهت انتخاب در فرم‌ها")
     @action(detail=False, methods=['get'], url_path='lookup')
     def lookup(self, request):
         sellers    = self.get_queryset()
@@ -935,6 +1071,7 @@ class SellerViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
 
 @extend_schema_view(
     list=extend_schema(
+        tags=['مشتریان'],
         summary="لیست مشتریان (پشتیبانی از صفحه‌بندی هوشمند و جستجو)",
         description="دریافت لیست مشتریان با پشتیبانی از اینفینیت اسکرول و جستجوی سروری. در صورت ارسال page صفحه‌بندی اعمال می‌شود و در غیر این صورت خروجی مانند نسخه قبل آرایه‌ای خواهد بود تا نسخه‌های قبلی اپ با مشکلی مواجه نشوند.",
         parameters=[
@@ -943,7 +1080,12 @@ class SellerViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
             OpenApiParameter('search', OpenApiTypes.STR, description="جستجو در نام و شماره تماس مشتری", required=False),
             OpenApiParameter('ordering', OpenApiTypes.STR, description="مرتب‌سازی (مثلاً name, -last_purchase_date, -total_purchase_amount)", required=False),
         ]
-    )
+    ),
+    retrieve=extend_schema(tags=['مشتریان'], summary="مشاهده جزئیات مشتری"),
+    create=extend_schema(tags=['مشتریان'], summary="ثبت مشتری جدید"),
+    update=extend_schema(tags=['مشتریان'], summary="ویرایش کامل مشتری"),
+    partial_update=extend_schema(tags=['مشتریان'], summary="ویرایش جزئی مشتری"),
+    destroy=extend_schema(tags=['مشتریان'], summary="حذف مشتری"),
 )
 class CustomerViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     queryset           = Customer.objects.all().order_by('-last_purchase_date', '-id')
@@ -958,20 +1100,42 @@ class CustomerViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
 
 # ── Sales ─────────────────────────────────────────────────────────────────────
 
+@extend_schema_view(
+    list=extend_schema(
+        tags=['فروش و فاکتورها'],
+        summary="لیست فاکتورهای فروش",
+        parameters=[
+            OpenApiParameter('branch', OpenApiTypes.STR, description="فیلتر بر اساس نام شعبه", required=False),
+            OpenApiParameter('seller', OpenApiTypes.INT, description="فیلتر بر اساس شناسه فروشنده", required=False),
+            OpenApiParameter('customer', OpenApiTypes.INT, description="فیلتر بر اساس شناسه مشتری", required=False),
+            OpenApiParameter('from_date', OpenApiTypes.DATE, description="فیلتر از تاریخ میلادی (YYYY-MM-DD)", required=False),
+            OpenApiParameter('to_date', OpenApiTypes.DATE, description="فیلتر تا تاریخ میلادی (YYYY-MM-DD)", required=False),
+        ]
+    ),
+    retrieve=extend_schema(tags=['فروش و فاکتورها'], summary="جزئیات فاکتور فروش"),
+    create=extend_schema(tags=['فروش و فاکتورها'], summary="ثبت فاکتور فروش جدید"),
+    update=extend_schema(tags=['فروش و فاکتورها'], summary="ویرایش کامل فاکتور فروش"),
+    partial_update=extend_schema(tags=['فروش و فاکتورها'], summary="ویرایش جزئی فاکتور فروش"),
+    destroy=extend_schema(tags=['فروش و فاکتورها'], summary="حذف فاکتور فروش"),
+)
 class SaleViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
+    queryset           = Sale.objects.all()
     permission_classes = [IsOwnerOrAdminOnly]
 
     def get_serializer_class(self):
         return SaleListSerializer if self.action == 'list' else SaleSerializer
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return Sale.objects.none()
+
         qs = Sale.objects.select_related(
             'seller', 'customer', 'created_by'
         ).prefetch_related('payments', 'payments__cheques', 'deposit_items')
 
         user = self.request.user
-        if not (user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in user.roles.all())):
-            qs = qs.filter(created_by=user)
+        if not (user and user.is_authenticated and (user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in user.roles.all()))):
+            qs = qs.filter(created_by=user) if (user and user.is_authenticated) else qs.none()
 
         for param, field in [
             ('branch',   'branch'),
@@ -994,19 +1158,41 @@ class SaleViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
 
 # ── Expenses ──────────────────────────────────────────────────────────────────
 
+@extend_schema_view(
+    list=extend_schema(tags=['هزینه‌های عمومی'], summary="لیست هزینه‌های عمومی فروشگاه"),
+    retrieve=extend_schema(tags=['هزینه‌های عمومی'], summary="جزئیات هزینه عمومی"),
+    create=extend_schema(tags=['هزینه‌های عمومی'], summary="ثبت هزینه عمومی جدید"),
+    update=extend_schema(tags=['هزینه‌های عمومی'], summary="ویرایش کامل هزینه عمومی"),
+    partial_update=extend_schema(tags=['هزینه‌های عمومی'], summary="ویرایش جزئی هزینه عمومی"),
+    destroy=extend_schema(tags=['هزینه‌های عمومی'], summary="حذف هزینه عمومی"),
+)
 class ExpenseViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
+    queryset           = Expense.objects.all()
     serializer_class   = ExpenseSerializer
     permission_classes = [IsOwnerOrAdminOnly]
 
     def get_queryset(self):
-        qs       = Expense.objects.select_related('created_by').prefetch_related('cheques')
-        user     = self.request.user
+        if getattr(self, 'swagger_fake_view', False):
+            return Expense.objects.none()
+
+        qs   = Expense.objects.select_related('created_by').prefetch_related('cheques')
+        user = self.request.user
+        if not (user and user.is_authenticated):
+            return Expense.objects.none()
         is_admin = user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in user.roles.all())
         return qs if is_admin else qs.filter(created_by=user)
 
 
 # ── DamageReport ──────────────────────────────────────────────────────────────
 
+@extend_schema_view(
+    list=extend_schema(tags=['خسارت و ضایعات'], summary="لیست گزارش‌های خسارت"),
+    retrieve=extend_schema(tags=['خسارت و ضایعات'], summary="جزئیات گزارش خسارت"),
+    create=extend_schema(tags=['خسارت و ضایعات'], summary="ثبت گزارش خسارت جدید"),
+    update=extend_schema(tags=['خسارت و ضایعات'], summary="ویرایش کامل گزارش خسارت"),
+    partial_update=extend_schema(tags=['خسارت و ضایعات'], summary="ویرایش جزئی گزارش خسارت"),
+    destroy=extend_schema(tags=['خسارت و ضایعات'], summary="حذف گزارش خسارت"),
+)
 class DamageReportViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     queryset           = DamageReport.objects.all()
     serializer_class   = DamageReportSerializer
@@ -1018,6 +1204,14 @@ class DamageReportViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
 
 # ── ItemExit ──────────────────────────────────────────────────────────────────
 
+@extend_schema_view(
+    list=extend_schema(tags=['انبار و خروج کالا'], summary="لیست مجوزهای خروج کالا"),
+    retrieve=extend_schema(tags=['انبار و خروج کالا'], summary="جزئیات مجوز خروج کالا"),
+    create=extend_schema(tags=['انبار و خروج کالا'], summary="ثبت مجوز خروج کالا"),
+    update=extend_schema(tags=['انبار و خروج کالا'], summary="ویرایش کامل مجوز خروج کالا"),
+    partial_update=extend_schema(tags=['انبار و خروج کالا'], summary="ویرایش جزئی مجوز خروج کالا"),
+    destroy=extend_schema(tags=['انبار و خروج کالا'], summary="حذف مجوز خروج کالا"),
+)
 class ItemExitViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     queryset           = ItemExit.objects.all()
     serializer_class   = ItemExitSerializer
@@ -1029,20 +1223,43 @@ class ItemExitViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
 
 # ── DepositOrders ─────────────────────────────────────────────────────────────
 
+@extend_schema_view(
+    list=extend_schema(
+        tags=['سفارش‌های بیعانه'],
+        summary="لیست سفارش‌های بیعانه",
+        parameters=[
+            OpenApiParameter('branch', OpenApiTypes.STR, description="فیلتر بر اساس نام شعبه", required=False),
+            OpenApiParameter('status', OpenApiTypes.STR, description="فیلتر بر اساس وضعیت سفارش", required=False),
+            OpenApiParameter('seller', OpenApiTypes.INT, description="فیلتر بر اساس شناسه فروشنده", required=False),
+            OpenApiParameter('customer', OpenApiTypes.INT, description="فیلتر بر اساس شناسه مشتری", required=False),
+            OpenApiParameter('from_date', OpenApiTypes.DATE, description="فیلتر از تاریخ میلادی (YYYY-MM-DD)", required=False),
+            OpenApiParameter('to_date', OpenApiTypes.DATE, description="فیلتر تا تاریخ میلادی (YYYY-MM-DD)", required=False),
+        ]
+    ),
+    retrieve=extend_schema(tags=['سفارش‌های بیعانه'], summary="جزئیات سفارش بیعانه"),
+    create=extend_schema(tags=['سفارش‌های بیعانه'], summary="ثبت سفارش بیعانه جدید"),
+    update=extend_schema(tags=['سفارش‌های بیعانه'], summary="ویرایش کامل سفارش بیعانه"),
+    partial_update=extend_schema(tags=['سفارش‌های بیعانه'], summary="ویرایش جزئی سفارش بیعانه"),
+    destroy=extend_schema(tags=['سفارش‌های بیعانه'], summary="حذف سفارش بیعانه"),
+)
 class DepositOrderViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
+    queryset           = DepositOrder.objects.all()
     permission_classes = [IsOwnerOrAdminOnly]
 
     def get_serializer_class(self):
         return DepositOrderListSerializer if self.action == 'list' else DepositOrderSerializer
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return DepositOrder.objects.none()
+
         qs = DepositOrder.objects.select_related(
             'customer', 'seller', 'created_by', 'sale'
         ).prefetch_related('items')
 
         user = self.request.user
-        if not (user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in user.roles.all())):
-            qs = qs.filter(created_by=user)
+        if not (user and user.is_authenticated and (user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in user.roles.all()))):
+            qs = qs.filter(created_by=user) if (user and user.is_authenticated) else qs.none()
 
         branch       = self.request.query_params.get('branch')
         order_status = self.request.query_params.get('status')
@@ -1120,14 +1337,34 @@ class DepositOrderViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
 
 # ── Missions ──────────────────────────────────────────────────────────────────
 
+@extend_schema_view(
+    list=extend_schema(
+        tags=['ماموریت‌ها'],
+        summary="لیست ماموریت‌ها",
+        parameters=[
+            OpenApiParameter('assigned_to', OpenApiTypes.UUID, description="فیلتر بر اساس شناسه کاربر مامور", required=False),
+        ]
+    ),
+    retrieve=extend_schema(tags=['ماموریت‌ها'], summary="مشاهده جزئیات ماموریت"),
+    create=extend_schema(tags=['ماموریت‌ها'], summary="تعریف ماموریت جدید"),
+    update=extend_schema(tags=['ماموریت‌ها'], summary="ویرایش کامل ماموریت"),
+    partial_update=extend_schema(tags=['ماموریت‌ها'], summary="ویرایش جزئی ماموریت"),
+    destroy=extend_schema(tags=['ماموریت‌ها'], summary="حذف ماموریت"),
+)
 class MissionViewSet(viewsets.ModelViewSet):
+    queryset           = Mission.objects.all()
     serializer_class   = MissionSerializer
     permission_classes = [IsAuthenticated, IsSuperiorUser]
     filter_backends    = [filters.SearchFilter]
     search_fields      = ['title', 'description']
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return Mission.objects.none()
+
         user       = self.request.user
+        if not (user and user.is_authenticated):
+            return Mission.objects.none()
         user_roles = set(user.roles.values_list('code', flat=True))
 
         if user.is_superuser or any(r in user_roles for r in ['ADMIN']):
@@ -1187,12 +1424,32 @@ class MissionViewSet(viewsets.ModelViewSet):
 
 # ── Checklists ────────────────────────────────────────────────────────────────
 
+@extend_schema_view(
+    list=extend_schema(
+        tags=['چک‌لیست‌ها و وظایف'],
+        summary="لیست چک‌لیست‌ها",
+        parameters=[
+            OpenApiParameter('assigned_to', OpenApiTypes.UUID, description="فیلتر بر اساس کاربر مسئول", required=False),
+        ]
+    ),
+    retrieve=extend_schema(tags=['چک‌لیست‌ها و وظایف'], summary="مشاهده جزئیات چک‌لیست"),
+    create=extend_schema(tags=['چک‌لیست‌ها و وظایف'], summary="تعریف چک‌لیست جدید"),
+    update=extend_schema(tags=['چک‌لیست‌ها و وظایف'], summary="ویرایش کامل چک‌لیست"),
+    partial_update=extend_schema(tags=['چک‌لیست‌ها و وظایف'], summary="ویرایش جزئی چک‌لیست"),
+    destroy=extend_schema(tags=['چک‌لیست‌ها و وظایف'], summary="حذف چک‌لیست"),
+)
 class ChecklistViewSet(viewsets.ModelViewSet):
+    queryset           = Checklist.objects.all()
     serializer_class   = ChecklistSerializer
     permission_classes = [IsAuthenticated, IsSuperiorUser]
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return Checklist.objects.none()
+
         user       = self.request.user
+        if not (user and user.is_authenticated):
+            return Checklist.objects.none()
         user_roles = set(user.roles.values_list('code', flat=True))
 
         if user.is_superuser or any(r in user_roles for r in ['ADMIN']):
@@ -1216,7 +1473,16 @@ class ChecklistViewSet(viewsets.ModelViewSet):
 
 # ── Tasks ─────────────────────────────────────────────────────────────────────
 
+@extend_schema_view(
+    list=extend_schema(tags=['چک‌لیست‌ها و وظایف'], summary="لیست وظایف/تسک‌ها"),
+    retrieve=extend_schema(tags=['چک‌لیست‌ها و وظایف'], summary="مشاهده جزئیات وظیفه"),
+    create=extend_schema(tags=['چک‌لیست‌ها و وظایف'], summary="ثبت وظیفه جدید"),
+    update=extend_schema(tags=['چک‌لیست‌ها و وظایف'], summary="ویرایش کامل وظیفه یا ثبت انجام"),
+    partial_update=extend_schema(tags=['چک‌لیست‌ها و وظایف'], summary="ویرایش جزئی وظیفه"),
+    destroy=extend_schema(tags=['چک‌لیست‌ها و وظایف'], summary="حذف وظیفه"),
+)
 class TaskViewSet(viewsets.ModelViewSet):
+    queryset           = Task.objects.all()
     serializer_class   = TaskSerializer
     permission_classes = [IsAuthenticated]
 
@@ -1233,7 +1499,12 @@ class TaskViewSet(viewsets.ModelViewSet):
         return False
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return Task.objects.none()
+
         user = self.request.user
+        if not (user and user.is_authenticated):
+            return Task.objects.none()
 
         if self._is_admin(user):
             return Task.objects.select_related(
@@ -1302,6 +1573,10 @@ class TaskViewSet(viewsets.ModelViewSet):
 
 # ── Roles ─────────────────────────────────────────────────────────────────────
 
+@extend_schema_view(
+    list=extend_schema(tags=['مدیریت کاربران'], summary="لیست نقش‌های سیستم"),
+    retrieve=extend_schema(tags=['مدیریت کاربران'], summary="مشاهده جزئیات نقش"),
+)
 class RoleViewSet(viewsets.ReadOnlyModelViewSet):
     queryset           = Role.objects.all()
     serializer_class   = RoleSerializer
@@ -1310,12 +1585,31 @@ class RoleViewSet(viewsets.ReadOnlyModelViewSet):
 
 # ── ChecklistLog ──────────────────────────────────────────────────────────────
 
+@extend_schema_view(
+    list=extend_schema(
+        tags=['چک‌لیست‌ها و وظایف'],
+        summary="لیست لاگ‌ها و تاریخچه انجام چک‌لیست‌ها",
+        parameters=[
+            OpenApiParameter('assigned_to', OpenApiTypes.UUID, description="فیلتر بر اساس شناسه کاربر مسئول", required=False),
+            OpenApiParameter('frequency', OpenApiTypes.STR, description="فیلتر بر اساس دوره تناوب (DAILY, WEEKLY, MONTHLY)", required=False),
+            OpenApiParameter('from_date', OpenApiTypes.DATE, description="از تاریخ بازه (YYYY-MM-DD)", required=False),
+            OpenApiParameter('to_date', OpenApiTypes.DATE, description="تا تاریخ بازه (YYYY-MM-DD)", required=False),
+        ]
+    ),
+    retrieve=extend_schema(tags=['چک‌لیست‌ها و وظایف'], summary="مشاهده جزئیات لاگ چک‌لیست"),
+)
 class ChecklistLogViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset           = ChecklistLog.objects.all()
     serializer_class   = ChecklistLogSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return ChecklistLog.objects.none()
+
         user = self.request.user
+        if not (user and user.is_authenticated):
+            return ChecklistLog.objects.none()
 
         if user.is_superuser or user.roles.filter(code='ADMIN').exists():
             qs = ChecklistLog.objects.all().prefetch_related('items')
@@ -1342,12 +1636,33 @@ class ChecklistLogViewSet(viewsets.ReadOnlyModelViewSet):
 
 # ── Claims ────────────────────────────────────────────────────────────────────
 
+@extend_schema_view(
+    list=extend_schema(
+        tags=['مطالبات و پیگیری‌ها'],
+        summary="لیست مطالبات معوق",
+        parameters=[
+            OpenApiParameter('status', OpenApiTypes.STR, description="فیلتر بر اساس وضعیت مطالبه", required=False),
+            OpenApiParameter('assigned_to', OpenApiTypes.UUID, description="فیلتر بر اساس کاربر پیگیری‌کننده", required=False),
+        ]
+    ),
+    retrieve=extend_schema(tags=['مطالبات و پیگیری‌ها'], summary="مشاهده جزئیات مطالبه و پیگیری‌ها"),
+    create=extend_schema(tags=['مطالبات و پیگیری‌ها'], summary="ثبت پرونده مطالبه جدید"),
+    update=extend_schema(tags=['مطالبات و پیگیری‌ها'], summary="ویرایش کامل پرونده مطالبه"),
+    partial_update=extend_schema(tags=['مطالبات و پیگیری‌ها'], summary="ویرایش جزئی پرونده مطالبه"),
+    destroy=extend_schema(tags=['مطالبات و پیگیری‌ها'], summary="حذف پرونده مطالبه"),
+)
 class ClaimViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
+    queryset           = Claim.objects.all()
     serializer_class   = ClaimSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        user     = self.request.user
+        if getattr(self, 'swagger_fake_view', False):
+            return Claim.objects.none()
+
+        user = self.request.user
+        if not (user and user.is_authenticated):
+            return Claim.objects.none()
         is_admin = user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in user.roles.all())
 
         if is_admin:
@@ -1371,6 +1686,12 @@ class ClaimViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
 
         return qs
 
+    @extend_schema(
+        tags=['مطالبات و پیگیری‌ها'],
+        summary="ثبت اقدام پیگیری جدید برای یک مطالبه",
+        request=ClaimFollowUpSerializer,
+        responses={201: ClaimFollowUpSerializer}
+    )
     @action(detail=True, methods=['post'], url_path='add-follow-up')
     def add_follow_up(self, request, pk=None):
         claim          = self.get_object()
@@ -1396,14 +1717,37 @@ class ClaimViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
 
 # ── Damage Registration ───────────────────────────────────────────────────────
 
+@extend_schema_view(
+    list=extend_schema(
+        tags=['خسارت و ضایعات'],
+        summary="لیست ثبت‌های خسارت و ضایعات",
+        parameters=[
+            OpenApiParameter('branch', OpenApiTypes.STR, description="فیلتر بر اساس نام شعبه", required=False),
+            OpenApiParameter('reason', OpenApiTypes.STR, description="فیلتر بر اساس علت ضایعات", required=False),
+            OpenApiParameter('from_date', OpenApiTypes.DATE, description="از تاریخ ثبت (YYYY-MM-DD)", required=False),
+            OpenApiParameter('to_date', OpenApiTypes.DATE, description="تا تاریخ ثبت (YYYY-MM-DD)", required=False),
+        ]
+    ),
+    retrieve=extend_schema(tags=['خسارت و ضایعات'], summary="مشاهده جزئیات ثبت خسارت"),
+    create=extend_schema(tags=['خسارت و ضایعات'], summary="ثبت خسارت و اقلام ضایعات جدید"),
+    update=extend_schema(tags=['خسارت و ضایعات'], summary="ویرایش کامل ثبت خسارت"),
+    partial_update=extend_schema(tags=['خسارت و ضایعات'], summary="ویرایش جزئی ثبت خسارت"),
+    destroy=extend_schema(tags=['خسارت و ضایعات'], summary="حذف ثبت خسارت"),
+)
 class DamageRegistrationViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     queryset           = DamageRegistration.objects.all().order_by('-created_at')
     serializer_class   = DamageRegistrationSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return DamageRegistration.objects.none()
+
         qs   = super().get_queryset()
         user = self.request.user
+        if not (user and user.is_authenticated):
+            return DamageRegistration.objects.none()
+
         # ادمین، مدیر مالی و انباردار دسترسی کامل به تمامی ثبت‌های ضایعات دارند
         if not (user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER', 'WAREHOUSE'] for r in user.roles.all())):
             qs = qs.filter(created_by=user)
@@ -1429,6 +1773,20 @@ class DamageRegistrationViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
 
 # ── Return Request ────────────────────────────────────────────────────────────
 
+@extend_schema_view(
+    list=extend_schema(
+        tags=['برگشتی کالا و وجه'],
+        summary="لیست درخواست‌های مرجوعی کالا",
+        parameters=[
+            OpenApiParameter('status', OpenApiTypes.STR, description="فیلتر وضعیت: PENDING, APPROVED, REJECTED, COMPLETED", required=False),
+        ]
+    ),
+    retrieve=extend_schema(tags=['برگشتی کالا و وجه'], summary="مشاهده جزئیات درخواست مرجوعی"),
+    create=extend_schema(tags=['برگشتی کالا و وجه'], summary="ثبت درخواست مرجوعی جدید"),
+    update=extend_schema(tags=['برگشتی کالا و وجه'], summary="ویرایش کامل درخواست مرجوعی"),
+    partial_update=extend_schema(tags=['برگشتی کالا و وجه'], summary="ویرایش جزئی درخواست مرجوعی"),
+    destroy=extend_schema(tags=['برگشتی کالا و وجه'], summary="حذف درخواست مرجوعی"),
+)
 class ReturnRequestViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     queryset           = ReturnRequest.objects.all().order_by('-created_at')
     serializer_class   = ReturnRequestSerializer
@@ -1441,6 +1799,12 @@ class ReturnRequestViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
             qs = qs.filter(status=status_param)
         return qs
 
+    @extend_schema(
+        tags=['برگشتی کالا و وجه'],
+        summary="تایید درخواست برگشتی توسط مدیریت",
+        request=None,
+        responses={200: OpenApiTypes.OBJECT}
+    )
     @action(detail=True, methods=['post'], url_path='approve')
     def approve(self, request, pk=None):
         return_req = self.get_object()
@@ -1461,6 +1825,12 @@ class ReturnRequestViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
 
         return Response({"message": "درخواست برگشتی با موفقیت تایید شد. در انتظار واریز."}, status=status.HTTP_200_OK)
 
+    @extend_schema(
+        tags=['برگشتی کالا و وجه'],
+        summary="ثبت نهایی واریزی و عودت وجه به مشتری",
+        request=ReturnRefundFinalizeSerializer,
+        responses={200: OpenApiTypes.OBJECT}
+    )
     @action(detail=True, methods=['post'], url_path='finalize-refund')
     def finalize_refund(self, request, pk=None):
         return_req = self.get_object()
@@ -1491,12 +1861,34 @@ class ReturnRequestViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
 
 # ── Report Definition ─────────────────────────────────────────────────────────
 
+@extend_schema_view(
+    list=extend_schema(
+        tags=['گزارش‌های دوره‌ای و مهلت‌دار'],
+        summary="لیست تعاریف الگوهای گزارش‌دهی",
+        parameters=[
+            OpenApiParameter('subordinate', OpenApiTypes.UUID, description="فیلتر بر اساس کاربر موظف (زیردستی)", required=False),
+            OpenApiParameter('report_type', OpenApiTypes.STR, description="نوع گزارش (DAILY, WEEKLY, MONTHLY, ON_DEMAND)", required=False),
+            OpenApiParameter('is_active', OpenApiTypes.BOOL, description="وضعیت فعال/غیرفعال بودن گزارش", required=False),
+        ]
+    ),
+    retrieve=extend_schema(tags=['گزارش‌های دوره‌ای و مهلت‌دار'], summary="مشاهده جزئیات الگوی گزارش"),
+    create=extend_schema(tags=['گزارش‌های دوره‌ای و مهلت‌دار'], summary="تعریف الگوی گزارش‌دهی جدید برای زیردستی"),
+    update=extend_schema(tags=['گزارش‌های دوره‌ای و مهلت‌دار'], summary="ویرایش کامل الگوی گزارش"),
+    partial_update=extend_schema(tags=['گزارش‌های دوره‌ای و مهلت‌دار'], summary="ویرایش جزئی الگوی گزارش"),
+    destroy=extend_schema(tags=['گزارش‌های دوره‌ای و مهلت‌دار'], summary="حذف الگوی گزارش"),
+)
 class ReportDefinitionViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
+    queryset           = ReportDefinition.objects.all()
     serializer_class   = ReportDefinitionSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return ReportDefinition.objects.none()
+
         user     = self.request.user
+        if not (user and user.is_authenticated):
+            return ReportDefinition.objects.none()
         is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
 
         if is_admin:
@@ -1520,6 +1912,12 @@ class ReportDefinitionViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(superior=self.request.user)
 
+    @extend_schema(
+        tags=['گزارش‌های دوره‌ای و مهلت‌دار'],
+        summary="تغییر وضعیت فعال/غیرفعال بودن یک الگوی گزارش",
+        request=None,
+        responses={200: OpenApiTypes.OBJECT}
+    )
     @action(detail=True, methods=['patch'], url_path='toggle-active')
     def toggle_active(self, request, pk=None):
         definition = self.get_object()
@@ -1542,6 +1940,12 @@ class ReportDefinitionViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
             status=status.HTTP_200_OK
         )
 
+    @extend_schema(
+        tags=['گزارش‌های دوره‌ای و مهلت‌دار'],
+        summary="ایجاد مجدد گزارش از روی الگوی قبلی (تکرار موضوع)",
+        request=ReportDuplicateRequestSerializer,
+        responses={201: ReportDefinitionSerializer}
+    )
     @action(detail=True, methods=['post'], url_path='duplicate')
     @transaction.atomic
     def duplicate(self, request, pk=None):
@@ -1593,12 +1997,35 @@ class ReportDefinitionViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
 
 # ── Report Submission ─────────────────────────────────────────────────────────
 
+@extend_schema_view(
+    list=extend_schema(
+        tags=['گزارش‌های دوره‌ای و مهلت‌دار'],
+        summary="لیست گزارش‌های ارسال‌شده توسط کارکنان",
+        parameters=[
+            OpenApiParameter('definition', OpenApiTypes.INT, description="فیلتر بر اساس شناسه الگوی گزارش", required=False),
+            OpenApiParameter('submitted_by', OpenApiTypes.UUID, description="فیلتر بر اساس ارسال‌کننده", required=False),
+            OpenApiParameter('from_date', OpenApiTypes.DATE, description="از تاریخ ثبت (YYYY-MM-DD)", required=False),
+            OpenApiParameter('to_date', OpenApiTypes.DATE, description="تا تاریخ ثبت (YYYY-MM-DD)", required=False),
+        ]
+    ),
+    retrieve=extend_schema(tags=['گزارش‌های دوره‌ای و مهلت‌دار'], summary="مشاهده جزئیات و تصاویر گزارش ارسالی"),
+    create=extend_schema(tags=['گزارش‌های دوره‌ای و مهلت‌دار'], summary="ارسال گزارش کاری و پیوست تصاویر"),
+    update=extend_schema(tags=['گزارش‌های دوره‌ای و مهلت‌دار'], summary="ویرایش گزارش ارسالی"),
+    partial_update=extend_schema(tags=['گزارش‌های دوره‌ای و مهلت‌دار'], summary="ویرایش جزئی گزارش ارسالی"),
+    destroy=extend_schema(tags=['گزارش‌های دوره‌ای و مهلت‌دار'], summary="حذف گزارش ارسالی"),
+)
 class ReportSubmissionViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
+    queryset           = ReportSubmission.objects.all()
     serializer_class   = ReportSubmissionSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return ReportSubmission.objects.none()
+
         user     = self.request.user
+        if not (user and user.is_authenticated):
+            return ReportSubmission.objects.none()
         is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
 
         if is_admin:
@@ -1658,34 +2085,43 @@ class ReportSubmissionViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         return super().destroy(request, *args, **kwargs)
     
 # ── BranchTransfer ────────────────────────────────────────────────────────────
- 
+
+@extend_schema_view(
+    list=extend_schema(
+        tags=['حواله و انتقال بین شعب'],
+        summary="لیست حواله‌ها و انتقال کالا بین شعب",
+        parameters=[
+            OpenApiParameter('status', OpenApiTypes.STR, description="فیلتر وضعیت (PENDING_SENDER, PENDING_RECEIVER, APPROVED, REJECTED)", required=False),
+            OpenApiParameter('source_branch', OpenApiTypes.STR, description="شعبه مبدا", required=False),
+            OpenApiParameter('destination_branch', OpenApiTypes.STR, description="شعبه مقصد", required=False),
+            OpenApiParameter('from_date', OpenApiTypes.DATE, description="از تاریخ (YYYY-MM-DD)", required=False),
+            OpenApiParameter('to_date', OpenApiTypes.DATE, description="تا تاریخ (YYYY-MM-DD)", required=False),
+        ]
+    ),
+    retrieve=extend_schema(tags=['حواله و انتقال بین شعب'], summary="مشاهده جزئیات کامل و لاگ‌های انتقال کالا"),
+    create=extend_schema(tags=['حواله و انتقال بین شعب'], summary="ثبت درخواست انتقال کالای جدید بین شعب"),
+    update=extend_schema(tags=['حواله و انتقال بین شعب'], summary="ویرایش انتقال کالا"),
+    partial_update=extend_schema(tags=['حواله و انتقال بین شعب'], summary="ویرایش جزئی انتقال کالا"),
+    destroy=extend_schema(tags=['حواله و انتقال بین شعب'], summary="حذف درخواست انتقال کالا"),
+)
 class BranchTransferViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
-    """
-    انتقال بین شعب
- 
-    وضعیت‌ها:
-      PENDING_SENDER   → ثبت درخواست توسط صندوقدار
-      PENDING_RECEIVER → تایید سرپرست مبدا، در انتظار گیرنده
-      APPROVED         → تایید هر دو سرپرست
-      REJECTED         → رد شده (قابل ویرایش و بازارسال)
- 
-    اکشن‌ها:
-      POST /transfers/{id}/approve_sender/  — تایید توسط سرپرست مبدا
-      POST /transfers/{id}/reject_sender/   — رد توسط سرپرست مبدا
-      POST /transfers/{id}/approve_receiver/— تایید توسط سرپرست مقصد
-      POST /transfers/{id}/reject_receiver/ — رد توسط سرپرست مقصد
-    """
+    queryset           = BranchTransfer.objects.all()
     permission_classes = [permissions.IsAuthenticated]
- 
+
     def get_serializer_class(self):
         if self.action == 'list':
             return BranchTransferListSerializer
         return BranchTransferSerializer
- 
+
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return BranchTransfer.objects.none()
+
         user = self.request.user
+        if not (user and user.is_authenticated):
+            return BranchTransfer.objects.none()
         is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
- 
+
         if is_admin:
             qs = BranchTransfer.objects.all()
         else:
@@ -1694,24 +2130,24 @@ class BranchTransferViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
                 Q(sender_supervisor=user) |
                 Q(receiver_supervisor=user)
             ).distinct()
- 
+
         # فیلترهای اختیاری
         status_param = self.request.query_params.get('status')
         src_branch   = self.request.query_params.get('source_branch')
         dst_branch   = self.request.query_params.get('destination_branch')
         from_date    = self.request.query_params.get('from_date')
         to_date      = self.request.query_params.get('to_date')
- 
+
         if status_param: qs = qs.filter(status=status_param)
         if src_branch:   qs = qs.filter(source_branch=src_branch)
         if dst_branch:   qs = qs.filter(destination_branch=dst_branch)
         if from_date:    qs = qs.filter(transfer_date__gte=from_date)
         if to_date:      qs = qs.filter(transfer_date__lte=to_date)
- 
+
         return qs.select_related(
             'source_cashier', 'sender_supervisor', 'receiver_supervisor'
         ).prefetch_related('items', 'logs').order_by('-created_at')
- 
+
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
         # فقط درخواست‌های رد شده یا در انتظار تایید مبدا قابل ویرایش‌اند
@@ -1721,13 +2157,19 @@ class BranchTransferViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         return super().update(request, *args, **kwargs)
- 
+
+    @extend_schema(
+        tags=['حواله و انتقال بین شعب'],
+        summary="تایید انتقال توسط سرپرست مبدا",
+        request=BranchTransferNoteSerializer,
+        responses={200: OpenApiTypes.OBJECT}
+    )
     @action(detail=True, methods=['post'], url_path='approve-sender')
     @transaction.atomic
     def approve_sender(self, request, pk=None):
         """تایید انتقال توسط سرپرست مبدا"""
         transfer = self.get_object()
- 
+
         if transfer.status != 'PENDING_SENDER':
             return Response(
                 {"error": "این انتقال در وضعیت 'در انتظار تایید مبدا' نیست."},
@@ -1740,12 +2182,12 @@ class BranchTransferViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
                 {"error": "فقط سرپرست مبدا یا ادمین می‌تواند این انتقال را تایید کند."},
                 status=status.HTTP_403_FORBIDDEN
             )
- 
+
         note = request.data.get('note', '')
         transfer.status      = 'PENDING_RECEIVER'
         transfer.sender_note = note
         transfer.save()
- 
+
         TransferLog.objects.create(
             transfer=transfer,
             created_by=request.user,
@@ -1759,13 +2201,19 @@ class BranchTransferViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
             {"message": "انتقال با موفقیت تایید شد و برای سرپرست مقصد ارسال گردید."},
             status=status.HTTP_200_OK
         )
- 
+
+    @extend_schema(
+        tags=['حواله و انتقال بین شعب'],
+        summary="رد انتقال توسط سرپرست مبدا",
+        request=BranchTransferRejectSerializer,
+        responses={200: OpenApiTypes.OBJECT}
+    )
     @action(detail=True, methods=['post'], url_path='reject-sender')
     @transaction.atomic
     def reject_sender(self, request, pk=None):
         """رد انتقال توسط سرپرست مبدا"""
         transfer = self.get_object()
- 
+
         if transfer.status != 'PENDING_SENDER':
             return Response(
                 {"error": "این انتقال در وضعیت 'در انتظار تایید مبدا' نیست."},
@@ -1778,18 +2226,18 @@ class BranchTransferViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
                 {"error": "فقط سرپرست مبدا یا ادمین می‌تواند این انتقال را رد کند."},
                 status=status.HTTP_403_FORBIDDEN
             )
- 
+
         reason = request.data.get('reason', '').strip()
         if not reason:
             return Response(
                 {"error": "ارسال دلیل عدم تایید (reason) الزامی است."},
                 status=status.HTTP_400_BAD_REQUEST
             )
- 
+
         transfer.status           = 'REJECTED'
         transfer.rejection_reason = reason
         transfer.save()
- 
+
         TransferLog.objects.create(
             transfer=transfer,
             created_by=request.user,
@@ -1802,13 +2250,19 @@ class BranchTransferViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
             {"message": "انتقال رد شد. صندوقدار می‌تواند پس از اصلاح، مجدداً ارسال کند."},
             status=status.HTTP_200_OK
         )
- 
+
+    @extend_schema(
+        tags=['حواله و انتقال بین شعب'],
+        summary="تایید نهایی انتقال توسط سرپرست مقصد",
+        request=BranchTransferNoteSerializer,
+        responses={200: OpenApiTypes.OBJECT}
+    )
     @action(detail=True, methods=['post'], url_path='approve-receiver')
     @transaction.atomic
     def approve_receiver(self, request, pk=None):
         """تایید نهایی انتقال توسط سرپرست مقصد"""
         transfer = self.get_object()
- 
+
         if transfer.status != 'PENDING_RECEIVER':
             return Response(
                 {"error": "این انتقال در وضعیت 'در انتظار تایید مقصد' نیست."},
@@ -1821,12 +2275,12 @@ class BranchTransferViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
                 {"error": "فقط سرپرست مقصد یا ادمین می‌تواند این انتقال را تایید کند."},
                 status=status.HTTP_403_FORBIDDEN
             )
- 
+
         note = request.data.get('note', '')
         transfer.status        = 'APPROVED'
         transfer.receiver_note = note
         transfer.save()
- 
+
         # ساخت لاگ نهایی با تمام اطلاعات
         from django.utils import timezone as tz
         items_summary = ", ".join(
@@ -1848,13 +2302,19 @@ class BranchTransferViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
             {"message": "فرایند انتقال با موفقیت ثبت نهایی شد."},
             status=status.HTTP_200_OK
         )
- 
+
+    @extend_schema(
+        tags=['حواله و انتقال بین شعب'],
+        summary="رد انتقال توسط سرپرست مقصد",
+        request=BranchTransferRejectSerializer,
+        responses={200: OpenApiTypes.OBJECT}
+    )
     @action(detail=True, methods=['post'], url_path='reject-receiver')
     @transaction.atomic
     def reject_receiver(self, request, pk=None):
         """رد انتقال توسط سرپرست مقصد"""
         transfer = self.get_object()
- 
+
         if transfer.status != 'PENDING_RECEIVER':
             return Response(
                 {"error": "این انتقال در وضعیت 'در انتظار تایید مقصد' نیست."},
@@ -1867,18 +2327,18 @@ class BranchTransferViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
                 {"error": "فقط سرپرست مقصد یا ادمین می‌تواند این انتقال را رد کند."},
                 status=status.HTTP_403_FORBIDDEN
             )
- 
+
         reason = request.data.get('reason', '').strip()
         if not reason:
             return Response(
                 {"error": "ارسال دلیل عدم تایید (reason) الزامی است."},
                 status=status.HTTP_400_BAD_REQUEST
             )
- 
+
         transfer.status           = 'REJECTED'
         transfer.rejection_reason = reason
         transfer.save()
- 
+
         TransferLog.objects.create(
             transfer=transfer,
             created_by=request.user,
@@ -1891,63 +2351,69 @@ class BranchTransferViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
             {"message": "انتقال رد شد. صندوقدار می‌تواند پس از اصلاح، مجدداً ارسال کند."},
             status=status.HTTP_200_OK
         )
- 
- 
+
+
 # ── WasteReport ───────────────────────────────────────────────────────────────
- 
+
+@extend_schema_view(
+    list=extend_schema(
+        tags=['خسارت و ضایعات'],
+        summary="لیست گزارش‌های ضایعات و اقلام اسقاطی",
+        parameters=[
+            OpenApiParameter('status', OpenApiTypes.STR, description="فیلتر وضعیت: PENDING, APPROVED_BY_WAREHOUSE, REJECTED_BY_WAREHOUSE, CLOSED", required=False),
+            OpenApiParameter('branch', OpenApiTypes.STR, description="شعبه مورد نظر", required=False),
+            OpenApiParameter('from_date', OpenApiTypes.DATE, description="از تاریخ ثبت ضایعات (YYYY-MM-DD)", required=False),
+            OpenApiParameter('to_date', OpenApiTypes.DATE, description="تا تاریخ ثبت ضایعات (YYYY-MM-DD)", required=False),
+        ]
+    ),
+    retrieve=extend_schema(tags=['خسارت و ضایعات'], summary="مشاهده جزئیات کامل گزارش ضایعات و اقلام آن"),
+    create=extend_schema(tags=['خسارت و ضایعات'], summary="ثبت گزارش ضایعات جدید توسط سرپرست"),
+    update=extend_schema(tags=['خسارت و ضایعات'], summary="ویرایش گزارش ضایعات"),
+    partial_update=extend_schema(tags=['خسارت و ضایعات'], summary="ویرایش جزئی گزارش ضایعات"),
+    destroy=extend_schema(tags=['خسارت و ضایعات'], summary="حذف گزارش ضایعات"),
+)
 class WasteReportViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
-    """
-    گزارش ضایعات (جایگزین DamageRegistration)
- 
-    وضعیت‌ها:
-      PENDING                → ثبت توسط سرپرست، در انتظار انباردار
-      APPROVED_BY_WAREHOUSE  → تایید انباردار، در انتظار مدیریت
-      REJECTED_BY_WAREHOUSE  → رد توسط انباردار
-      CLOSED                 → تعیین تکلیف توسط ادمین
- 
-    اکشن‌ها:
-      POST /waste-reports/{id}/warehouse-review/ — بررسی انباردار
-      POST /waste-reports/{id}/admin-decision/   — دستور مدیریت
-    """
+    queryset           = WasteReport.objects.all()
     permission_classes = [permissions.IsAuthenticated]
- 
+
     def get_serializer_class(self):
         if self.action == 'list':
             return WasteReportListSerializer
         return WasteReportSerializer
- 
+
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return WasteReport.objects.none()
+
         user     = self.request.user
+        if not (user and user.is_authenticated):
+            return WasteReport.objects.none()
+
         is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
         is_warehouse = any(r.code == 'WAREHOUSE' for r in user.roles.all())
- 
-        if is_admin:
-            # ادمین همه را می‌بیند
-            qs = WasteReport.objects.all()
-        elif is_warehouse:
-            # انباردار همه گزارش‌ها را برای بررسی می‌بیند
+
+        if is_admin or is_warehouse:
             qs = WasteReport.objects.all()
         else:
-            # سرپرست: گزارش‌های خودش + گزارش‌هایی که در آن‌ها دخیل بوده
             qs = WasteReport.objects.filter(
                 Q(reporter=user) | Q(involved_users=user)
             ).distinct()
- 
+
         # فیلترهای اختیاری
         status_param = self.request.query_params.get('status')
         branch_param = self.request.query_params.get('branch')
         from_date    = self.request.query_params.get('from_date')
         to_date      = self.request.query_params.get('to_date')
- 
+
         if status_param: qs = qs.filter(status=status_param)
         if branch_param: qs = qs.filter(branch=branch_param)
         if from_date:    qs = qs.filter(waste_date__gte=from_date)
         if to_date:      qs = qs.filter(waste_date__lte=to_date)
- 
+
         return qs.select_related(
             'reporter', 'warehouse_reviewer', 'admin_reviewer'
         ).prefetch_related('items', 'involved_users').order_by('-created_at')
- 
+
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
         # فقط گزارش‌های در انتظار یا رد شده توسط انباردار قابل ویرایش توسط سرپرست هستند
@@ -1958,19 +2424,18 @@ class WasteReportViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         return super().update(request, *args, **kwargs)
- 
+
+    @extend_schema(
+        tags=['خسارت و ضایعات'],
+        summary="بررسی، تایید یا رد گزارش ضایعات توسط انباردار",
+        request=WasteReviewRequestSerializer,
+        responses={200: OpenApiTypes.OBJECT}
+    )
     @action(detail=True, methods=['post'], url_path='warehouse-review')
     @transaction.atomic
     def warehouse_review(self, request, pk=None):
-        """
-        بررسی انباردار: تایید یا رد گزارش ضایعات
- 
-        body:
-          action  : 'approve' | 'reject'
-          comment : توضیحات (اجباری برای رد، اختیاری برای تایید)
-        """
         waste = self.get_object()
- 
+
         is_admin     = request.user.is_superuser or any(r.code == 'ADMIN' for r in request.user.roles.all())
         is_warehouse = any(r.code == 'WAREHOUSE' for r in request.user.roles.all())
         if not is_admin and not is_warehouse:
@@ -1978,16 +2443,16 @@ class WasteReportViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
                 {"error": "فقط انباردار یا ادمین می‌تواند این عملیات را انجام دهد."},
                 status=status.HTTP_403_FORBIDDEN
             )
- 
+
         if waste.status != 'PENDING':
             return Response(
                 {"error": "این گزارش قبلاً بررسی شده است."},
                 status=status.HTTP_400_BAD_REQUEST
             )
- 
+
         action_type = request.data.get('action', '').strip()
         comment     = request.data.get('comment', '').strip()
- 
+
         if action_type not in ['approve', 'reject']:
             return Response(
                 {"error": "مقدار action باید 'approve' یا 'reject' باشد."},
@@ -1998,7 +2463,7 @@ class WasteReportViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
                 {"error": "برای رد گزارش، ارسال توضیحات (comment) الزامی است."},
                 status=status.HTTP_400_BAD_REQUEST
             )
- 
+
         waste.warehouse_reviewer = request.user
         waste.warehouse_comment  = comment
         waste.status = (
@@ -2006,7 +2471,7 @@ class WasteReportViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
             else 'REJECTED_BY_WAREHOUSE'
         )
         waste.save()
- 
+
         if action_type == 'approve':
             msg = (
                 f"گزارش ضایعات توسط انباردار ({request.user.get_full_name() or request.user.username}) تایید شد "
@@ -2018,45 +2483,45 @@ class WasteReportViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
                 f"گزارش ضایعات توسط انباردار ({request.user.get_full_name() or request.user.username}) رد شد. "
                 f"دلیل: {comment}"
             )
- 
+
         return Response({"message": msg}, status=status.HTTP_200_OK)
- 
+
+    @extend_schema(
+        tags=['خسارت و ضایعات'],
+        summary="دستور و تعیین تکلیف نهایی ضایعات توسط مدیریت",
+        request=WasteDecisionRequestSerializer,
+        responses={200: OpenApiTypes.OBJECT}
+    )
     @action(detail=True, methods=['post'], url_path='admin-decision')
     @transaction.atomic
     def admin_decision(self, request, pk=None):
-        """
-        تعیین تکلیف توسط مدیریت (ادمین)
- 
-        body:
-          instruction : دستور/توضیحات مدیریت (اجباری)
-        """
         waste = self.get_object()
- 
+
         is_admin = request.user.is_superuser or any(r.code == 'ADMIN' for r in request.user.roles.all())
         if not is_admin:
             return Response(
                 {"error": "فقط ادمین می‌تواند دستور مدیریت صادر کند."},
                 status=status.HTTP_403_FORBIDDEN
             )
- 
+
         if waste.status != 'APPROVED_BY_WAREHOUSE':
             return Response(
                 {"error": "این گزارش هنوز توسط انباردار تایید نشده یا قبلاً تعیین تکلیف شده است."},
                 status=status.HTTP_400_BAD_REQUEST
             )
- 
+
         instruction = request.data.get('instruction', '').strip()
         if not instruction:
             return Response(
                 {"error": "ارسال دستور مدیریت (instruction) الزامی است."},
                 status=status.HTTP_400_BAD_REQUEST
             )
- 
+
         waste.admin_reviewer    = request.user
         waste.admin_instruction = instruction
         waste.status            = 'CLOSED'
         waste.save()
- 
+
         return Response(
             {"message": "دستور مدیریت ثبت شد و فرایند رسیدگی به ضایعات مختومه گردید."},
             status=status.HTTP_200_OK
@@ -2065,7 +2530,24 @@ class WasteReportViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
 
 # ── AdvanceRequest (درخواست مساعده) ──────────────────────────────────────────
 
+@extend_schema_view(
+    list=extend_schema(
+        tags=['مساعده کارکنان'],
+        summary="لیست درخواست‌های مساعده من",
+        parameters=[
+            OpenApiParameter('status', OpenApiTypes.STR, description="فیلتر وضعیت درخواست مساعده", required=False),
+            OpenApiParameter('from_date', OpenApiTypes.DATE, description="از تاریخ ثبت (YYYY-MM-DD)", required=False),
+            OpenApiParameter('to_date', OpenApiTypes.DATE, description="تا تاریخ ثبت (YYYY-MM-DD)", required=False),
+        ]
+    ),
+    retrieve=extend_schema(tags=['مساعده کارکنان'], summary="مشاهده جزئیات کامل درخواست مساعده"),
+    create=extend_schema(tags=['مساعده کارکنان'], summary="ثبت درخواست مساعده جدید"),
+    update=extend_schema(tags=['مساعده کارکنان'], summary="ویرایش کامل درخواست مساعده"),
+    partial_update=extend_schema(tags=['مساعده کارکنان'], summary="ویرایش جزئی درخواست مساعده"),
+    destroy=extend_schema(tags=['مساعده کارکنان'], summary="حذف درخواست مساعده"),
+)
 class AdvanceRequestViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
+    queryset           = AdvanceRequest.objects.all()
     permission_classes = [permissions.IsAuthenticated]
 
     def get_serializer_class(self):
@@ -2074,7 +2556,12 @@ class AdvanceRequestViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         return AdvanceRequestSerializer
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return AdvanceRequest.objects.none()
+
         user = self.request.user
+        if not (user and user.is_authenticated):
+            return AdvanceRequest.objects.none()
         
         is_admin = user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in user.roles.all())
 
@@ -2124,6 +2611,12 @@ class AdvanceRequestViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         )
 
     # --- ۱. بررسی بالادستی ---
+    @extend_schema(
+        tags=['مساعده کارکنان'],
+        summary="بررسی و تایید یا رد درخواست مساعده توسط بالادستی",
+        request=AdvanceReviewRequestSerializer,
+        responses={200: OpenApiTypes.OBJECT}
+    )
     @action(detail=True, methods=['post'], url_path='superior-review')
     @transaction.atomic
     def superior_review(self, request, pk=None):
@@ -2164,6 +2657,12 @@ class AdvanceRequestViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         return Response({"message": "عملیات با موفقیت ثبت شد."}, status=status.HTTP_200_OK)
 
     # --- ۲. بررسی ادمین ---
+    @extend_schema(
+        tags=['مساعده کارکنان'],
+        summary="بررسی و تایید یا رد درخواست مساعده توسط مدیریت (ادمین)",
+        request=AdvanceReviewRequestSerializer,
+        responses={200: OpenApiTypes.OBJECT}
+    )
     @action(detail=True, methods=['post'], url_path='admin-review')
     @transaction.atomic
     def admin_review(self, request, pk=None):
@@ -2198,6 +2697,12 @@ class AdvanceRequestViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         return Response({"message": "عملیات ادمین با موفقیت ثبت شد."}, status=status.HTTP_200_OK)
 
     # --- ۳. پرداخت توسط مدیر مالی ---
+    @extend_schema(
+        tags=['مساعده کارکنان'],
+        summary="ثبت واریز و پرداخت نهایی مساعده توسط مدیر مالی",
+        request=AdvancePayRequestSerializer,
+        responses={200: OpenApiTypes.OBJECT}
+    )
     @action(detail=True, methods=['post'], url_path='finance-pay')
     @transaction.atomic
     def finance_pay(self, request, pk=None):
@@ -2231,6 +2736,17 @@ class AdvanceRequestViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         return Response({"message": "وضعیت پرداخت با موفقیت ثبت شد."}, status=status.HTTP_200_OK)
 
     # --- ۴. کارتابل بالادستی: درخواست‌هایی که مستقیماً به من ارجاع شده ---
+    @extend_schema(
+        tags=['مساعده کارکنان'],
+        summary="کارتابل درخواست‌های مساعده ارجاع‌شده به کاربر جاری (بالادستی)",
+        parameters=[
+            OpenApiParameter('status', OpenApiTypes.STR, description="فیلتر وضعیت", required=False),
+            OpenApiParameter('from_date', OpenApiTypes.DATE, description="از تاریخ ثبت (YYYY-MM-DD)", required=False),
+            OpenApiParameter('to_date', OpenApiTypes.DATE, description="تا تاریخ ثبت (YYYY-MM-DD)", required=False),
+            OpenApiParameter('search', OpenApiTypes.STR, description="جستجو در نام یا نام کاربری", required=False),
+        ],
+        responses={200: AdvanceRequestInboxSerializer(many=True)}
+    )
     @action(detail=False, methods=['get'], url_path='my-inbox')
     def my_inbox(self, request):
         """
@@ -2273,6 +2789,19 @@ class AdvanceRequestViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         return Response(serializer.data)
 
     # --- ۵. ویو کامل ادمین: همه درخواست‌ها با فیلترهای پیشرفته ---
+    @extend_schema(
+        tags=['مساعده کارکنان'],
+        summary="لیست جامع کلیه درخواست‌های مساعده سیستم جهت مدیریت و مالی",
+        parameters=[
+            OpenApiParameter('status', OpenApiTypes.STR, description="فیلتر وضعیت", required=False),
+            OpenApiParameter('from_date', OpenApiTypes.DATE, description="از تاریخ ثبت (YYYY-MM-DD)", required=False),
+            OpenApiParameter('to_date', OpenApiTypes.DATE, description="تا تاریخ ثبت (YYYY-MM-DD)", required=False),
+            OpenApiParameter('search', OpenApiTypes.STR, description="جستجو در نام یا نام کاربری", required=False),
+            OpenApiParameter('requester_id', OpenApiTypes.UUID, description="شناسه کاربر متقاضی", required=False),
+            OpenApiParameter('superior_id', OpenApiTypes.UUID, description="شناسه کاربر بالادستی", required=False),
+        ],
+        responses={200: AdvanceRequestInboxSerializer(many=True)}
+    )
     @action(detail=False, methods=['get'], url_path='admin-list')
     def admin_list(self, request):
         """
@@ -2333,12 +2862,12 @@ class AdvanceRequestViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
 # ── سیستم پورسانت و پاداش فروشندگان (Seller Commission & Reward) ──────────────
 
 @extend_schema_view(
-    list=extend_schema(tags=['پورسانت و فروشندگان'], summary="لیست قوانین پورسانت و پاداش"),
-    retrieve=extend_schema(tags=['پورسانت و فروشندگان'], summary="مشاهده جزئیات تنظیمات پورسانت یک فروشنده"),
-    create=extend_schema(tags=['پورسانت و فروشندگان'], summary="ثبت قوانین پورسانت جدید برای فروشنده"),
-    update=extend_schema(tags=['پورسانت و فروشندگان'], summary="ویرایش کامل تنظیمات پورسانت"),
-    partial_update=extend_schema(tags=['پورسانت و فروشندگان'], summary="ویرایش جزئی تنظیمات پورسانت"),
-    destroy=extend_schema(tags=['پورسانت و فروشندگان'], summary="حذف تنظیمات پورسانت"),
+    list=extend_schema(tags=['فروشندگان و پورسانت'], summary="لیست قوانین پورسانت و پاداش"),
+    retrieve=extend_schema(tags=['فروشندگان و پورسانت'], summary="مشاهده جزئیات تنظیمات پورسانت یک فروشنده"),
+    create=extend_schema(tags=['فروشندگان و پورسانت'], summary="ثبت قوانین پورسانت جدید برای فروشنده"),
+    update=extend_schema(tags=['فروشندگان و پورسانت'], summary="ویرایش کامل تنظیمات پورسانت"),
+    partial_update=extend_schema(tags=['فروشندگان و پورسانت'], summary="ویرایش جزئی تنظیمات پورسانت"),
+    destroy=extend_schema(tags=['فروشندگان و پورسانت'], summary="حذف تنظیمات پورسانت"),
 )
 class SellerCommissionConfigViewSet(viewsets.ModelViewSet):
     """
@@ -2365,7 +2894,13 @@ class SellerCommissionConfigViewSet(viewsets.ModelViewSet):
         return user.is_superior_to(seller)
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return self.queryset.none()
+
         user = self.request.user
+        if not (user and user.is_authenticated):
+            return self.queryset.none()
+
         if self._is_admin_or_finance(user):
             return self.queryset
 
@@ -2401,7 +2936,7 @@ class SellerCommissionConfigViewSet(viewsets.ModelViewSet):
         instance.delete()
 
     @extend_schema(
-        tags=['پورسانت و فروشندگان'],
+        tags=['فروشندگان و پورسانت'],
         summary="استعلام جامع وضعیت پورسانت، پاداش و فروش‌های ماهانه فروشنده",
         parameters=[
             OpenApiParameter(
@@ -2533,12 +3068,12 @@ class SellerCommissionConfigViewSet(viewsets.ModelViewSet):
 
 
 @extend_schema_view(
-    list=extend_schema(tags=['پورسانت و فروشندگان'], summary="لیست فروش‌های روزانه فروشندگان"),
-    retrieve=extend_schema(tags=['پورسانت و فروشندگان'], summary="مشاهده یک رکورد فروش روزانه"),
-    create=extend_schema(tags=['پورسانت و فروشندگان'], summary="ثبت یک رکورد فروش روزانه برای فروشنده"),
-    update=extend_schema(tags=['پورسانت و فروشندگان'], summary="ویرایش فروش روزانه"),
-    partial_update=extend_schema(tags=['پورسانت و فروشندگان'], summary="ویرایش جزئی فروش روزانه"),
-    destroy=extend_schema(tags=['پورسانت و فروشندگان'], summary="حذف رکورد فروش روزانه"),
+    list=extend_schema(tags=['فروشندگان و پورسانت'], summary="لیست فروش‌های روزانه فروشندگان"),
+    retrieve=extend_schema(tags=['فروشندگان و پورسانت'], summary="مشاهده یک رکورد فروش روزانه"),
+    create=extend_schema(tags=['فروشندگان و پورسانت'], summary="ثبت یک رکورد فروش روزانه برای فروشنده"),
+    update=extend_schema(tags=['فروشندگان و پورسانت'], summary="ویرایش فروش روزانه"),
+    partial_update=extend_schema(tags=['فروشندگان و پورسانت'], summary="ویرایش جزئی فروش روزانه"),
+    destroy=extend_schema(tags=['فروشندگان و پورسانت'], summary="حذف رکورد فروش روزانه"),
 )
 class SellerDailySaleViewSet(viewsets.ModelViewSet):
     """
@@ -2565,8 +3100,13 @@ class SellerDailySaleViewSet(viewsets.ModelViewSet):
         return False
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return self.queryset.none()
+
         qs = self.queryset
         user = self.request.user
+        if not (user and user.is_authenticated):
+            return self.queryset.none()
 
         # فیلترها
         seller_id = self.request.query_params.get('seller')
@@ -2626,7 +3166,7 @@ class SellerDailySaleViewSet(viewsets.ModelViewSet):
         instance.delete()
 
     @extend_schema(
-        tags=['پورسانت و فروشندگان'],
+        tags=['فروشندگان و پورسانت'],
         summary="ثبت تجمیعی (Bulk) فروش‌های روزانه کل ماه برای یک فروشنده",
         request=SellerDailySaleBulkSerializer,
     )
@@ -2851,8 +3391,8 @@ class LiquidityDailyChargeViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
             ),
             OpenApiParameter(
                 name='category', type=OpenApiTypes.STR, location=OpenApiParameter.QUERY,
-                description="دسته‌بندی هزینه: SALARY (حقوق), DAILY (روزانه), RENT (اجاره), BILL (قبض), CHEQUE (چک), PURCHASE (خرید), MISC (متفرقه)",
-                enum=['SALARY', 'DAILY', 'RENT', 'BILL', 'CHEQUE', 'PURCHASE', 'MISC']
+                description="دسته‌بندی هزینه: SUPPLIER (تامین‌کننده), SALARY (حقوق), RENT (اجاره), INSTALLMENTS (اقساط), OTHER_EXPENSES (سایر هزینه‌ها), MANAGEMENT (مدیریت), SAVINGS (پس‌انداز), CHARITY (خیریه), EQUIPMENT (تجهیزات)",
+                enum=['SUPPLIER', 'SALARY', 'RENT', 'INSTALLMENTS', 'OTHER_EXPENSES', 'MANAGEMENT', 'SAVINGS', 'CHARITY', 'EQUIPMENT']
             ),
             OpenApiParameter(
                 name='is_paid', type=OpenApiTypes.BOOL, location=OpenApiParameter.QUERY,
@@ -2902,6 +3442,7 @@ class LiquidityExpenseViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     """
     مدیریت هزینه‌های تعهد شده نقدینگی (CRUD، لیست با فیلترهای تفکیکی، ثبت پرداخت مرحله‌ای و تایید تسویه نهایی)
     """
+    queryset = LiquidityExpense.objects.all()
     permission_classes = [IsLiquidityManager]
     serializer_class = LiquidityExpenseSerializer
 
@@ -2917,6 +3458,9 @@ class LiquidityExpenseViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         return ctx
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return LiquidityExpense.objects.none()
+
         qs = LiquidityExpense.objects.select_related('created_by').prefetch_related('payments__created_by')
 
         if self.action != 'list':
@@ -3304,6 +3848,10 @@ class LiquidityCardsViewSet(viewsets.ViewSet):
         summary="جزئیات و تاریخچه تراکنش‌های یک کارت نقدینگی",
         parameters=[
             OpenApiParameter(
+                name='id', type=OpenApiTypes.STR, location=OpenApiParameter.PATH,
+                description="کد نوع کارت نقدینگی (مانند: supplier, salary, rent, installments, other_expenses, management, savings, charity, equipment)"
+            ),
+            OpenApiParameter(
                 name='type', type=OpenApiTypes.STR, location=OpenApiParameter.QUERY,
                 description="فیلتر بر اساس نوع تراکنش: DEPOSIT (واریز) یا WITHDRAWAL (برداشت)",
                 enum=['DEPOSIT', 'WITHDRAWAL']
@@ -3346,8 +3894,15 @@ class LiquidityCardsViewSet(viewsets.ViewSet):
         }, status=status.HTTP_200_OK)
 
     @extend_schema(
+        operation_id="liquidity_card_specific_transaction_create",
         tags=['مدیریت نقدینگی - کارت‌ها'],
-        summary="ثبت تراکنش واریز یا برداشت کارت نقدینگی",
+        summary="ثبت تراکنش واریز یا برداشت برای کارت مشخص",
+        parameters=[
+            OpenApiParameter(
+                name='id', type=OpenApiTypes.STR, location=OpenApiParameter.PATH,
+                description="کد نوع کارت نقدینگی (مانند: supplier, salary, rent, installments, other_expenses, management, savings, charity, equipment)"
+            )
+        ],
         request=LiquidityCardTransactionCreateSerializer,
         responses={201: LiquidityCardTransactionCreateResponseSerializer}
     )
@@ -3367,6 +3922,7 @@ class LiquidityCardsViewSet(viewsets.ViewSet):
         return self._add_card_transaction(request, card_code)
 
     @extend_schema(
+        operation_id="liquidity_cards_general_transaction_create",
         tags=['مدیریت نقدینگی - کارت‌ها'],
         summary="ثبت تراکنش عمومی در کارت‌های نقدینگی با تعیین نوع کارت در بدنه",
         request=LiquidityCardTransactionCreateSerializer,

@@ -1229,6 +1229,15 @@ class LiquidityExpense(models.Model):
         ('EQUIPMENT',      'تجهیزات'),
     ]
 
+    EXPENSE_STATUS_CHOICES = [
+        ('EXCELLENT', 'عالی'),
+        ('NORMAL',    'عادی'),
+        ('WARNING',   'هشدار'),
+        ('CRITICAL',  'بحرانی'),
+        ('OVERDUE',   'معوقه'),
+        ('PAID',      'پرداخت شده'),
+    ]
+
     id          = models.UUIDField(primary_key=True, default=uuid4, editable=False)
     title       = models.CharField(max_length=150, verbose_name="نام/عنوان هزینه")
     category    = models.CharField(max_length=30, choices=CATEGORY_CHOICES, default='OTHER_EXPENSES', verbose_name="دسته‌بندی")
