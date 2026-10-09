@@ -3511,8 +3511,10 @@ class LiquidityExpenseViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         if status_param:
             status_param = status_param.upper()
             daily_rev = LiquidityDailyRevenueSetting.get_current_revenue().amount
+            all_candidates = list(qs)
+            batch_metrics = LiquidityExpense.batch_calculate_metrics(all_candidates, daily_revenue=daily_rev)
             matching_ids = [
-                exp.id for exp in qs if exp.calculate_status(daily_revenue=daily_rev) == status_param
+                exp.id for exp in all_candidates if batch_metrics.get(exp.id, {}).get('status') == status_param
             ]
             qs = qs.filter(id__in=matching_ids)
 
@@ -3524,6 +3526,26 @@ class LiquidityExpenseViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
             qs = qs.order_by('is_paid', 'due_date', '-created_at')
 
         return qs
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+
+        page = self.paginate_queryset(queryset)
+        items = list(page) if page is not None else list(queryset)
+
+        # بهینه‌سازی: محاسبه تجمیعی متریک‌ها برای اقلام موجود در خروجی
+        setting = LiquidityDailyRevenueSetting.get_current_revenue()
+        batch_metrics = LiquidityExpense.batch_calculate_metrics(items, daily_revenue=setting.amount)
+
+        ctx = self.get_serializer_context()
+        ctx['batch_metrics'] = batch_metrics
+
+        if page is not None:
+            serializer = self.get_serializer(page, many=True, context=ctx)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(items, many=True, context=ctx)
+        return Response(serializer.data)
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
@@ -3722,10 +3744,11 @@ class LiquidityExpenseViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         next_week_items = [e for e in unpaid if today <= e.due_date <= next_week]
         overdue_items = [e for e in unpaid if e.due_date < today]
 
-        # وضعیت‌ها
+        # وضعیت‌ها بر اساس فرمول نقدینگی جدید
         status_counts = {'EXCELLENT': 0, 'NORMAL': 0, 'WARNING': 0, 'CRITICAL': 0, 'OVERDUE': 0, 'PAID': len(paid)}
+        batch_metrics = LiquidityExpense.batch_calculate_metrics(unpaid, daily_revenue=daily_rev)
         for e in unpaid:
-            st = e.calculate_status(daily_revenue=daily_rev)
+            st = batch_metrics.get(e.id, {}).get('status')
             if st in status_counts:
                 status_counts[st] += 1
 

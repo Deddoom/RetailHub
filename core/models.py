@@ -1213,6 +1213,21 @@ class LiquidityDailyRevenueSetting(models.Model):
         return obj
 
 
+
+# ── درصدهای مصوب تخصیص سهم دسته‌بندی‌ها از فروش روزانه ────────────────────────────
+CATEGORY_PERCENTAGES = {
+    'SUPPLIER': Decimal('0.51'),       # تامین کننده: ۵۱٪
+    'SALARY': Decimal('0.14'),         # حقوق: ۱۴٪
+    'RENT': Decimal('0.05'),           # اجاره: ۵٪
+    'INSTALLMENTS': Decimal('0.09'),   # اقساط: ۹٪
+    'OTHER_EXPENSES': Decimal('0.07'), # سایر هزینه ها: ۷٪
+    'MANAGEMENT': Decimal('0.03'),     # مدیریت: ۳٪
+    'SAVINGS': Decimal('0.07'),        # پس انداز: ۷٪
+    'CHARITY': Decimal('0.02'),        # خیریه: ۲٪
+    'EQUIPMENT': Decimal('0.02'),      # تجهیزات: ۲٪
+}
+
+
 class LiquidityExpense(models.Model):
     """
     هزینه‌های تعهد شده مدیریت نقدینگی (حقوق، روزانه، اجاره، قبض، چک، خرید، متفرقه)
@@ -1276,52 +1291,185 @@ class LiquidityExpense(models.Model):
         today = datetime.date.today()
         return (self.due_date - today).days
 
-    def calculate_status(self, daily_revenue=None):
+    def get_card_balance(self):
         """
-        محاسبه وضعیت هوشمند:
-        1. اگر تایید پرداخت خورده -> PAID (پرداخت شده)
-        2. اگر قبل از سررسید مقدار داده شده >= کل مقدار -> EXCELLENT (عالی)
-        3. اگر سررسید گذشته و پرداخت نشده -> OVERDUE (عقب مانده)
-        4. در غیر این صورت بر اساس نسبت نرخ ذخیره روزانه به درآمد روزانه:
-           - کمتر از 50% درآمد روزانه -> NORMAL (عادی)
-           - بین 50% تا 75% درآمد روزانه -> WARNING (هشدار)
-           - بالاتر از 75% درآمد روزانه -> CRITICAL (خطرناک)
+        موجودی خالص فعلی کارت مربوط به این دسته‌بندی (واریزی‌ها منهای برداشت‌ها)
         """
+        tx_qs = LiquidityCardTransaction.objects.filter(card_type=self.category)
+        deposits = tx_qs.filter(transaction_type='DEPOSIT').aggregate(s=models.Sum('amount'))['s'] or Decimal('0.00')
+        withdrawals = tx_qs.filter(transaction_type='WITHDRAWAL').aggregate(s=models.Sum('amount'))['s'] or Decimal('0.00')
+        return deposits - withdrawals
+
+    def get_upstream_expenses_amount(self):
+        """
+        مجموع مبالغ هزینه‌های بالادستی:
+        هزینه‌های پرداخت‌نشده در همین دسته‌بندی که تاریخ سررسید آن‌ها زودتر از این هزینه است
+        (یا در صورت یکسان بودن تاریخ سررسید، زودتر ثبت شده‌اند).
+        """
+        qs = LiquidityExpense.objects.filter(
+            category=self.category,
+            is_paid=False
+        ).exclude(id=self.id)
+
+        earlier_due = qs.filter(due_date__lt=self.due_date)
+        total = earlier_due.aggregate(s=models.Sum('amount'))['s'] or Decimal('0.00')
+
+        if self.created_at:
+            same_due_earlier = qs.filter(due_date=self.due_date, created_at__lt=self.created_at)
+            total += same_due_earlier.aggregate(s=models.Sum('amount'))['s'] or Decimal('0.00')
+
+        return total
+
+    def calculate_liquidity_metrics(self, daily_revenue=None, card_balance=None, upstream_expenses=None):
+        """
+        محاسبه تمام متریک‌های نقدینگی و وضعیت هوشمند هزینه:
+        1. درصد سهم دسته‌بندی از فروش روزانه (Category Allocation Ratio)
+        2. موجودی فعلی کارت این دسته‌بندی (Card Balance)
+        3. مجموع هزینه‌های بالادستی (سررسید زودتر در همین دسته‌بندی)
+        4. ورودی پیش‌بینی‌شده نقدی تا سررسید (Expected Incoming Cash)
+        5. نقدینگی خالص در دسترس در تاریخ سررسید (Available Cash)
+        6. کسر شاخص فشار نقدینگی (Ratio / Fraction)
+        7. وضعیت هوشمند (Status)
+        """
+        cat_pct = CATEGORY_PERCENTAGES.get(self.category, Decimal('0.00'))
+
         if self.is_paid:
-            return 'PAID'
+            return {
+                'status': 'PAID',
+                'category_percentage': cat_pct,
+                'card_balance': Decimal('0.00') if card_balance is None else Decimal(str(card_balance)),
+                'upstream_expenses': Decimal('0.00') if upstream_expenses is None else Decimal(str(upstream_expenses)),
+                'expected_incoming': Decimal('0.00'),
+                'available_cash': Decimal('0.00'),
+                'ratio': Decimal('0.00'),
+            }
 
-        allocated = self.allocated_amount
-        rem_debt = max(Decimal('0.00'), self.amount - allocated)
         days = self.days_remaining
-
-        if rem_debt == Decimal('0.00') and days >= 0:
-            return 'EXCELLENT'
-
         if days < 0:
-            return 'OVERDUE'
+            return {
+                'status': 'OVERDUE',
+                'category_percentage': cat_pct,
+                'card_balance': Decimal('0.00') if card_balance is None else Decimal(str(card_balance)),
+                'upstream_expenses': Decimal('0.00') if upstream_expenses is None else Decimal(str(upstream_expenses)),
+                'expected_incoming': Decimal('0.00'),
+                'available_cash': Decimal('0.00'),
+                'ratio': None,
+            }
 
         if daily_revenue is None:
             setting = LiquidityDailyRevenueSetting.get_current_revenue()
             daily_revenue = setting.amount
+        daily_revenue = Decimal(str(daily_revenue or '0.00'))
 
-        if not daily_revenue or daily_revenue <= 0:
-            if days <= 1:
-                return 'CRITICAL'
-            elif days <= 3:
-                return 'WARNING'
-            return 'NORMAL'
-
-        # در روز سررسید (days == 0)، ۱ روز در نظر گرفته می‌شود
-        effective_days = max(1, days)
-        daily_required = rem_debt / Decimal(str(effective_days))
-        ratio = daily_required / Decimal(str(daily_revenue))
-
-        if ratio < Decimal('0.50'):
-            return 'NORMAL'
-        elif ratio <= Decimal('0.75'):
-            return 'WARNING'
+        if card_balance is None:
+            card_balance = self.get_card_balance()
         else:
-            return 'CRITICAL'
+            card_balance = Decimal(str(card_balance))
+
+        if upstream_expenses is None:
+            upstream_expenses = self.get_upstream_expenses_amount()
+        else:
+            upstream_expenses = Decimal(str(upstream_expenses))
+
+        effective_days = Decimal(str(max(0, days)))
+        expected_incoming = daily_revenue * cat_pct * effective_days
+
+        # نقدینگی در دسترس (مخرج کسر):
+        # موجودی کارت + ورودی نقدی سهم این دسته تا سررسید - هزینه‌های بالادستی
+        available_cash = card_balance + expected_incoming - upstream_expenses
+
+        # تعیین وضعیت و مقدار کسر:
+        # اگر نقدینگی در دسترس صفر یا منفی باشد -> وضعیت قطعاً CRITICAL (بحرانی / خطرناک)
+        if available_cash <= Decimal('0.00'):
+            ratio = Decimal('999.00')
+            status_code = 'CRITICAL'
+        else:
+            ratio = round(self.amount / available_cash, 4)
+            if ratio >= Decimal('1.00'):
+                status_code = 'CRITICAL'
+            elif ratio >= Decimal('0.80'):
+                status_code = 'WARNING'
+            elif ratio >= Decimal('0.30'):
+                status_code = 'NORMAL'
+            else:
+                status_code = 'EXCELLENT'
+
+        return {
+            'status': status_code,
+            'category_percentage': cat_pct,
+            'card_balance': card_balance,
+            'upstream_expenses': upstream_expenses,
+            'expected_incoming': expected_incoming,
+            'available_cash': available_cash,
+            'ratio': ratio,
+        }
+
+    def calculate_status(self, daily_revenue=None, card_balance=None, upstream_expenses=None):
+        """
+        محاسبه وضعیت هوشمند بر اساس فرمول نقدینگی جدید:
+        PAID / OVERDUE / CRITICAL / WARNING / NORMAL / EXCELLENT
+        """
+        metrics = self.calculate_liquidity_metrics(
+            daily_revenue=daily_revenue,
+            card_balance=card_balance,
+            upstream_expenses=upstream_expenses
+        )
+        return metrics['status']
+
+    @classmethod
+    def batch_calculate_metrics(cls, expenses, daily_revenue=None, card_balances=None):
+        """
+        محاسبه بهینه و تجمیعی متریک‌های نقدینگی برای لیست هزینه‌ها بدون ایجاد کوئری N+1
+        خروجی: دیکشنری با کلید id هزینه و مقدار دیکشنری متریک‌ها
+        """
+        if daily_revenue is None:
+            setting = LiquidityDailyRevenueSetting.get_current_revenue()
+            daily_revenue = setting.amount
+        daily_revenue = Decimal(str(daily_revenue or '0.00'))
+
+        # دریافت موجودی کارت‌ها با ۱ کوئری در صورت عدم ارسال
+        if card_balances is None:
+            card_balances = {}
+            for code, _ in LiquidityCardTransaction.CARD_TYPE_CHOICES:
+                card_balances[code] = Decimal('0.00')
+
+            tx_summary = LiquidityCardTransaction.objects.values('card_type', 'transaction_type').annotate(
+                total=models.Sum('amount')
+            )
+            for row in tx_summary:
+                ctype = row['card_type']
+                amt = row['total'] or Decimal('0.00')
+                if row['transaction_type'] == 'DEPOSIT':
+                    card_balances[ctype] = card_balances.get(ctype, Decimal('0.00')) + amt
+                elif row['transaction_type'] == 'WITHDRAWAL':
+                    card_balances[ctype] = card_balances.get(ctype, Decimal('0.00')) - amt
+
+        # برای محاسبه دقیق هزینه‌های بالادستی هر هزینه، تمام هزینه‌های تسویه‌نشده سیستم را واکشی می‌کنیم
+        all_unpaid = list(cls.objects.filter(is_paid=False).order_by('due_date', 'created_at', 'id'))
+
+        # دسته‌بندی و محاسبه مبالغ انباشته بالادستی (Running Upstream Sums) در حافظه
+        upstream_by_id = {}
+        by_category = {}
+        for exp in all_unpaid:
+            by_category.setdefault(exp.category, []).append(exp)
+
+        for cat, cat_expenses in by_category.items():
+            running_sum = Decimal('0.00')
+            for exp in cat_expenses:
+                upstream_by_id[exp.id] = running_sum
+                running_sum += exp.amount
+
+        results = {}
+        for exp in expenses:
+            c_balance = card_balances.get(exp.category, Decimal('0.00'))
+            u_expenses = upstream_by_id.get(exp.id, Decimal('0.00'))
+            results[exp.id] = exp.calculate_liquidity_metrics(
+                daily_revenue=daily_revenue,
+                card_balance=c_balance,
+                upstream_expenses=u_expenses
+            )
+
+        return results
 
 
 class LiquidityExpensePayment(models.Model):

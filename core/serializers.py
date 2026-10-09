@@ -1835,6 +1835,12 @@ class LiquidityExpenseSerializer(serializers.ModelSerializer):
     status_display = serializers.SerializerMethodField()
     daily_saving_needed = serializers.SerializerMethodField()
     daily_revenue_ratio = serializers.SerializerMethodField()
+    ratio = serializers.SerializerMethodField()
+    category_percentage = serializers.SerializerMethodField()
+    card_balance = serializers.SerializerMethodField()
+    upstream_expenses = serializers.SerializerMethodField()
+    expected_incoming = serializers.SerializerMethodField()
+    available_cash = serializers.SerializerMethodField()
     due_date_jalali = serializers.SerializerMethodField()
     paid_at_jalali = serializers.SerializerMethodField()
     created_by_name = serializers.SerializerMethodField()
@@ -1847,7 +1853,9 @@ class LiquidityExpenseSerializer(serializers.ModelSerializer):
             'amount', 'due_date', 'due_date_jalali',
             'description', 'is_paid', 'paid_at', 'paid_at_jalali',
             'allocated_amount', 'remaining_debt', 'days_remaining',
-            'daily_saving_needed', 'daily_revenue_ratio',
+            'daily_saving_needed', 'daily_revenue_ratio', 'ratio',
+            'category_percentage', 'card_balance', 'upstream_expenses',
+            'expected_incoming', 'available_cash',
             'status', 'status_display', 'payments',
             'created_by', 'created_by_name', 'created_at', 'updated_at'
         ]
@@ -1860,10 +1868,16 @@ class LiquidityExpenseSerializer(serializers.ModelSerializer):
             mutable_data['title'] = mutable_data['name']
         return super().to_internal_value(mutable_data)
 
+    def _get_metrics(self, obj):
+        batch_metrics = self.context.get('batch_metrics')
+        if batch_metrics and obj.id in batch_metrics:
+            return batch_metrics[obj.id]
+        daily_revenue = self.context.get('daily_revenue')
+        return obj.calculate_liquidity_metrics(daily_revenue=daily_revenue)
+
     @extend_schema_field(serializers.ChoiceField(choices=LiquidityExpense.EXPENSE_STATUS_CHOICES))
     def get_status(self, obj):
-        daily_revenue = self.context.get('daily_revenue')
-        return obj.calculate_status(daily_revenue=daily_revenue)
+        return self._get_metrics(obj)['status']
 
     @extend_schema_field(serializers.CharField())
     def get_status_display(self, obj):
@@ -1885,16 +1899,34 @@ class LiquidityExpenseSerializer(serializers.ModelSerializer):
 
     @extend_schema_field(serializers.FloatField(allow_null=True))
     def get_daily_revenue_ratio(self, obj):
-        if obj.is_paid:
-            return Decimal('0.00')
-        daily_revenue = self.context.get('daily_revenue')
-        if daily_revenue is None:
-            setting = LiquidityDailyRevenueSetting.get_current_revenue()
-            daily_revenue = setting.amount
-        if not daily_revenue or daily_revenue <= 0:
-            return None
-        needed = self.get_daily_saving_needed(obj)
-        return round(needed / Decimal(str(daily_revenue)), 4)
+        r = self._get_metrics(obj).get('ratio')
+        return float(r) if r is not None else None
+
+    @extend_schema_field(serializers.FloatField(allow_null=True))
+    def get_ratio(self, obj):
+        r = self._get_metrics(obj).get('ratio')
+        return float(r) if r is not None else None
+
+    @extend_schema_field(serializers.FloatField())
+    def get_category_percentage(self, obj):
+        pct = self._get_metrics(obj).get('category_percentage', Decimal('0.00'))
+        return float(pct)
+
+    @extend_schema_field(serializers.DecimalField(max_digits=14, decimal_places=2))
+    def get_card_balance(self, obj):
+        return self._get_metrics(obj).get('card_balance', Decimal('0.00'))
+
+    @extend_schema_field(serializers.DecimalField(max_digits=14, decimal_places=2))
+    def get_upstream_expenses(self, obj):
+        return self._get_metrics(obj).get('upstream_expenses', Decimal('0.00'))
+
+    @extend_schema_field(serializers.DecimalField(max_digits=14, decimal_places=2))
+    def get_expected_incoming(self, obj):
+        return self._get_metrics(obj).get('expected_incoming', Decimal('0.00'))
+
+    @extend_schema_field(serializers.DecimalField(max_digits=14, decimal_places=2))
+    def get_available_cash(self, obj):
+        return self._get_metrics(obj).get('available_cash', Decimal('0.00'))
 
     @extend_schema_field(serializers.CharField(allow_null=True))
     def get_due_date_jalali(self, obj):
@@ -1935,6 +1967,13 @@ class LiquidityExpenseListSerializer(serializers.ModelSerializer):
     status = serializers.SerializerMethodField()
     status_display = serializers.SerializerMethodField()
     daily_saving_needed = serializers.SerializerMethodField()
+    daily_revenue_ratio = serializers.SerializerMethodField()
+    ratio = serializers.SerializerMethodField()
+    category_percentage = serializers.SerializerMethodField()
+    card_balance = serializers.SerializerMethodField()
+    upstream_expenses = serializers.SerializerMethodField()
+    expected_incoming = serializers.SerializerMethodField()
+    available_cash = serializers.SerializerMethodField()
     due_date_jalali = serializers.SerializerMethodField()
     payments_count = serializers.IntegerField(source='payments.count', read_only=True)
 
@@ -1945,14 +1984,23 @@ class LiquidityExpenseListSerializer(serializers.ModelSerializer):
             'amount', 'due_date', 'due_date_jalali',
             'is_paid', 'paid_at',
             'allocated_amount', 'remaining_debt', 'days_remaining',
-            'daily_saving_needed', 'status', 'status_display',
+            'daily_saving_needed', 'daily_revenue_ratio', 'ratio',
+            'category_percentage', 'card_balance', 'upstream_expenses',
+            'expected_incoming', 'available_cash',
+            'status', 'status_display',
             'payments_count', 'created_at'
         ]
 
+    def _get_metrics(self, obj):
+        batch_metrics = self.context.get('batch_metrics')
+        if batch_metrics and obj.id in batch_metrics:
+            return batch_metrics[obj.id]
+        daily_revenue = self.context.get('daily_revenue')
+        return obj.calculate_liquidity_metrics(daily_revenue=daily_revenue)
+
     @extend_schema_field(serializers.ChoiceField(choices=LiquidityExpense.EXPENSE_STATUS_CHOICES))
     def get_status(self, obj):
-        daily_revenue = self.context.get('daily_revenue')
-        return obj.calculate_status(daily_revenue=daily_revenue)
+        return self._get_metrics(obj)['status']
 
     @extend_schema_field(serializers.CharField())
     def get_status_display(self, obj):
@@ -1971,6 +2019,37 @@ class LiquidityExpenseListSerializer(serializers.ModelSerializer):
             return rem
         effective_days = max(1, days)
         return round(rem / Decimal(str(effective_days)), 2)
+
+    @extend_schema_field(serializers.FloatField(allow_null=True))
+    def get_daily_revenue_ratio(self, obj):
+        r = self._get_metrics(obj).get('ratio')
+        return float(r) if r is not None else None
+
+    @extend_schema_field(serializers.FloatField(allow_null=True))
+    def get_ratio(self, obj):
+        r = self._get_metrics(obj).get('ratio')
+        return float(r) if r is not None else None
+
+    @extend_schema_field(serializers.FloatField())
+    def get_category_percentage(self, obj):
+        pct = self._get_metrics(obj).get('category_percentage', Decimal('0.00'))
+        return float(pct)
+
+    @extend_schema_field(serializers.DecimalField(max_digits=14, decimal_places=2))
+    def get_card_balance(self, obj):
+        return self._get_metrics(obj).get('card_balance', Decimal('0.00'))
+
+    @extend_schema_field(serializers.DecimalField(max_digits=14, decimal_places=2))
+    def get_upstream_expenses(self, obj):
+        return self._get_metrics(obj).get('upstream_expenses', Decimal('0.00'))
+
+    @extend_schema_field(serializers.DecimalField(max_digits=14, decimal_places=2))
+    def get_expected_incoming(self, obj):
+        return self._get_metrics(obj).get('expected_incoming', Decimal('0.00'))
+
+    @extend_schema_field(serializers.DecimalField(max_digits=14, decimal_places=2))
+    def get_available_cash(self, obj):
+        return self._get_metrics(obj).get('available_cash', Decimal('0.00'))
 
     @extend_schema_field(serializers.CharField(allow_null=True))
     def get_due_date_jalali(self, obj):
