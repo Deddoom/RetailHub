@@ -1257,6 +1257,8 @@ class LiquidityExpense(models.Model):
     title       = models.CharField(max_length=150, verbose_name="نام/عنوان هزینه")
     category    = models.CharField(max_length=30, choices=CATEGORY_CHOICES, default='OTHER_EXPENSES', verbose_name="دسته‌بندی")
     amount      = models.DecimalField(max_digits=14, decimal_places=2, verbose_name="مبلغ کل هزینه")
+    initial_amount = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True, verbose_name="مبلغ اولیه کل هزینه")
+    has_spent_check = models.BooleanField(default=False, verbose_name="آیا خرج چک دارد؟")
     due_date    = models.DateField(verbose_name="تاریخ سررسید")
     description = models.TextField(blank=True, null=True, verbose_name="توضیحات")
     is_paid     = models.BooleanField(default=False, verbose_name="آیا تایید پرداخت زده شده است؟")
@@ -1272,6 +1274,28 @@ class LiquidityExpense(models.Model):
 
     def __str__(self):
         return f"{self.title} ({self.get_category_display()}) - {self.amount:,.0f}"
+
+    def save(self, *args, **kwargs):
+        if self.initial_amount is None and self.amount is not None:
+            self.initial_amount = self.amount
+        super().save(*args, **kwargs)
+
+    @property
+    def spent_checks_amount(self):
+        """مجموع مبالغ چک‌های خرج‌شده برای این هزینه"""
+        total = self.spent_checks.aggregate(s=models.Sum('amount'))['s']
+        return total or Decimal('0.00')
+
+    def recalculate_amounts(self):
+        """
+        محاسبه مجدد مبلغ خالص هزینه پس از اعمال چک‌های خرج‌شده:
+        amount = max(0, initial_amount - spent_checks_amount)
+        """
+        if self.initial_amount is None:
+            self.initial_amount = self.amount
+        spent_total = self.spent_checks_amount
+        self.has_spent_check = bool(spent_total > Decimal('0.00'))
+        self.amount = max(Decimal('0.00'), self.initial_amount - spent_total)
 
     @property
     def allocated_amount(self):
@@ -1543,10 +1567,37 @@ class LiquidityCardTransaction(models.Model):
 # ── LiquidityDailyCharge (شارژ شدگی روزانه مدیریت نقدینگی) ──────────────────────
 class LiquidityDailyCharge(models.Model):
     """
-    ثبت شارژهای روزانه نقدینگی (میزان شارژ شدگی به همراه تاریخ و ساعت دقیق)
+    ثبت شارژهای روزانه نقدینگی (شامل تفکیک فروش ۴ شعبه با ۳ روش پرداخت، وصول مطالبات و چک پاس شده)
     """
     id          = models.UUIDField(primary_key=True, default=uuid4, editable=False)
-    amount      = models.DecimalField(max_digits=14, decimal_places=2, verbose_name="مبلغ شارژ روزانه (تومان)")
+    date        = models.DateField(default=datetime.date.today, verbose_name="تاریخ شارژ")
+
+    # ── فروش شعبه بهشتی ──
+    beheshti_pos          = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'), verbose_name="کارتخوان بهشتی")
+    beheshti_cash         = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'), verbose_name="نقد بهشتی")
+    beheshti_card_to_card = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'), verbose_name="کارت به کارت بهشتی")
+
+    # ── فروش شعبه سپیده ──
+    sepideh_pos           = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'), verbose_name="کارتخوان سپیده")
+    sepideh_cash          = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'), verbose_name="نقد سپیده")
+    sepideh_card_to_card  = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'), verbose_name="کارت به کارت سپیده")
+
+    # ── فروش شعبه مدرس ──
+    modarres_pos          = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'), verbose_name="کارتخوان مدرس")
+    modarres_cash         = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'), verbose_name="نقد مدرس")
+    modarres_card_to_card = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'), verbose_name="کارت به کارت مدرس")
+
+    # ── فروش شعبه کاجستان ──
+    kajestan_pos          = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'), verbose_name="کارتخوان کاجستان")
+    kajestan_cash         = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'), verbose_name="نقد کاجستان")
+    kajestan_card_to_card = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'), verbose_name="کارت به کارت کاجستان")
+
+    # ── وصول مطالبات و چک پاس شده ──
+    debt_collection       = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'), verbose_name="وصول مطالبات")
+    passed_checks_amount  = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'), verbose_name="چک پاس شده")
+
+    # ── جمع کل فروش و شارژ روزانه ──
+    amount      = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'), verbose_name="مبلغ فروش کل / شارژ روزانه (تومان)")
     description = models.CharField(max_length=255, blank=True, null=True, verbose_name="توضیحات / بابت")
     created_by  = models.ForeignKey(CustomUser, on_delete=models.PROTECT, related_name='liquidity_daily_charges', verbose_name="ثبت‌کننده")
     created_at  = models.DateTimeField(auto_now_add=True, verbose_name="تاریخ و ساعت ثبت شارژ")
@@ -1554,8 +1605,110 @@ class LiquidityDailyCharge(models.Model):
     class Meta:
         verbose_name = "شارژ روزانه نقدینگی"
         verbose_name_plural = "شارژهای روزانه نقدینگی"
-        ordering = ['-created_at']
+        ordering = ['-date', '-created_at']
 
     def __str__(self):
-        return f"شارژ {self.amount:,.0f} تومان - {self.created_at}"
+        return f"شارژ {self.amount:,.0f} تومان - {self.date}"
+
+    @property
+    def beheshti_total(self):
+        return (self.beheshti_pos or Decimal('0.00')) + (self.beheshti_cash or Decimal('0.00')) + (self.beheshti_card_to_card or Decimal('0.00'))
+
+    @property
+    def sepideh_total(self):
+        return (self.sepideh_pos or Decimal('0.00')) + (self.sepideh_cash or Decimal('0.00')) + (self.sepideh_card_to_card or Decimal('0.00'))
+
+    @property
+    def modarres_total(self):
+        return (self.modarres_pos or Decimal('0.00')) + (self.modarres_cash or Decimal('0.00')) + (self.modarres_card_to_card or Decimal('0.00'))
+
+    @property
+    def kajestan_total(self):
+        return (self.kajestan_pos or Decimal('0.00')) + (self.kajestan_cash or Decimal('0.00')) + (self.kajestan_card_to_card or Decimal('0.00'))
+
+    @property
+    def branch_sales_total(self):
+        return self.beheshti_total + self.sepideh_total + self.modarres_total + self.kajestan_total
+
+    @property
+    def total_sales(self):
+        return self.branch_sales_total + (self.debt_collection or Decimal('0.00')) + (self.passed_checks_amount or Decimal('0.00'))
+
+    def save(self, *args, **kwargs):
+        calculated = self.total_sales
+        if calculated > Decimal('0.00'):
+            self.amount = calculated
+        super().save(*args, **kwargs)
+
+
+# ── LiquidityCheck (مدیریت چک‌های نقدینگی) ──────────────────────────────────────
+class LiquidityCheck(models.Model):
+    """
+    مدیریت چک‌های دریافتی، وضعیت‌های وصول، سررسید و امکان خرج چک روی هزینه‌ها
+    """
+    BRANCH_CHOICES = [
+        ('BEHESHTI', 'شعبه بهشتی'),
+        ('MODARRES', 'شعبه مدرس'),
+        ('SEPIDEH',  'شعبه سپیده'),
+        ('KAJESTAN', 'شعبه کاجستان'),
+        ('ALL',      'کل مجموعه'),
+    ]
+
+    STATUS_CHOICES = [
+        ('CLEARED', 'وصول شده'),
+        ('PENDING', 'نرسیده'),
+        ('UNPAID',  'عدم پرداخت'),
+        ('BOUNCED', 'برگشتی'),
+        ('SPENT',   'خرج شده'),
+    ]
+
+    id               = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    customer_name    = models.CharField(max_length=200, verbose_name="نام مشتری")
+    issue_date       = models.DateField(default=datetime.date.today, verbose_name="تاریخ ثبت / صدور")
+    due_date         = models.DateField(verbose_name="تاریخ وصول / سررسید")
+    amount           = models.DecimalField(max_digits=14, decimal_places=2, verbose_name="مبلغ چک")
+    description      = models.TextField(blank=True, null=True, verbose_name="توضیحات")
+    branch           = models.CharField(max_length=30, choices=BRANCH_CHOICES, default='ALL', verbose_name="شعبه")
+    status           = models.CharField(max_length=30, choices=STATUS_CHOICES, default='PENDING', verbose_name="وضعیت چک")
+
+    # اتصال به هزینه نقدینگی در صورت خرج شدن چک
+    spent_on_expense = models.ForeignKey(
+        LiquidityExpense,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='spent_checks',
+        verbose_name="خرج شده بابت هزینه"
+    )
+    spent_at         = models.DateTimeField(null=True, blank=True, verbose_name="تاریخ و ساعت خرج شدن")
+
+    created_by       = models.ForeignKey(CustomUser, on_delete=models.PROTECT, related_name='liquidity_checks_created', verbose_name="ثبت‌کننده")
+    created_at       = models.DateTimeField(auto_now_add=True, verbose_name="زمان ثبت")
+    updated_at       = models.DateTimeField(auto_now=True, verbose_name="زمان به‌روزرسانی")
+
+    class Meta:
+        verbose_name = "چک مدیریت نقدینگی"
+        verbose_name_plural = "چک‌های مدیریت نقدینگی"
+        ordering = ['due_date', '-created_at']
+
+    def __str__(self):
+        return f"چک {self.customer_name} - {self.amount:,.0f} ({self.get_status_display()})"
+
+    @property
+    def is_overdue(self):
+        if self.status in ['CLEARED', 'SPENT']:
+            return False
+        return self.due_date < datetime.date.today()
+
+    @property
+    def days_remaining(self):
+        return (self.due_date - datetime.date.today()).days
+
+    @classmethod
+    def sync_overdue_checks(cls):
+        """
+        انتقال خودکار چک‌های در وضعیت «نرسیده» با سررسید گذشته به «عدم پرداخت»
+        """
+        today = datetime.date.today()
+        cls.objects.filter(status='PENDING', due_date__lt=today).update(status='UNPAID')
 

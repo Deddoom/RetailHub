@@ -2057,6 +2057,217 @@ paths:
               schema:
                 $ref: '#/components/schemas/LiquiditySimpleMessageResponse'
           description: ''
+  /api/liquidity/checks/:
+    get:
+      operationId: liquidity_checks_list
+      description: دریافت لیست چک‌های ثبت‌شده در سیستم. در هر فراخوانی، چک‌های نرسیده
+        با سررسید گذشته به طور خودکار به عدم پرداخت تبدیل می‌شوند.
+      summary: لیست چک‌های دریافتی با فیلتر و جستجو
+      parameters:
+      - in: query
+        name: available_for_expense
+        schema:
+          type: boolean
+        description: فقط چک‌های قابل خرج (نرسیده و عدم پرداخت که خرج نشده‌اند)
+      - in: query
+        name: branch
+        schema:
+          type: string
+        description: فیلتر بر اساس شعبه (BEHESHTI, MODARRES, SEPIDEH, KAJESTAN, ALL)
+      - in: query
+        name: from_date
+        schema:
+          type: string
+          format: date
+        description: فیلتر از تاریخ سررسید (YYYY-MM-DD)
+      - name: ordering
+        required: false
+        in: query
+        description: کدام فیلد باید هنگام مرتب‌سازی نتایج استفاده شود.
+        schema:
+          type: string
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: جستجو در نام مشتری یا توضیحات
+      - in: query
+        name: status
+        schema:
+          type: string
+        description: فیلتر بر اساس وضعیت (CLEARED, PENDING, UNPAID, BOUNCED, SPENT)
+      - in: query
+        name: to_date
+        schema:
+          type: string
+          format: date
+        description: فیلتر تا تاریخ سررسید (YYYY-MM-DD)
+      tags:
+      - مدیریت نقدینگی - چک‌ها
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LiquidityCheck'
+          description: ''
+    post:
+      operationId: liquidity_checks_create
+      description: ثبت مشخصات چک جدید دریافتی از مشتری
+      summary: ثبت چک جدید
+      tags:
+      - مدیریت نقدینگی - چک‌ها
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LiquidityCheckRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/LiquidityCheckRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/LiquidityCheckRequest'
+        required: true
+      security:
+      - BearerAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiquidityCheck'
+          description: ''
+  /api/liquidity/checks/{id}/:
+    get:
+      operationId: liquidity_checks_retrieve
+      summary: مشاهده جزئیات یک چک
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: یک رشته UUID که این چک مدیریت نقدینگی را شناسایی میکند.
+        required: true
+      tags:
+      - مدیریت نقدینگی - چک‌ها
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiquidityCheck'
+          description: ''
+    put:
+      operationId: liquidity_checks_update
+      summary: ویرایش کامل مشخصات چک یا تغییر وضعیت
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: یک رشته UUID که این چک مدیریت نقدینگی را شناسایی میکند.
+        required: true
+      tags:
+      - مدیریت نقدینگی - چک‌ها
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LiquidityCheckRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/LiquidityCheckRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/LiquidityCheckRequest'
+        required: true
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiquidityCheck'
+          description: ''
+    patch:
+      operationId: liquidity_checks_partial_update
+      summary: ویرایش جزیی یا تغییر وضعیت چک (وصول شده، برگشتی، ...)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: یک رشته UUID که این چک مدیریت نقدینگی را شناسایی میکند.
+        required: true
+      tags:
+      - مدیریت نقدینگی - چک‌ها
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedLiquidityCheckRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedLiquidityCheckRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedLiquidityCheckRequest'
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiquidityCheck'
+          description: ''
+    delete:
+      operationId: liquidity_checks_destroy
+      description: فقط ادمین و مدیر مالی مجاز به حذف چک هستند
+      summary: حذف چک
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: یک رشته UUID که این چک مدیریت نقدینگی را شناسایی میکند.
+        required: true
+      tags:
+      - مدیریت نقدینگی - چک‌ها
+      security:
+      - BearerAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/liquidity/checks/summary/:
+    get:
+      operationId: liquidity_checks_summary_retrieve
+      description: شمارش تعداد و جمع مبالغ چک‌ها به تفکیک وضعیت (وصول شده، نرسیده،
+        عدم پرداخت، برگشتی، خرج شده)
+      summary: خلاصه آماری و وضعیت چک‌ها
+      tags:
+      - مدیریت نقدینگی - چک‌ها
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiquidityCheckSummary'
+          description: ''
   /api/liquidity/daily-charges/:
     get:
       operationId: liquidity_daily_charges_list
@@ -2112,7 +2323,6 @@ paths:
           multipart/form-data:
             schema:
               $ref: '#/components/schemas/LiquidityDailyChargeCreateRequest'
-        required: true
       security:
       - BearerAuth: []
       responses:
@@ -2168,7 +2378,6 @@ paths:
           multipart/form-data:
             schema:
               $ref: '#/components/schemas/LiquidityDailyChargeRequest'
-        required: true
       security:
       - BearerAuth: []
       responses:
@@ -2629,6 +2838,79 @@ paths:
         required: true
       tags:
       - مدیریت نقدینگی - هزینه‌ها
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiquidityExpenseActionResponse'
+          description: ''
+  /api/liquidity/expenses/{id}/remove-spent-check/:
+    post:
+      operationId: liquidity_expenses_remove_spent_check_create
+      description: جداسازی چک از هزینه و بازگرداندن وضعیت چک به نرسیده یا عدم پرداخت
+        و افزایش مجدد مبلغ هزینه
+      summary: لغو و حذف چک خرج‌شده از هزینه
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: یک رشته UUID که این هزینه نقدینگی را شناسایی میکند.
+        required: true
+      tags:
+      - مدیریت نقدینگی - هزینه‌ها
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LiquidityExpenseRemoveSpentCheckRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/LiquidityExpenseRemoveSpentCheckRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/LiquidityExpenseRemoveSpentCheckRequest'
+        required: true
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiquidityExpenseActionResponse'
+          description: ''
+  /api/liquidity/expenses/{id}/spend-checks/:
+    post:
+      operationId: liquidity_expenses_spend_checks_create
+      description: اختصاص یک یا چند چک به این هزینه جهت تسویه و کسر از بدهی نقدی آن
+      summary: خرج چک روی هزینه
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: یک رشته UUID که این هزینه نقدینگی را شناسایی میکند.
+        required: true
+      tags:
+      - مدیریت نقدینگی - هزینه‌ها
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LiquidityExpenseSpendChecksRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/LiquidityExpenseSpendChecksRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/LiquidityExpenseSpendChecksRequest'
+        required: true
       security:
       - BearerAuth: []
       responses:
@@ -8111,6 +8393,248 @@ components:
       - total_deposits
       - total_expenses
       - total_withdrawals
+    LiquidityCheck:
+      type: object
+      description: سریالایزر دریافت، ایجاد و ویرایش چک‌های مدیریت نقدینگی
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        customer_name:
+          type: string
+          title: نام مشتری
+          maxLength: 200
+        issue_date:
+          type: string
+          format: date
+          title: تاریخ ثبت / صدور
+        issue_date_jalali:
+          type: string
+          nullable: true
+          readOnly: true
+        due_date:
+          type: string
+          format: date
+          title: تاریخ وصول / سررسید
+        due_date_jalali:
+          type: string
+          nullable: true
+          readOnly: true
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: مبلغ چک
+        description:
+          type: string
+          nullable: true
+          title: توضیحات
+        branch:
+          allOf:
+          - $ref: '#/components/schemas/LiquidityCheckBranchEnum'
+          title: شعبه
+        branch_display:
+          type: string
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/LiquidityCheckStatusEnum'
+          title: وضعیت چک
+        status_display:
+          type: string
+          readOnly: true
+        days_remaining:
+          type: integer
+          readOnly: true
+        is_overdue:
+          type: boolean
+          readOnly: true
+        spent_on_expense:
+          type: string
+          format: uuid
+          nullable: true
+          title: خرج شده بابت هزینه
+        spent_on_expense_title:
+          type: string
+          readOnly: true
+        spent_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: تاریخ و ساعت خرج شدن
+        spent_at_jalali:
+          type: string
+          nullable: true
+          readOnly: true
+        created_by:
+          type: string
+          format: uuid
+          readOnly: true
+          title: ثبت‌کننده
+        created_by_name:
+          type: string
+          nullable: true
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+          title: زمان ثبت
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+          title: زمان به‌روزرسانی
+      required:
+      - amount
+      - branch_display
+      - created_at
+      - created_by
+      - created_by_name
+      - customer_name
+      - days_remaining
+      - due_date
+      - due_date_jalali
+      - id
+      - is_overdue
+      - issue_date_jalali
+      - spent_at
+      - spent_at_jalali
+      - spent_on_expense_title
+      - status_display
+      - updated_at
+    LiquidityCheckBranchEnum:
+      enum:
+      - BEHESHTI
+      - MODARRES
+      - SEPIDEH
+      - KAJESTAN
+      - ALL
+      type: string
+      description: |-
+        * `BEHESHTI` - شعبه بهشتی
+        * `MODARRES` - شعبه مدرس
+        * `SEPIDEH` - شعبه سپیده
+        * `KAJESTAN` - شعبه کاجستان
+        * `ALL` - کل مجموعه
+    LiquidityCheckRequest:
+      type: object
+      description: سریالایزر دریافت، ایجاد و ویرایش چک‌های مدیریت نقدینگی
+      properties:
+        customer_name:
+          type: string
+          minLength: 1
+          title: نام مشتری
+          maxLength: 200
+        issue_date:
+          type: string
+          format: date
+          title: تاریخ ثبت / صدور
+        due_date:
+          type: string
+          format: date
+          title: تاریخ وصول / سررسید
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: مبلغ چک
+        description:
+          type: string
+          nullable: true
+          title: توضیحات
+        branch:
+          allOf:
+          - $ref: '#/components/schemas/LiquidityCheckBranchEnum'
+          title: شعبه
+        status:
+          allOf:
+          - $ref: '#/components/schemas/LiquidityCheckStatusEnum'
+          title: وضعیت چک
+        spent_on_expense:
+          type: string
+          format: uuid
+          nullable: true
+          title: خرج شده بابت هزینه
+      required:
+      - amount
+      - customer_name
+      - due_date
+    LiquidityCheckStatusEnum:
+      enum:
+      - CLEARED
+      - PENDING
+      - UNPAID
+      - BOUNCED
+      - SPENT
+      type: string
+      description: |-
+        * `CLEARED` - وصول شده
+        * `PENDING` - نرسیده
+        * `UNPAID` - عدم پرداخت
+        * `BOUNCED` - برگشتی
+        * `SPENT` - خرج شده
+    LiquidityCheckSummary:
+      type: object
+      description: آمار و شمارش وضعیت‌های کلی چک‌ها
+      properties:
+        total_count:
+          type: integer
+          description: تعداد کل چک‌ها
+        total_amount:
+          type: number
+          format: double
+          description: مجموع مبالغ چک‌ها
+        cleared_count:
+          type: integer
+          description: تعداد چک‌های وصول‌شده
+        cleared_amount:
+          type: number
+          format: double
+          description: مجموع مبالغ وصول‌شده
+        pending_count:
+          type: integer
+          description: تعداد چک‌های نرسیده
+        pending_amount:
+          type: number
+          format: double
+          description: مجموع مبالغ نرسیده
+        unpaid_count:
+          type: integer
+          description: تعداد چک‌های پرداخت‌نشده/معوق
+        unpaid_amount:
+          type: number
+          format: double
+          description: مجموع مبالغ پرداخت‌نشده
+        bounced_count:
+          type: integer
+          description: تعداد چک‌های برگشتی
+        bounced_amount:
+          type: number
+          format: double
+          description: مجموع مبالغ برگشتی
+        spent_count:
+          type: integer
+          description: تعداد چک‌های خرج‌شده
+        spent_amount:
+          type: number
+          format: double
+          description: مجموع مبالغ خرج‌شده
+      required:
+      - bounced_amount
+      - bounced_count
+      - cleared_amount
+      - cleared_count
+      - pending_amount
+      - pending_count
+      - spent_amount
+      - spent_count
+      - total_amount
+      - total_count
+      - unpaid_amount
+      - unpaid_count
     LiquidityDailyCharge:
       type: object
       description: سریالایزر دریافت و نمایش اطلاعات شارژ روزانه نقدینگی
@@ -8119,16 +8643,124 @@ components:
           type: string
           format: uuid
           readOnly: true
+        date:
+          type: string
+          format: date
+          title: تاریخ شارژ
+        date_jalali:
+          type: string
+          nullable: true
+          readOnly: true
         amount:
           type: string
           format: decimal
           pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
-          title: مبلغ شارژ روزانه (تومان)
+          title: مبلغ فروش کل / شارژ روزانه (تومان)
+        total_sales:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          readOnly: true
         description:
           type: string
           nullable: true
           title: توضیحات / بابت
           maxLength: 255
+        beheshti_pos:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: کارتخوان بهشتی
+        beheshti_cash:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: نقد بهشتی
+        beheshti_card_to_card:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: کارت به کارت بهشتی
+        beheshti_total:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          readOnly: true
+        sepideh_pos:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: کارتخوان سپیده
+        sepideh_cash:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: نقد سپیده
+        sepideh_card_to_card:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: کارت به کارت سپیده
+        sepideh_total:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          readOnly: true
+        modarres_pos:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: کارتخوان مدرس
+        modarres_cash:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: نقد مدرس
+        modarres_card_to_card:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: کارت به کارت مدرس
+        modarres_total:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          readOnly: true
+        kajestan_pos:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: کارتخوان کاجستان
+        kajestan_cash:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: نقد کاجستان
+        kajestan_card_to_card:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: کارت به کارت کاجستان
+        kajestan_total:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          readOnly: true
+        branch_sales_total:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          readOnly: true
+        debt_collection:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: وصول مطالبات
+        passed_checks_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: چک پاس شده
         created_by:
           type: string
           format: uuid
@@ -8152,45 +8784,196 @@ components:
           nullable: true
           readOnly: true
       required:
-      - amount
+      - beheshti_total
+      - branch_sales_total
       - created_at
       - created_by
       - created_by_name
+      - date_jalali
       - id
+      - kajestan_total
+      - modarres_total
+      - sepideh_total
       - shamsi_date
       - shamsi_time
+      - total_sales
     LiquidityDailyChargeCreateRequest:
       type: object
-      description: سریالایزر ثبت سریع شارژ روزانه (فقط ارسال مبلغ و توضیحات اختیاری)
+      description: سریالایزر ثبت شارژ روزانه (دریافت ریز فروش شعب ۴ گانه، مطالبات،
+        چک پاس شده، تاریخ و توضیحات)
       properties:
+        date:
+          type: string
+          format: date
+          title: تاریخ شارژ
+        beheshti_pos:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: کارتخوان بهشتی
+        beheshti_cash:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: نقد بهشتی
+        beheshti_card_to_card:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: کارت به کارت بهشتی
+        sepideh_pos:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: کارتخوان سپیده
+        sepideh_cash:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: نقد سپیده
+        sepideh_card_to_card:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: کارت به کارت سپیده
+        modarres_pos:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: کارتخوان مدرس
+        modarres_cash:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: نقد مدرس
+        modarres_card_to_card:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: کارت به کارت مدرس
+        kajestan_pos:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: کارتخوان کاجستان
+        kajestan_cash:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: نقد کاجستان
+        kajestan_card_to_card:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: کارت به کارت کاجستان
+        debt_collection:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: وصول مطالبات
+        passed_checks_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: چک پاس شده
         amount:
           type: string
           format: decimal
           pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
-          title: مبلغ شارژ روزانه (تومان)
+          title: مبلغ فروش کل / شارژ روزانه (تومان)
         description:
           type: string
           nullable: true
           title: توضیحات / بابت
           maxLength: 255
-      required:
-      - amount
     LiquidityDailyChargeRequest:
       type: object
       description: سریالایزر دریافت و نمایش اطلاعات شارژ روزانه نقدینگی
       properties:
+        date:
+          type: string
+          format: date
+          title: تاریخ شارژ
         amount:
           type: string
           format: decimal
           pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
-          title: مبلغ شارژ روزانه (تومان)
+          title: مبلغ فروش کل / شارژ روزانه (تومان)
         description:
           type: string
           nullable: true
           title: توضیحات / بابت
           maxLength: 255
-      required:
-      - amount
+        beheshti_pos:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: کارتخوان بهشتی
+        beheshti_cash:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: نقد بهشتی
+        beheshti_card_to_card:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: کارت به کارت بهشتی
+        sepideh_pos:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: کارتخوان سپیده
+        sepideh_cash:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: نقد سپیده
+        sepideh_card_to_card:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: کارت به کارت سپیده
+        modarres_pos:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: کارتخوان مدرس
+        modarres_cash:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: نقد مدرس
+        modarres_card_to_card:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: کارت به کارت مدرس
+        kajestan_pos:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: کارتخوان کاجستان
+        kajestan_cash:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: نقد کاجستان
+        kajestan_card_to_card:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: کارت به کارت کاجستان
+        debt_collection:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: وصول مطالبات
+        passed_checks_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: چک پاس شده
     LiquidityDailyRevenueSetting:
       type: object
       properties:
@@ -8255,6 +9038,24 @@ components:
           format: decimal
           pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
           title: مبلغ کل هزینه
+        initial_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          readOnly: true
+        has_spent_check:
+          type: boolean
+          readOnly: true
+        spent_checks_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          readOnly: true
+        spent_checks:
+          type: array
+          items:
+            $ref: '#/components/schemas/LiquidityCheck'
+          readOnly: true
         due_date:
           type: string
           format: date
@@ -8304,6 +9105,35 @@ components:
           format: double
           nullable: true
           readOnly: true
+        ratio:
+          type: number
+          format: double
+          nullable: true
+          readOnly: true
+        category_percentage:
+          type: number
+          format: double
+          readOnly: true
+        card_balance:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          readOnly: true
+        upstream_expenses:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          readOnly: true
+        expected_incoming:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          readOnly: true
+        available_cash:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          readOnly: true
         status:
           allOf:
           - $ref: '#/components/schemas/LiquidityExpenseStatusEnum'
@@ -8338,7 +9168,10 @@ components:
       required:
       - allocated_amount
       - amount
+      - available_cash
+      - card_balance
       - category_display
+      - category_percentage
       - created_at
       - created_by
       - created_by_name
@@ -8347,16 +9180,23 @@ components:
       - days_remaining
       - due_date
       - due_date_jalali
+      - expected_incoming
+      - has_spent_check
       - id
+      - initial_amount
       - is_paid
       - paid_at
       - paid_at_jalali
       - payments
+      - ratio
       - remaining_debt
+      - spent_checks
+      - spent_checks_amount
       - status
       - status_display
       - title
       - updated_at
+      - upstream_expenses
     LiquidityExpenseActionResponse:
       type: object
       properties:
@@ -8395,6 +9235,19 @@ components:
           format: decimal
           pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
           title: مبلغ کل هزینه
+        initial_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          readOnly: true
+        has_spent_check:
+          type: boolean
+          readOnly: true
+        spent_checks_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          readOnly: true
         due_date:
           type: string
           format: date
@@ -8429,6 +9282,40 @@ components:
           format: decimal
           pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
           readOnly: true
+        daily_revenue_ratio:
+          type: number
+          format: double
+          nullable: true
+          readOnly: true
+        ratio:
+          type: number
+          format: double
+          nullable: true
+          readOnly: true
+        category_percentage:
+          type: number
+          format: double
+          readOnly: true
+        card_balance:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          readOnly: true
+        upstream_expenses:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          readOnly: true
+        expected_incoming:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          readOnly: true
+        available_cash:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          readOnly: true
         status:
           allOf:
           - $ref: '#/components/schemas/LiquidityExpenseStatusEnum'
@@ -8447,19 +9334,29 @@ components:
       required:
       - allocated_amount
       - amount
+      - available_cash
+      - card_balance
       - category_display
+      - category_percentage
       - created_at
+      - daily_revenue_ratio
       - daily_saving_needed
       - days_remaining
       - due_date
       - due_date_jalali
+      - expected_incoming
+      - has_spent_check
       - id
+      - initial_amount
       - name
       - payments_count
+      - ratio
       - remaining_debt
+      - spent_checks_amount
       - status
       - status_display
       - title
+      - upstream_expenses
     LiquidityExpensePayment:
       type: object
       properties:
@@ -8564,6 +9461,15 @@ components:
       required:
       - amount
       - expense
+    LiquidityExpenseRemoveSpentCheckRequest:
+      type: object
+      properties:
+        check_id:
+          type: string
+          format: uuid
+          description: شناسه چکی که می‌خواهید از این هزینه جدا شده و لغو خرج شود
+      required:
+      - check_id
     LiquidityExpenseRequest:
       type: object
       properties:
@@ -8584,6 +9490,12 @@ components:
           format: decimal
           pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
           title: مبلغ کل هزینه
+        check_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          writeOnly: true
         due_date:
           type: string
           format: date
@@ -8596,6 +9508,17 @@ components:
       - amount
       - due_date
       - title
+    LiquidityExpenseSpendChecksRequest:
+      type: object
+      properties:
+        check_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: لیست شناسه‌های چک‌های انتخابی جهت خرج شدن روی هزینه
+      required:
+      - check_ids
     LiquidityExpenseStatusEnum:
       enum:
       - EXCELLENT
@@ -9127,20 +10050,133 @@ components:
           format: date
         branch:
           $ref: '#/components/schemas/BranchChoiceEnum'
-    PatchedLiquidityDailyChargeRequest:
+    PatchedLiquidityCheckRequest:
       type: object
-      description: سریالایزر دریافت و نمایش اطلاعات شارژ روزانه نقدینگی
+      description: سریالایزر دریافت، ایجاد و ویرایش چک‌های مدیریت نقدینگی
       properties:
+        customer_name:
+          type: string
+          minLength: 1
+          title: نام مشتری
+          maxLength: 200
+        issue_date:
+          type: string
+          format: date
+          title: تاریخ ثبت / صدور
+        due_date:
+          type: string
+          format: date
+          title: تاریخ وصول / سررسید
         amount:
           type: string
           format: decimal
           pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
-          title: مبلغ شارژ روزانه (تومان)
+          title: مبلغ چک
+        description:
+          type: string
+          nullable: true
+          title: توضیحات
+        branch:
+          allOf:
+          - $ref: '#/components/schemas/LiquidityCheckBranchEnum'
+          title: شعبه
+        status:
+          allOf:
+          - $ref: '#/components/schemas/LiquidityCheckStatusEnum'
+          title: وضعیت چک
+        spent_on_expense:
+          type: string
+          format: uuid
+          nullable: true
+          title: خرج شده بابت هزینه
+    PatchedLiquidityDailyChargeRequest:
+      type: object
+      description: سریالایزر دریافت و نمایش اطلاعات شارژ روزانه نقدینگی
+      properties:
+        date:
+          type: string
+          format: date
+          title: تاریخ شارژ
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: مبلغ فروش کل / شارژ روزانه (تومان)
         description:
           type: string
           nullable: true
           title: توضیحات / بابت
           maxLength: 255
+        beheshti_pos:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: کارتخوان بهشتی
+        beheshti_cash:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: نقد بهشتی
+        beheshti_card_to_card:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: کارت به کارت بهشتی
+        sepideh_pos:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: کارتخوان سپیده
+        sepideh_cash:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: نقد سپیده
+        sepideh_card_to_card:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: کارت به کارت سپیده
+        modarres_pos:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: کارتخوان مدرس
+        modarres_cash:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: نقد مدرس
+        modarres_card_to_card:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: کارت به کارت مدرس
+        kajestan_pos:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: کارتخوان کاجستان
+        kajestan_cash:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: نقد کاجستان
+        kajestan_card_to_card:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: کارت به کارت کاجستان
+        debt_collection:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: وصول مطالبات
+        passed_checks_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          title: چک پاس شده
     PatchedLiquidityExpenseRequest:
       type: object
       properties:
@@ -9161,6 +10197,12 @@ components:
           format: decimal
           pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
           title: مبلغ کل هزینه
+        check_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          writeOnly: true
         due_date:
           type: string
           format: date

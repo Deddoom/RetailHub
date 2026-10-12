@@ -18,7 +18,7 @@ from core.models import (
     WasteReport, WasteItem, AdvanceRequest, AdvanceRequestLog,
     SellerCommissionConfig, SellerDailySale,
     LiquidityDailyRevenueSetting, LiquidityExpense, LiquidityExpensePayment, LiquidityCardTransaction,
-    LiquidityDailyCharge
+    LiquidityDailyCharge, LiquidityCheck
 )
 from core.utils.jalali import (
     get_days_in_shamsi_month, format_jalali_date, get_shamsi_month_name, gregorian_to_jalali
@@ -1825,11 +1825,93 @@ class LiquidityCardTransactionSerializer(serializers.ModelSerializer):
         return format_jalali_date(jy, jm, jd)
 
 
+# ── چک‌های مدیریت نقدینگی (Liquidity Checks) ───────────────────────────────────
+
+class LiquidityCheckSerializer(serializers.ModelSerializer):
+    """
+    سریالایزر دریافت، ایجاد و ویرایش چک‌های مدیریت نقدینگی
+    """
+    branch_display = serializers.CharField(source='get_branch_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    issue_date_jalali = serializers.SerializerMethodField()
+    due_date_jalali = serializers.SerializerMethodField()
+    spent_at_jalali = serializers.SerializerMethodField()
+    days_remaining = serializers.IntegerField(read_only=True)
+    is_overdue = serializers.BooleanField(read_only=True)
+    spent_on_expense_title = serializers.CharField(source='spent_on_expense.title', read_only=True)
+    created_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = LiquidityCheck
+        fields = [
+            'id', 'customer_name', 'issue_date', 'issue_date_jalali',
+            'due_date', 'due_date_jalali', 'amount', 'description',
+            'branch', 'branch_display', 'status', 'status_display',
+            'days_remaining', 'is_overdue',
+            'spent_on_expense', 'spent_on_expense_title', 'spent_at', 'spent_at_jalali',
+            'created_by', 'created_by_name', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_by', 'created_at', 'updated_at', 'spent_at']
+
+    @extend_schema_field(serializers.CharField(allow_null=True))
+    def get_issue_date_jalali(self, obj):
+        if not obj.issue_date:
+            return None
+        jy, jm, jd = gregorian_to_jalali(obj.issue_date.year, obj.issue_date.month, obj.issue_date.day)
+        return format_jalali_date(jy, jm, jd)
+
+    @extend_schema_field(serializers.CharField(allow_null=True))
+    def get_due_date_jalali(self, obj):
+        if not obj.due_date:
+            return None
+        jy, jm, jd = gregorian_to_jalali(obj.due_date.year, obj.due_date.month, obj.due_date.day)
+        return format_jalali_date(jy, jm, jd)
+
+    @extend_schema_field(serializers.CharField(allow_null=True))
+    def get_spent_at_jalali(self, obj):
+        if not obj.spent_at:
+            return None
+        from django.utils import timezone
+        local_dt = timezone.localtime(obj.spent_at)
+        jy, jm, jd = gregorian_to_jalali(local_dt.year, local_dt.month, local_dt.day)
+        return format_jalali_date(jy, jm, jd)
+
+    @extend_schema_field(serializers.CharField(allow_null=True))
+    def get_created_by_name(self, obj):
+        if not obj.created_by:
+            return None
+        full = f"{obj.created_by.first_name} {obj.created_by.last_name}".strip()
+        return full or obj.created_by.username
+
+
+class LiquidityCheckSummarySerializer(serializers.Serializer):
+    """
+    آمار و شمارش وضعیت‌های کلی چک‌ها
+    """
+    total_count = serializers.IntegerField(help_text="تعداد کل چک‌ها")
+    total_amount = serializers.FloatField(help_text="مجموع مبالغ چک‌ها")
+    cleared_count = serializers.IntegerField(help_text="تعداد چک‌های وصول‌شده")
+    cleared_amount = serializers.FloatField(help_text="مجموع مبالغ وصول‌شده")
+    pending_count = serializers.IntegerField(help_text="تعداد چک‌های نرسیده")
+    pending_amount = serializers.FloatField(help_text="مجموع مبالغ نرسیده")
+    unpaid_count = serializers.IntegerField(help_text="تعداد چک‌های پرداخت‌نشده/معوق")
+    unpaid_amount = serializers.FloatField(help_text="مجموع مبالغ پرداخت‌نشده")
+    bounced_count = serializers.IntegerField(help_text="تعداد چک‌های برگشتی")
+    bounced_amount = serializers.FloatField(help_text="مجموع مبالغ برگشتی")
+    spent_count = serializers.IntegerField(help_text="تعداد چک‌های خرج‌شده")
+    spent_amount = serializers.FloatField(help_text="مجموع مبالغ خرج‌شده")
+
+
 class LiquidityExpenseSerializer(serializers.ModelSerializer):
     name = serializers.CharField(source='title', required=False)
     category_display = serializers.CharField(source='get_category_display', read_only=True)
     allocated_amount = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
     remaining_debt = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    initial_amount = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    has_spent_check = serializers.BooleanField(read_only=True)
+    spent_checks_amount = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    spent_checks = LiquidityCheckSerializer(many=True, read_only=True)
+    check_ids = serializers.ListField(child=serializers.UUIDField(), required=False, write_only=True)
     days_remaining = serializers.IntegerField(read_only=True)
     status = serializers.SerializerMethodField()
     status_display = serializers.SerializerMethodField()
@@ -1850,7 +1932,8 @@ class LiquidityExpenseSerializer(serializers.ModelSerializer):
         model = LiquidityExpense
         fields = [
             'id', 'title', 'name', 'category', 'category_display',
-            'amount', 'due_date', 'due_date_jalali',
+            'amount', 'initial_amount', 'has_spent_check', 'spent_checks_amount', 'spent_checks', 'check_ids',
+            'due_date', 'due_date_jalali',
             'description', 'is_paid', 'paid_at', 'paid_at_jalali',
             'allocated_amount', 'remaining_debt', 'days_remaining',
             'daily_saving_needed', 'daily_revenue_ratio', 'ratio',
@@ -1867,6 +1950,40 @@ class LiquidityExpenseSerializer(serializers.ModelSerializer):
         if 'name' in mutable_data and 'title' not in mutable_data:
             mutable_data['title'] = mutable_data['name']
         return super().to_internal_value(mutable_data)
+
+    def create(self, validated_data):
+        check_ids = validated_data.pop('check_ids', None)
+        expense = super().create(validated_data)
+        if check_ids:
+            self._attach_checks(expense, check_ids)
+        return expense
+
+    def update(self, instance, validated_data):
+        check_ids = validated_data.pop('check_ids', None)
+        expense = super().update(instance, validated_data)
+        if check_ids is not None:
+            self._attach_checks(expense, check_ids)
+        return expense
+
+    def _attach_checks(self, expense, check_ids):
+        checks = list(LiquidityCheck.objects.filter(id__in=check_ids))
+        if len(checks) != len(check_ids):
+            raise serializers.ValidationError({"check_ids": "یک یا چند چک با شناسه‌های ارسال شده یافت نشدند."})
+        for chk in checks:
+            if chk.spent_on_expense and chk.spent_on_expense_id != expense.id:
+                raise serializers.ValidationError({"check_ids": f"چک «{chk.customer_name}» قبلاً برای هزینه دیگری خرج شده است."})
+            if chk.status not in ['PENDING', 'UNPAID']:
+                raise serializers.ValidationError({"check_ids": f"چک «{chk.customer_name}» در وضعیت {chk.get_status_display()} است و قابلیت خرج شدن ندارد."})
+
+        from django.utils import timezone
+        now = timezone.now()
+        for chk in checks:
+            chk.spent_on_expense = expense
+            chk.status = 'SPENT'
+            chk.spent_at = now
+            chk.save()
+        expense.recalculate_amounts()
+        expense.save()
 
     def _get_metrics(self, obj):
         batch_metrics = self.context.get('batch_metrics')
@@ -1963,6 +2080,9 @@ class LiquidityExpenseListSerializer(serializers.ModelSerializer):
     category_display = serializers.CharField(source='get_category_display', read_only=True)
     allocated_amount = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
     remaining_debt = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    initial_amount = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    has_spent_check = serializers.BooleanField(read_only=True)
+    spent_checks_amount = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
     days_remaining = serializers.IntegerField(read_only=True)
     status = serializers.SerializerMethodField()
     status_display = serializers.SerializerMethodField()
@@ -1981,7 +2101,8 @@ class LiquidityExpenseListSerializer(serializers.ModelSerializer):
         model = LiquidityExpense
         fields = [
             'id', 'title', 'name', 'category', 'category_display',
-            'amount', 'due_date', 'due_date_jalali',
+            'amount', 'initial_amount', 'has_spent_check', 'spent_checks_amount',
+            'due_date', 'due_date_jalali',
             'is_paid', 'paid_at',
             'allocated_amount', 'remaining_debt', 'days_remaining',
             'daily_saving_needed', 'daily_revenue_ratio', 'ratio',
@@ -2214,15 +2335,35 @@ class LiquidityDailyChargeSerializer(serializers.ModelSerializer):
     created_by_name = serializers.SerializerMethodField()
     shamsi_date = serializers.SerializerMethodField()
     shamsi_time = serializers.SerializerMethodField()
+    date_jalali = serializers.SerializerMethodField()
+    beheshti_total = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    sepideh_total = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    modarres_total = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    kajestan_total = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    branch_sales_total = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    total_sales = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
 
     class Meta:
         model = LiquidityDailyCharge
         fields = [
-            'id', 'amount', 'description',
+            'id', 'date', 'date_jalali', 'amount', 'total_sales', 'description',
+            'beheshti_pos', 'beheshti_cash', 'beheshti_card_to_card', 'beheshti_total',
+            'sepideh_pos', 'sepideh_cash', 'sepideh_card_to_card', 'sepideh_total',
+            'modarres_pos', 'modarres_cash', 'modarres_card_to_card', 'modarres_total',
+            'kajestan_pos', 'kajestan_cash', 'kajestan_card_to_card', 'kajestan_total',
+            'branch_sales_total',
+            'debt_collection', 'passed_checks_amount',
             'created_by', 'created_by_name',
             'created_at', 'shamsi_date', 'shamsi_time'
         ]
         read_only_fields = ['id', 'created_by', 'created_at']
+
+    @extend_schema_field(serializers.CharField(allow_null=True))
+    def get_date_jalali(self, obj):
+        if not obj.date:
+            return None
+        jy, jm, jd = gregorian_to_jalali(obj.date.year, obj.date.month, obj.date.day)
+        return format_jalali_date(jy, jm, jd)
 
     @extend_schema_field(serializers.CharField(allow_null=True))
     def get_created_by_name(self, obj):
@@ -2251,16 +2392,66 @@ class LiquidityDailyChargeSerializer(serializers.ModelSerializer):
 
 class LiquidityDailyChargeCreateSerializer(serializers.ModelSerializer):
     """
-    سریالایزر ثبت سریع شارژ روزانه (فقط ارسال مبلغ و توضیحات اختیاری)
+    سریالایزر ثبت شارژ روزانه (دریافت ریز فروش شعب ۴ گانه، مطالبات، چک پاس شده، تاریخ و توضیحات)
     """
     class Meta:
         model = LiquidityDailyCharge
-        fields = ['amount', 'description']
+        fields = [
+            'date',
+            'beheshti_pos', 'beheshti_cash', 'beheshti_card_to_card',
+            'sepideh_pos', 'sepideh_cash', 'sepideh_card_to_card',
+            'modarres_pos', 'modarres_cash', 'modarres_card_to_card',
+            'kajestan_pos', 'kajestan_cash', 'kajestan_card_to_card',
+            'debt_collection', 'passed_checks_amount',
+            'amount', 'description'
+        ]
+        extra_kwargs = {
+            'date': {'required': False},
+            'amount': {'required': False},
+            'description': {'required': False},
+        }
 
-    def validate_amount(self, value):
-        if value <= Decimal('0'):
-            raise serializers.ValidationError("مبلغ شارژ روزانه باید بزرگتر از صفر باشد.")
-        return value
+    def validate(self, attrs):
+        sub_sum = (
+            attrs.get('beheshti_pos', Decimal('0.00')) +
+            attrs.get('beheshti_cash', Decimal('0.00')) +
+            attrs.get('beheshti_card_to_card', Decimal('0.00')) +
+            attrs.get('sepideh_pos', Decimal('0.00')) +
+            attrs.get('sepideh_cash', Decimal('0.00')) +
+            attrs.get('sepideh_card_to_card', Decimal('0.00')) +
+            attrs.get('modarres_pos', Decimal('0.00')) +
+            attrs.get('modarres_cash', Decimal('0.00')) +
+            attrs.get('modarres_card_to_card', Decimal('0.00')) +
+            attrs.get('kajestan_pos', Decimal('0.00')) +
+            attrs.get('kajestan_cash', Decimal('0.00')) +
+            attrs.get('kajestan_card_to_card', Decimal('0.00')) +
+            attrs.get('debt_collection', Decimal('0.00')) +
+            attrs.get('passed_checks_amount', Decimal('0.00'))
+        )
+        direct_amt = attrs.get('amount', Decimal('0.00'))
+        if sub_sum > Decimal('0.00'):
+            attrs['amount'] = sub_sum
+        elif direct_amt > Decimal('0.00'):
+            attrs['amount'] = direct_amt
+        else:
+            raise serializers.ValidationError("حداقل یکی از مقادیر فروش شعب، وصول مطالبات، چک پاس شده یا مبلغ کل باید بزرگتر از صفر باشد.")
+        return attrs
+
+
+class LiquidityExpenseSpendChecksSerializer(serializers.Serializer):
+    check_ids = serializers.ListField(
+        child=serializers.UUIDField(),
+        required=True,
+        allow_empty=False,
+        help_text="لیست شناسه‌های چک‌های انتخابی جهت خرج شدن روی هزینه"
+    )
+
+
+class LiquidityExpenseRemoveSpentCheckSerializer(serializers.Serializer):
+    check_id = serializers.UUIDField(
+        required=True,
+        help_text="شناسه چکی که می‌خواهید از این هزینه جدا شده و لغو خرج شود"
+    )
 
 
 # ── Swagger / OpenAPI Documentation Helper Serializers ────────────────────────

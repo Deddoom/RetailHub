@@ -405,3 +405,195 @@ GET /api/liquidity/expenses/?status=CRITICAL
   "total_remaining_amount": 255000000.0
 }
 ```
+
+---
+
+## 7️⃣ شارژ روزانه نقدینگی با تفکیک شعب و مطالبات (Detailed Daily Charges API)
+
+امکان ثبت دقیق ورودی‌های نقدی روزانه با تفکیک ۴ شعبه (بهشتی، سپیده، مدرس، کاجستان) در ۳ روش پرداخت، به همراه وصول مطالبات و چک‌های پاس‌شده.
+
+### 7.1. ثبت شارژ روزانه جدید (Create)
+- **متد:** `POST`
+- **آدرس:** `/api/liquidity/daily-charges/`
+- **نمونه بدنه درخواست (JSON):**
+```json
+{
+  "date": "2026-10-10",
+  "beheshti_pos": 10000000,
+  "beheshti_cash": 2000000,
+  "beheshti_card_to_card": 3000000,
+  "sepideh_pos": 5000000,
+  "sepideh_cash": 1000000,
+  "sepideh_card_to_card": 2000000,
+  "modarres_pos": 7000000,
+  "modarres_cash": 3000000,
+  "modarres_card_to_card": 0,
+  "kajestan_pos": 4000000,
+  "kajestan_cash": 1000000,
+  "kajestan_card_to_card": 1000000,
+  "debt_collection": 5000000,
+  "passed_checks_amount": 8000000,
+  "description": "شارژ تفکیکی روز شنبه"
+}
+```
+*(تمامی فیلدها اختیاری بوده و مقدار پیش‌فرض آنها صفر است. فیلد `date` در صورت ارسال نشدن، تاریخ روز جاری لحاظ می‌گردد)*
+
+- **پاسخ (`201 Created`):**
+```json
+{
+  "id": "76ef231d-...",
+  "date": "2026-10-10",
+  "date_jalali": "1405/07/19",
+  "amount": "52000000.00",
+  "total_sales": "52000000.00",
+  "description": "شارژ تفکیکی روز شنبه",
+  "beheshti_pos": "10000000.00",
+  "beheshti_cash": "2000000.00",
+  "beheshti_card_to_card": "3000000.00",
+  "beheshti_total": "15000000.00",
+  "sepideh_pos": "5000000.00",
+  "sepideh_cash": "1000000.00",
+  "sepideh_card_to_card": "2000000.00",
+  "sepideh_total": "8000000.00",
+  "modarres_pos": "7000000.00",
+  "modarres_cash": "3000000.00",
+  "modarres_card_to_card": "0.00",
+  "modarres_total": "10000000.00",
+  "kajestan_pos": "4000000.00",
+  "kajestan_cash": "1000000.00",
+  "kajestan_card_to_card": "1000000.00",
+  "kajestan_total": "6000000.00",
+  "branch_sales_total": "39000000.00",
+  "debt_collection": "5000000.00",
+  "passed_checks_amount": "8000000.00",
+  "created_by": 1,
+  "created_by_name": "مدیر مالی",
+  "created_at": "2026-10-12T05:30:00Z",
+  "shamsi_date": "1405/07/21",
+  "shamsi_time": "09:00"
+}
+```
+
+### 7.2. لیست شارژهای روزانه (List & Filter)
+- **متد:** `GET`
+- **آدرس:** `/api/liquidity/daily-charges/`
+- **پارامترهای فیلتر اختیاری:**
+  - `from_date=2026-10-01`: فیلتر از تاریخ
+  - `to_date=2026-10-30`: فیلتر تا تاریخ
+
+---
+
+## 8️⃣ مدیریت چک‌های دریافتی (Checks Management API)
+
+### 8.1. گزینه‌های وضعیت و شعب
+- **کدهای وضعیت (`status`):**
+  - `CLEARED`: وصول شده (تسویه شده)
+  - `PENDING`: نرسیده (موعد سررسید فرا نرسیده)
+  - `UNPAID`: عدم پرداخت (تاریخ سررسید رد شده و وجه پاس نشده)
+  - `BOUNCED`: برگشتی
+  - `SPENT`: خرج شده (به یک هزینه تخصیص داده شده)
+- **کدهای شعب (`branch`):**
+  - `BEHESHTI`: شعبه بهشتی
+  - `MODARRES`: شعبه مدرس
+  - `SEPIDEH`: شعبه سپیده
+  - `KAJESTAN`: شعبه کاجستان
+  - `ALL`: کل مجموعه
+
+> [!NOTE]
+> **انتقال خودکار وضعیت چک:** در هر بار فراخوانی لیست چک‌ها یا جزئیات، اگر موعد سررسید چکی گذشته باشد و وضعیت آن هنوز «نرسیده» (`PENDING`) باشد، سیستم به صورت کاملاً خودکار وضعیت آن را به «عدم پرداخت» (`UNPAID`) تبدیل می‌کند.
+
+### 8.2. ثبت چک جدید
+- **متد:** `POST`
+- **آدرس:** `/api/liquidity/checks/`
+- **بدنه درخواست:**
+```json
+{
+  "customer_name": "بازرگانی محمدی",
+  "issue_date": "2026-10-10",
+  "due_date": "2026-11-15",
+  "amount": 25000000,
+  "branch": "BEHESHTI",
+  "status": "PENDING",
+  "description": "چک صیادی بابت فاکتور شماره ۱۲۴"
+}
+```
+
+### 8.3. دریافت لیست چک‌ها (با فیلترهای پیشرفته)
+- **متد:** `GET`
+- **آدرس:** `/api/liquidity/checks/`
+- **پارامترهای فیلتر:**
+  - `status=PENDING`
+  - `branch=BEHESHTI`
+  - `from_date=2026-10-01`
+  - `to_date=2026-11-30`
+  - `search=محمدی` (جستجو در نام مشتری و توضیحات)
+  - `available_for_expense=true` (فقط چک‌های نرسیده یا عدم پرداخت که خرج نشده‌اند؛ مناسب باز کردن دراپ‌داون انتخاب چک برای خرج روی هزینه)
+
+### 8.4. آمار و خلاصه وضعیت چک‌ها (Summary Badges)
+- **متد:** `GET`
+- **آدرس:** `/api/liquidity/checks/summary/`
+- **نمونه پاسخ:**
+```json
+{
+  "total_count": 12,
+  "total_amount": 350000000.0,
+  "cleared_count": 4,
+  "cleared_amount": 100000000.0,
+  "pending_count": 5,
+  "pending_amount": 150000000.0,
+  "unpaid_count": 1,
+  "unpaid_amount": 25000000.0,
+  "bounced_count": 1,
+  "bounced_amount": 25000000.0,
+  "spent_count": 1,
+  "spent_amount": 50000000.0
+}
+```
+
+### 8.5. ویرایش یا تغییر وضعیت چک
+- **متد:** `PATCH` یا `PUT`
+- **آدرس:** `/api/liquidity/checks/{id}/`
+- **نمونه تغییر وضعیت به وصول‌شده:**
+```json
+{
+  "status": "CLEARED"
+}
+```
+
+---
+
+## 9️⃣ خرج چک روی هزینه‌ها (Spending Checks on Expenses API)
+
+وقتی چکی پشت‌نویسی شده و به یک تامین‌کننده یا بابت هزینه‌ای خرج می‌شود:
+
+### 9.1. اختصاص چک(ها) به یک هزینه (Spend Checks)
+- **متد:** `POST`
+- **آدرس:** `/api/liquidity/expenses/{id}/spend-checks/`
+- **بدنه درخواست:**
+```json
+{
+  "check_ids": [
+    "c58a2d10-38e5-4f4a-89a1-...",
+    "e91a27b8-6411-482a-bc3e-..."
+  ]
+}
+```
+- **رفتار و اثرات در سیستم:**
+  1. وضعیت چک‌ها به `SPENT` تبدیل می‌شود و به این هزینه لینک می‌شوند.
+  2. فیلد `has_spent_check: true` برای هزینه فعال می‌شود.
+  3. فیلد `initial_amount` هزینه مبلغ کل اولیه را نگه می‌دارد (مثلاً ۲۰۰ میلیون).
+  4. فیلد `spent_checks_amount` مجموع چک‌های اختصاص یافته است (مثلاً ۲۰ میلیون).
+  5. مبلغ `amount` هزینه به ۱۸۰ میلیون کاهش می‌یابد تا هنگام تسویه نقدی (`confirm-payment`)، سیستم فقط ۱۸۰ میلیون را از موجودی کارت کسر کند.
+
+### 9.2. لغو و جداسازی چک خرج‌شده از هزینه (Remove Spent Check)
+در صورتی که چک اشتباهاً اختصاص یافته باشد یا لغو شود:
+- **متد:** `POST`
+- **آدرس:** `/api/liquidity/expenses/{id}/remove-spent-check/`
+- **بدنه درخواست:**
+```json
+{
+  "check_id": "c58a2d10-38e5-4f4a-89a1-..."
+}
+```
+- **نتیجه:** وضعیت چک به `PENDING` (یا `UNPAID` در صورت گذشتن سررسید) بازگشته و مبلغ خالص هزینه به میزان مبلغ چک افزایش می‌یابد.
+

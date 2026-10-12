@@ -28,7 +28,7 @@ from core.models import (
     WasteReport, WasteItem, UserOnlineLog, AdvanceRequest, AdvanceRequestLog,
     SellerCommissionConfig, SellerDailySale,
     LiquidityDailyRevenueSetting, LiquidityExpense, LiquidityExpensePayment, LiquidityCardTransaction,
-    LiquidityDailyCharge,
+    LiquidityDailyCharge, LiquidityCheck,
 )
 from core.serializers import (
     UserSerializer,
@@ -57,6 +57,8 @@ from core.serializers import (
     LiquiditySimpleMessageResponseSerializer,
     UserPendingCountsResponseSerializer, UserOnlineResponseSerializer,
     LiquidityDailyChargeSerializer, LiquidityDailyChargeCreateSerializer,
+    LiquidityCheckSerializer, LiquidityCheckSummarySerializer,
+    LiquidityExpenseSpendChecksSerializer, LiquidityExpenseRemoveSpentCheckSerializer,
     AuthLoginRequestSerializer, AuthLoginResponseSerializer, BranchItemSerializer,
     UserDeleteResponseSerializer, UserRestoreResponseSerializer,
     BranchTransferNoteSerializer, BranchTransferRejectSerializer,
@@ -3344,18 +3346,18 @@ class LiquidityDailyChargeViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, IsLiquidityManager]
     serializer_class = LiquidityDailyChargeSerializer
     filter_backends = [filters.OrderingFilter]
-    ordering_fields = ['created_at', 'amount']
-    ordering = ['-created_at']
+    ordering_fields = ['date', 'created_at', 'amount']
+    ordering = ['-date', '-created_at']
 
     def get_queryset(self):
         qs = LiquidityDailyCharge.objects.select_related('created_by').all()
         from_date = self.request.query_params.get('from_date')
         to_date = self.request.query_params.get('to_date')
         if from_date:
-            qs = qs.filter(created_at__date__gte=from_date)
+            qs = qs.filter(date__gte=from_date)
         if to_date:
-            qs = qs.filter(created_at__date__lte=to_date)
-        return qs.order_by('-created_at')
+            qs = qs.filter(date__lte=to_date)
+        return qs.order_by('-date', '-created_at')
 
     def get_serializer_class(self):
         if self.action == 'create':
@@ -3371,6 +3373,127 @@ class LiquidityDailyChargeViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         charge = serializer.save(created_by=request.user)
         output_serializer = LiquidityDailyChargeSerializer(charge, context={'request': request})
         return Response(output_serializer.data, status=status.HTTP_201_CREATED)
+
+
+# ── چک‌های مدیریت نقدینگی (Liquidity Checks ViewSet) ───────────────────────────
+
+@extend_schema_view(
+    list=extend_schema(
+        tags=['مدیریت نقدینگی - چک‌ها'],
+        summary="لیست چک‌های دریافتی با فیلتر و جستجو",
+        description="دریافت لیست چک‌های ثبت‌شده در سیستم. در هر فراخوانی، چک‌های نرسیده با سررسید گذشته به طور خودکار به عدم پرداخت تبدیل می‌شوند.",
+        responses={200: LiquidityCheckSerializer(many=True)},
+        parameters=[
+            OpenApiParameter('status', OpenApiTypes.STR, description="فیلتر بر اساس وضعیت (CLEARED, PENDING, UNPAID, BOUNCED, SPENT)", required=False),
+            OpenApiParameter('branch', OpenApiTypes.STR, description="فیلتر بر اساس شعبه (BEHESHTI, MODARRES, SEPIDEH, KAJESTAN, ALL)", required=False),
+            OpenApiParameter('from_date', OpenApiTypes.DATE, description="فیلتر از تاریخ سررسید (YYYY-MM-DD)", required=False),
+            OpenApiParameter('to_date', OpenApiTypes.DATE, description="فیلتر تا تاریخ سررسید (YYYY-MM-DD)", required=False),
+            OpenApiParameter('search', OpenApiTypes.STR, description="جستجو در نام مشتری یا توضیحات", required=False),
+            OpenApiParameter('available_for_expense', OpenApiTypes.BOOL, description="فقط چک‌های قابل خرج (نرسیده و عدم پرداخت که خرج نشده‌اند)", required=False),
+        ]
+    ),
+    create=extend_schema(
+        tags=['مدیریت نقدینگی - چک‌ها'],
+        summary="ثبت چک جدید",
+        description="ثبت مشخصات چک جدید دریافتی از مشتری",
+        request=LiquidityCheckSerializer,
+        responses={201: LiquidityCheckSerializer}
+    ),
+    retrieve=extend_schema(
+        tags=['مدیریت نقدینگی - چک‌ها'],
+        summary="مشاهده جزئیات یک چک",
+        responses={200: LiquidityCheckSerializer}
+    ),
+    update=extend_schema(
+        tags=['مدیریت نقدینگی - چک‌ها'],
+        summary="ویرایش کامل مشخصات چک یا تغییر وضعیت",
+        request=LiquidityCheckSerializer,
+        responses={200: LiquidityCheckSerializer}
+    ),
+    partial_update=extend_schema(
+        tags=['مدیریت نقدینگی - چک‌ها'],
+        summary="ویرایش جزیی یا تغییر وضعیت چک (وصول شده، برگشتی، ...)",
+        request=LiquidityCheckSerializer,
+        responses={200: LiquidityCheckSerializer}
+    ),
+    destroy=extend_schema(
+        tags=['مدیریت نقدینگی - چک‌ها'],
+        summary="حذف چک",
+        description="فقط ادمین و مدیر مالی مجاز به حذف چک هستند",
+        responses={204: None}
+    ),
+)
+class LiquidityCheckViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated, IsLiquidityManager]
+    serializer_class = LiquidityCheckSerializer
+    filter_backends = [filters.OrderingFilter]
+    ordering_fields = ['due_date', 'issue_date', 'amount', 'created_at']
+    ordering = ['due_date', '-created_at']
+
+    def get_queryset(self):
+        LiquidityCheck.sync_overdue_checks()
+        qs = LiquidityCheck.objects.select_related('created_by', 'spent_on_expense').all()
+        status_filter = self.request.query_params.get('status')
+        branch_filter = self.request.query_params.get('branch')
+        from_date = self.request.query_params.get('from_date')
+        to_date = self.request.query_params.get('to_date')
+        search = self.request.query_params.get('search')
+        available = self.request.query_params.get('available_for_expense')
+
+        if status_filter:
+            qs = qs.filter(status=status_filter.upper())
+        if branch_filter:
+            qs = qs.filter(branch=branch_filter.upper())
+        if from_date:
+            qs = qs.filter(due_date__gte=from_date)
+        if to_date:
+            qs = qs.filter(due_date__lte=to_date)
+        if search:
+            qs = qs.filter(Q(customer_name__icontains=search) | Q(description__icontains=search))
+        if available and str(available).lower() in ['true', '1']:
+            qs = qs.filter(status__in=['PENDING', 'UNPAID'], spent_on_expense__isnull=True)
+
+        return qs
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
+    @extend_schema(
+        tags=['مدیریت نقدینگی - چک‌ها'],
+        summary="خلاصه آماری و وضعیت چک‌ها",
+        description="شمارش تعداد و جمع مبالغ چک‌ها به تفکیک وضعیت (وصول شده، نرسیده، عدم پرداخت، برگشتی، خرج شده)",
+        responses={200: LiquidityCheckSummarySerializer}
+    )
+    @action(detail=False, methods=['get'], url_path='summary')
+    def summary(self, request):
+        LiquidityCheck.sync_overdue_checks()
+        all_checks = LiquidityCheck.objects.all()
+
+        def _stats(filtered_qs):
+            agg = filtered_qs.aggregate(count=models.Count('id'), total=models.Sum('amount'))
+            return agg['count'] or 0, float(agg['total'] or Decimal('0.00'))
+
+        tot_cnt, tot_amt = _stats(all_checks)
+        clr_cnt, clr_amt = _stats(all_checks.filter(status='CLEARED'))
+        pnd_cnt, pnd_amt = _stats(all_checks.filter(status='PENDING'))
+        unp_cnt, unp_amt = _stats(all_checks.filter(status='UNPAID'))
+        bnc_cnt, bnc_amt = _stats(all_checks.filter(status='BOUNCED'))
+        spn_cnt, spn_amt = _stats(all_checks.filter(status='SPENT'))
+
+        return Response({
+            'total_count': tot_cnt,
+            'total_amount': tot_amt,
+            'cleared_count': clr_cnt,
+            'cleared_amount': clr_amt,
+            'pending_count': pnd_cnt,
+            'pending_amount': pnd_amt,
+            'unpaid_count': unp_cnt,
+            'unpaid_amount': unp_amt,
+            'bounced_count': bnc_cnt,
+            'bounced_amount': bnc_amt,
+            'spent_count': spn_cnt,
+            'spent_amount': spn_amt,
+        }, status=status.HTTP_200_OK)
 
 
 
@@ -3457,11 +3580,14 @@ class LiquidityExpenseViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         ctx['daily_revenue'] = setting.amount
         return ctx
 
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
     def get_queryset(self):
         if getattr(self, 'swagger_fake_view', False):
             return LiquidityExpense.objects.none()
 
-        qs = LiquidityExpense.objects.select_related('created_by').prefetch_related('payments__created_by')
+        qs = LiquidityExpense.objects.select_related('created_by').prefetch_related('payments__created_by', 'spent_checks__created_by')
 
         if self.action != 'list':
             return qs
@@ -3721,6 +3847,96 @@ class LiquidityExpenseViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
             "message": "وضعیت پرداخت هزینه با موفقیت بازگردانی شد و مبلغ به کارت بازگشت.",
             "expense": LiquidityExpenseSerializer(expense, context=ctx).data
         }, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        tags=['مدیریت نقدینگی - هزینه‌ها'],
+        summary="خرج چک روی هزینه",
+        description="اختصاص یک یا چند چک به این هزینه جهت تسویه و کسر از بدهی نقدی آن",
+        request=LiquidityExpenseSpendChecksSerializer,
+        responses={200: LiquidityExpenseActionResponseSerializer}
+    )
+    @action(detail=True, methods=['post'], url_path='spend-checks')
+    def spend_checks(self, request, pk=None):
+        expense = self.get_object()
+        if expense.is_paid:
+            return Response({"error": "این هزینه قبلاً تسویه شده و امکان اختصاص چک به آن وجود ندارد."}, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = LiquidityExpenseSpendChecksSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        check_ids = serializer.validated_data['check_ids']
+
+        checks = list(LiquidityCheck.objects.filter(id__in=check_ids))
+        if len(checks) != len(check_ids):
+            return Response({"error": "یک یا چند چک با شناسه‌های ارسال شده یافت نشدند."}, status=status.HTTP_400_BAD_REQUEST)
+
+        for chk in checks:
+            if chk.spent_on_expense and chk.spent_on_expense_id != expense.id:
+                return Response({"error": f"چک «{chk.customer_name}» قبلاً برای هزینه دیگری خرج شده است."}, status=status.HTTP_400_BAD_REQUEST)
+            if chk.status not in ['PENDING', 'UNPAID']:
+                return Response({"error": f"چک «{chk.customer_name}» در وضعیت {chk.get_status_display()} است و قابلیت خرج شدن ندارد."}, status=status.HTTP_400_BAD_REQUEST)
+
+        now = timezone.now()
+        for chk in checks:
+            chk.spent_on_expense = expense
+            chk.status = 'SPENT'
+            chk.spent_at = now
+            chk.save()
+
+        expense.recalculate_amounts()
+        expense.save()
+
+        ctx = self.get_serializer_context()
+        return Response({
+            "message": f"{len(checks)} چک با موفقیت به این هزینه اختصاص یافت و از مبلغ آن کسر گردید.",
+            "expense": LiquidityExpenseSerializer(expense, context=ctx).data
+        }, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        tags=['مدیریت نقدینگی - هزینه‌ها'],
+        summary="لغو و حذف چک خرج‌شده از هزینه",
+        description="جداسازی چک از هزینه و بازگرداندن وضعیت چک به نرسیده یا عدم پرداخت و افزایش مجدد مبلغ هزینه",
+        request=LiquidityExpenseRemoveSpentCheckSerializer,
+        responses={200: LiquidityExpenseActionResponseSerializer}
+    )
+    @action(detail=True, methods=['post'], url_path='remove-spent-check')
+    def remove_spent_check(self, request, pk=None):
+        expense = self.get_object()
+        serializer = LiquidityExpenseRemoveSpentCheckSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        check_id = serializer.validated_data['check_id']
+
+        try:
+            chk = LiquidityCheck.objects.get(id=check_id, spent_on_expense=expense)
+        except LiquidityCheck.DoesNotExist:
+            return Response({"error": "این چک به این هزینه اختصاص داده نشده است."}, status=status.HTTP_400_BAD_REQUEST)
+
+        chk.spent_on_expense = None
+        chk.spent_at = None
+        if chk.due_date < datetime.date.today():
+            chk.status = 'UNPAID'
+        else:
+            chk.status = 'PENDING'
+        chk.save()
+
+        expense.recalculate_amounts()
+        expense.save()
+
+        ctx = self.get_serializer_context()
+        return Response({
+            "message": "چک با موفقیت از هزینه جدا شد و مبلغ هزینه به‌روزرسانی گردید.",
+            "expense": LiquidityExpenseSerializer(expense, context=ctx).data
+        }, status=status.HTTP_200_OK)
+
+    def perform_destroy(self, instance):
+        for chk in instance.spent_checks.all():
+            chk.spent_on_expense = None
+            chk.spent_at = None
+            if chk.due_date < datetime.date.today():
+                chk.status = 'UNPAID'
+            else:
+                chk.status = 'PENDING'
+            chk.save()
+        instance.delete()
 
     @extend_schema(
         tags=['مدیریت نقدینگی - هزینه‌ها'],

@@ -10,7 +10,7 @@ from core.views import (
     BranchTransferViewSet, WasteReportViewSet, AdvanceRequestViewSet, FileUploadView,
     SellerCommissionConfigViewSet, SellerDailySaleViewSet,
     LiquidityDailyRevenueView, LiquidityExpenseViewSet, LiquidityCardsViewSet,
-    LiquidityDailyChargeViewSet,
+    LiquidityDailyChargeViewSet, LiquidityCheckViewSet,
 )
 
 router = DefaultRouter()
@@ -40,6 +40,7 @@ router.register(r'seller-daily-sales', SellerDailySaleViewSet, basename='seller-
 router.register(r'liquidity/expenses', LiquidityExpenseViewSet, basename='liquidity-expense')
 router.register(r'liquidity/cards', LiquidityCardsViewSet, basename='liquidity-cards')
 router.register(r'liquidity/daily-charges', LiquidityDailyChargeViewSet, basename='liquidity-daily-charge')
+router.register(r'liquidity/checks', LiquidityCheckViewSet, basename='liquidity-check')
 
 urlpatterns = [
     path('auth/token/', AuthTokenView.as_view(), name='auth_token_login'),
