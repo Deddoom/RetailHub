@@ -8,6 +8,7 @@ from core.views import (
     BranchListView, MissionViewSet, RoleViewSet, ChecklistLogViewSet, ClaimViewSet,
     DamageRegistrationViewSet, ReturnRequestViewSet, ReportDefinitionViewSet, ReportSubmissionViewSet,
     BranchTransferViewSet, WasteReportViewSet, AdvanceRequestViewSet, FileUploadView,
+    EmployeeRequestViewSet,
     SellerCommissionConfigViewSet, SellerDailySaleViewSet,
     LiquidityDailyRevenueView, LiquidityExpenseViewSet, LiquidityCardsViewSet,
     LiquidityDailyChargeViewSet, LiquidityCheckViewSet,
@@ -35,6 +36,7 @@ router.register(r'report-submissions', ReportSubmissionViewSet, basename='report
 router.register(r'transfers',          BranchTransferViewSet,    basename='branch-transfer')
 router.register(r'waste-reports',      WasteReportViewSet,       basename='waste-report')
 router.register(r'advance-requests', AdvanceRequestViewSet, basename='advance-request')
+router.register(r'employee-requests', EmployeeRequestViewSet, basename='employee-request')
 router.register(r'seller-commissions', SellerCommissionConfigViewSet, basename='seller-commission')
 router.register(r'seller-daily-sales', SellerDailySaleViewSet, basename='seller-daily-sale')
 router.register(r'liquidity/expenses', LiquidityExpenseViewSet, basename='liquidity-expense')

@@ -26,6 +26,7 @@ from core.models import (
     ReportDefinition, ReportSubmission,
     BranchTransfer, TransferItem, TransferLog,
     WasteReport, WasteItem, UserOnlineLog, AdvanceRequest, AdvanceRequestLog,
+    EmployeeRequest, EmployeeRequestLog,
     SellerCommissionConfig, SellerDailySale,
     LiquidityDailyRevenueSetting, LiquidityExpense, LiquidityExpensePayment, LiquidityCardTransaction,
     LiquidityDailyCharge, LiquidityCheck,
@@ -46,6 +47,9 @@ from core.serializers import (
     BranchTransferSerializer, BranchTransferListSerializer,
     WasteReportSerializer, WasteReportListSerializer,
     AdvanceRequestSerializer, AdvanceRequestListSerializer, AdvanceRequestInboxSerializer,
+    EmployeeRequestSerializer, EmployeeRequestListSerializer,
+    EmployeeRequestInboxSerializer,
+    EmployeeReviewRequestSerializer, EmployeeFinanceReviewSerializer,
     SellerCommissionConfigSerializer, SellerDailySaleSerializer, SellerDailySaleBulkSerializer,
     LiquidityDailyRevenueSettingSerializer, LiquidityExpensePaymentSerializer,
     LiquidityCardTransactionSerializer, LiquidityExpenseSerializer, LiquidityExpenseListSerializer,
@@ -2861,7 +2865,471 @@ class AdvanceRequestViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         return Response(serializer.data)
 
 
+# ── درخواست کارکنان (EmployeeRequest) ────────────────────────────────────────
+
+@extend_schema_view(
+    list=extend_schema(
+        tags=['درخواست کارکنان'],
+        summary="لیست درخواست‌های من",
+        parameters=[
+            OpenApiParameter('request_type', OpenApiTypes.STR,
+                             description="فیلتر نوع (LEAVE|ADVANCE|OVERTIME|MISC)", required=False),
+            OpenApiParameter('status', OpenApiTypes.STR,
+                             description="فیلتر وضعیت", required=False),
+            OpenApiParameter('from_date', OpenApiTypes.DATE,
+                             description="از تاریخ ثبت (YYYY-MM-DD)", required=False),
+            OpenApiParameter('to_date', OpenApiTypes.DATE,
+                             description="تا تاریخ ثبت (YYYY-MM-DD)", required=False),
+        ]
+    ),
+    retrieve=extend_schema(tags=['درخواست کارکنان'], summary="جزئیات کامل درخواست کارکنان"),
+    create=extend_schema(tags=['درخواست کارکنان'], summary="ثبت درخواست جدید"),
+    update=extend_schema(tags=['درخواست کارکنان'], summary="ویرایش کامل درخواست"),
+    partial_update=extend_schema(tags=['درخواست کارکنان'], summary="ویرایش جزئی درخواست"),
+    destroy=extend_schema(tags=['درخواست کارکنان'], summary="حذف درخواست"),
+)
+class EmployeeRequestViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
+    queryset           = EmployeeRequest.objects.all()
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return EmployeeRequestListSerializer
+        return EmployeeRequestSerializer
+
+    def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return EmployeeRequest.objects.none()
+
+        user = self.request.user
+        if not (user and user.is_authenticated):
+            return EmployeeRequest.objects.none()
+
+        is_admin = user.is_superuser or any(
+            r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in user.roles.all()
+        )
+
+        if is_admin:
+            qs = EmployeeRequest.objects.all()
+        else:
+            # کاربر درخواست‌های خودش + درخواست‌هایی که مستقیم به خودش ارجاع شده
+            subordinate_ids = [u.id for u in user.get_all_subordinates()]
+            qs = EmployeeRequest.objects.filter(
+                Q(requester=user) |
+                Q(target_superior=user) |
+                (Q(target_superior__isnull=True) & Q(requester_id__in=subordinate_ids))
+            ).distinct()
+
+        # فیلترهای اختیاری
+        request_type = self.request.query_params.get('request_type')
+        status_param = self.request.query_params.get('status')
+        from_date    = self.request.query_params.get('from_date')
+        to_date      = self.request.query_params.get('to_date')
+
+        if request_type: qs = qs.filter(request_type=request_type)
+        if status_param:  qs = qs.filter(status=status_param)
+        if from_date:     qs = qs.filter(created_at__date__gte=from_date)
+        if to_date:       qs = qs.filter(created_at__date__lte=to_date)
+
+        return qs.select_related(
+            'requester', 'target_superior',
+            'superior_reviewer', 'admin_reviewer', 'finance_reviewer',
+        ).prefetch_related('logs').order_by('-created_at')
+
+    @transaction.atomic
+    def perform_create(self, serializer):
+        user = self.request.user
+
+        has_superiors  = user.superiors.exists()
+        initial_status = 'PENDING_SUPERIOR' if has_superiors else 'PENDING_ADMIN'
+
+        emp_req = serializer.save(requester=user, status=initial_status)
+
+        type_label = emp_req.get_request_type_display()
+        if emp_req.target_superior:
+            target_name = emp_req.target_superior.get_full_name() or emp_req.target_superior.username
+            log_msg = f"درخواست {type_label} ثبت شد و به بالادستی ({target_name}) ارجاع داده شد."
+        elif initial_status == 'PENDING_ADMIN':
+            log_msg = f"درخواست {type_label} ثبت شد. (ارسال مستقیم به ادمین — کاربر بالادستی ندارد)"
+        else:
+            log_msg = f"درخواست {type_label} ثبت شد."
+
+        EmployeeRequestLog.objects.create(
+            employee_request=emp_req,
+            actor=user,
+            stage='SUBMIT',
+            action=log_msg,
+        )
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # ۱. لغو توسط کارمند
+    # ─────────────────────────────────────────────────────────────────────────
+    @extend_schema(
+        tags=['درخواست کارکنان'],
+        summary="لغو درخواست توسط کارمند (فقط تا قبل از هر تایید)",
+        request=None,
+        responses={200: OpenApiTypes.OBJECT},
+    )
+    @action(detail=True, methods=['post'], url_path='cancel')
+    @transaction.atomic
+    def cancel(self, request, pk=None):
+        emp_req = self.get_object()
+        user    = request.user
+
+        if emp_req.requester != user:
+            return Response(
+                {"error": "فقط درخواست‌کننده می‌تواند درخواست خود را لغو کند."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if emp_req.status != 'PENDING_SUPERIOR':
+            return Response(
+                {"error": "لغو فقط زمانی ممکن است که درخواست هنوز در انتظار تایید بالادستی باشد."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        emp_req.status = 'CANCELLED'
+        emp_req.save()
+
+        EmployeeRequestLog.objects.create(
+            employee_request=emp_req,
+            actor=user,
+            stage='CANCEL',
+            action=f"درخواست توسط {user.get_full_name() or user.username} لغو شد.",
+        )
+        return Response({"message": "درخواست با موفقیت لغو شد."}, status=status.HTTP_200_OK)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # ۲. بررسی بالادستی
+    # ─────────────────────────────────────────────────────────────────────────
+    @extend_schema(
+        tags=['درخواست کارکنان'],
+        summary="تایید یا رد درخواست توسط بالادستی",
+        request=EmployeeReviewRequestSerializer,
+        responses={200: OpenApiTypes.OBJECT},
+    )
+    @action(detail=True, methods=['post'], url_path='superior-review')
+    @transaction.atomic
+    def superior_review(self, request, pk=None):
+        emp_req = self.get_object()
+        user    = request.user
+
+        if emp_req.status != 'PENDING_SUPERIOR':
+            return Response(
+                {"error": "این درخواست در وضعیت انتظار تایید بالادستی نیست."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        is_admin = user.is_superuser or any(
+            r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in user.roles.all()
+        )
+        if not is_admin:
+            if emp_req.target_superior:
+                if emp_req.target_superior != user:
+                    return Response(
+                        {"error": "این درخواست برای شما ارجاع داده نشده است."},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+            else:
+                if not user.is_superior_to(emp_req.requester):
+                    return Response(
+                        {"error": "شما بالادست این کاربر نیستید."},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+
+        ser = EmployeeReviewRequestSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        action_type = ser.validated_data['action']
+        note        = ser.validated_data.get('note', '')
+
+        if action_type == 'reject' and not note:
+            return Response(
+                {"error": "برای رد درخواست، نوشتن توضیحات (note) الزامی است."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        emp_req.superior_reviewer    = user
+        emp_req.superior_note        = note
+        emp_req.superior_reviewed_at = timezone.now()
+
+        if action_type == 'approve':
+            # بررسی ادغام: اگر بالادستی خودش ادمین است → skip مرحله ادمین
+            approver = emp_req.target_superior or user
+            approver_is_admin = approver.is_superuser or any(
+                r.code == 'ADMIN' for r in approver.roles.all()
+            )
+            next_status = 'PENDING_FINANCE' if approver_is_admin else 'PENDING_ADMIN'
+            action_text = (
+                "تایید شد و مستقیماً به مدیر مالی ارجاع داده شد. (بالادستی ادمین است)"
+                if approver_is_admin else
+                "تایید شد و به ادمین ارجاع داده شد."
+            )
+        else:
+            next_status = 'REJECTED_BY_SUPERIOR'
+            action_text = f"رد شد. دلیل: {note}"
+
+        emp_req.status = next_status
+        emp_req.save()
+
+        actor_name = user.get_full_name() or user.username
+        EmployeeRequestLog.objects.create(
+            employee_request=emp_req,
+            actor=user,
+            stage='SUPERIOR',
+            action=f"بررسی بالادستی ({actor_name}): {action_text}",
+        )
+        return Response({"message": "عملیات با موفقیت ثبت شد."}, status=status.HTTP_200_OK)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # ۳. بررسی ادمین
+    # ─────────────────────────────────────────────────────────────────────────
+    @extend_schema(
+        tags=['درخواست کارکنان'],
+        summary="تایید یا رد درخواست توسط ادمین",
+        request=EmployeeReviewRequestSerializer,
+        responses={200: OpenApiTypes.OBJECT},
+    )
+    @action(detail=True, methods=['post'], url_path='admin-review')
+    @transaction.atomic
+    def admin_review(self, request, pk=None):
+        emp_req = self.get_object()
+        user    = request.user
+
+        if emp_req.status != 'PENDING_ADMIN':
+            return Response(
+                {"error": "این درخواست در وضعیت انتظار تایید ادمین نیست."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        is_admin = user.is_superuser or any(
+            r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in user.roles.all()
+        )
+        if not is_admin:
+            return Response(
+                {"error": "فقط ادمین سیستم به این بخش دسترسی دارد."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ser = EmployeeReviewRequestSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        action_type = ser.validated_data['action']
+        note        = ser.validated_data.get('note', '')
+
+        if action_type == 'reject' and not note:
+            return Response(
+                {"error": "برای رد درخواست، نوشتن توضیحات الزامی است."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        emp_req.admin_reviewer    = user
+        emp_req.admin_note        = note
+        emp_req.admin_reviewed_at = timezone.now()
+        emp_req.status = 'PENDING_FINANCE' if action_type == 'approve' else 'REJECTED_BY_ADMIN'
+        emp_req.save()
+
+        action_text = (
+            "تایید شد و به مدیر مالی ارجاع داده شد."
+            if action_type == 'approve'
+            else f"رد شد. دلیل: {note}"
+        )
+        actor_name = user.get_full_name() or user.username
+        EmployeeRequestLog.objects.create(
+            employee_request=emp_req,
+            actor=user,
+            stage='ADMIN',
+            action=f"بررسی ادمین ({actor_name}): {action_text}",
+        )
+        return Response({"message": "عملیات ادمین با موفقیت ثبت شد."}, status=status.HTTP_200_OK)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # ۴. بررسی مدیر مالی
+    # ─────────────────────────────────────────────────────────────────────────
+    @extend_schema(
+        tags=['درخواست کارکنان'],
+        summary="تایید یا رد نهایی توسط مدیر مالی (برای مساعده: ثبت پرداخت)",
+        request=EmployeeFinanceReviewSerializer,
+        responses={200: OpenApiTypes.OBJECT},
+    )
+    @action(detail=True, methods=['post'], url_path='finance-review')
+    @transaction.atomic
+    def finance_review(self, request, pk=None):
+        emp_req = self.get_object()
+        user    = request.user
+
+        if emp_req.status != 'PENDING_FINANCE':
+            return Response(
+                {"error": "این درخواست در وضعیت انتظار تایید مدیر مالی نیست."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        is_finance = user.is_superuser or any(
+            r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in user.roles.all()
+        )
+        if not is_finance:
+            return Response(
+                {"error": "فقط مدیر مالی یا ادمین به این بخش دسترسی دارد."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ser = EmployeeFinanceReviewSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        action_type  = ser.validated_data['action']
+        note         = ser.validated_data.get('note', '')
+        payment_date = ser.validated_data.get('payment_date')
+
+        # برای مساعده در صورت تایید، payment_date الزامی است
+        if action_type == 'approve' and emp_req.request_type == 'ADVANCE' and not payment_date:
+            return Response(
+                {"error": "برای تایید مساعده، وارد کردن تاریخ پرداخت (payment_date) الزامی است."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if action_type == 'reject' and not note:
+            return Response(
+                {"error": "برای رد درخواست، نوشتن توضیحات الزامی است."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        emp_req.finance_reviewer    = user
+        emp_req.finance_note        = note
+        emp_req.finance_reviewed_at = timezone.now()
+
+        if action_type == 'approve':
+            # مساعده → PAID، بقیه → APPROVED
+            if emp_req.request_type == 'ADVANCE':
+                emp_req.status       = 'PAID'
+                emp_req.payment_date = payment_date
+                action_text = f"پرداخت مساعده در تاریخ {payment_date} ثبت شد."
+            else:
+                emp_req.status = 'APPROVED'
+                action_text    = "درخواست تایید نهایی شد."
+        else:
+            emp_req.status = 'REJECTED_BY_FINANCE'
+            action_text    = f"رد شد. دلیل: {note}"
+
+        emp_req.save()
+
+        actor_name = user.get_full_name() or user.username
+        EmployeeRequestLog.objects.create(
+            employee_request=emp_req,
+            actor=user,
+            stage='FINANCE',
+            action=f"بررسی مدیر مالی ({actor_name}): {action_text}"
+                   + (f" توضیحات: {note}" if note and action_type == 'approve' else ""),
+        )
+        return Response({"message": "عملیات مدیر مالی با موفقیت ثبت شد."}, status=status.HTTP_200_OK)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # ۵. کارتابل بالادستی
+    # ─────────────────────────────────────────────────────────────────────────
+    @extend_schema(
+        tags=['درخواست کارکنان'],
+        summary="کارتابل درخواست‌های ارجاع‌شده به کاربر جاری (بالادستی)",
+        parameters=[
+            OpenApiParameter('request_type', OpenApiTypes.STR, required=False),
+            OpenApiParameter('status',       OpenApiTypes.STR, required=False),
+            OpenApiParameter('from_date',    OpenApiTypes.DATE, required=False),
+            OpenApiParameter('to_date',      OpenApiTypes.DATE, required=False),
+            OpenApiParameter('search',       OpenApiTypes.STR, required=False,
+                             description="جستجو در نام/نام‌کاربری درخواست‌کننده"),
+        ],
+        responses={200: EmployeeRequestInboxSerializer(many=True)},
+    )
+    @action(detail=False, methods=['get'], url_path='my-inbox')
+    def my_inbox(self, request):
+        user = request.user
+        qs   = EmployeeRequest.objects.filter(target_superior=user)
+
+        request_type = request.query_params.get('request_type')
+        status_param = request.query_params.get('status')
+        from_date    = request.query_params.get('from_date')
+        to_date      = request.query_params.get('to_date')
+        search       = request.query_params.get('search')
+
+        if request_type: qs = qs.filter(request_type=request_type)
+        if status_param:  qs = qs.filter(status=status_param)
+        if from_date:     qs = qs.filter(created_at__date__gte=from_date)
+        if to_date:       qs = qs.filter(created_at__date__lte=to_date)
+        if search:
+            qs = qs.filter(
+                Q(requester__first_name__icontains=search) |
+                Q(requester__last_name__icontains=search)  |
+                Q(requester__username__icontains=search)
+            )
+
+        qs = qs.select_related(
+            'requester', 'target_superior',
+            'superior_reviewer', 'admin_reviewer', 'finance_reviewer',
+        ).prefetch_related('logs').order_by('-created_at')
+
+        page = self.paginate_queryset(qs)
+        if page is not None:
+            serializer = EmployeeRequestInboxSerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        return Response(EmployeeRequestInboxSerializer(qs, many=True).data)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # ۶. لیست جامع ادمین / مدیر مالی
+    # ─────────────────────────────────────────────────────────────────────────
+    @extend_schema(
+        tags=['درخواست کارکنان'],
+        summary="لیست جامع کلیه درخواست‌های کارکنان (ادمین / مدیر مالی)",
+        parameters=[
+            OpenApiParameter('request_type',  OpenApiTypes.STR,  required=False),
+            OpenApiParameter('status',        OpenApiTypes.STR,  required=False),
+            OpenApiParameter('from_date',     OpenApiTypes.DATE, required=False),
+            OpenApiParameter('to_date',       OpenApiTypes.DATE, required=False),
+            OpenApiParameter('search',        OpenApiTypes.STR,  required=False,
+                             description="جستجو در نام/نام‌کاربری درخواست‌کننده"),
+            OpenApiParameter('requester_id',  OpenApiTypes.UUID, required=False),
+            OpenApiParameter('superior_id',   OpenApiTypes.UUID, required=False),
+        ],
+        responses={200: EmployeeRequestInboxSerializer(many=True)},
+    )
+    @action(detail=False, methods=['get'], url_path='admin-list')
+    def admin_list(self, request):
+        user     = request.user
+        is_admin = user.is_superuser or any(
+            r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in user.roles.all()
+        )
+        if not is_admin:
+            return Response({"error": "دسترسی محدود است."}, status=status.HTTP_403_FORBIDDEN)
+
+        qs = EmployeeRequest.objects.all()
+
+        request_type = request.query_params.get('request_type')
+        status_param  = request.query_params.get('status')
+        from_date     = request.query_params.get('from_date')
+        to_date       = request.query_params.get('to_date')
+        search        = request.query_params.get('search')
+        requester_id  = request.query_params.get('requester_id')
+        superior_id   = request.query_params.get('superior_id')
+
+        if request_type: qs = qs.filter(request_type=request_type)
+        if status_param:  qs = qs.filter(status=status_param)
+        if from_date:     qs = qs.filter(created_at__date__gte=from_date)
+        if to_date:       qs = qs.filter(created_at__date__lte=to_date)
+        if search:
+            qs = qs.filter(
+                Q(requester__first_name__icontains=search) |
+                Q(requester__last_name__icontains=search)  |
+                Q(requester__username__icontains=search)
+            )
+        if requester_id: qs = qs.filter(requester_id=requester_id)
+        if superior_id:  qs = qs.filter(target_superior_id=superior_id)
+
+        qs = qs.select_related(
+            'requester', 'target_superior',
+            'superior_reviewer', 'admin_reviewer', 'finance_reviewer',
+        ).prefetch_related('logs').order_by('-created_at')
+
+        page = self.paginate_queryset(qs)
+        if page is not None:
+            serializer = EmployeeRequestInboxSerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        return Response(EmployeeRequestInboxSerializer(qs, many=True).data)
+
+
 # ── سیستم پورسانت و پاداش فروشندگان (Seller Commission & Reward) ──────────────
+
 
 @extend_schema_view(
     list=extend_schema(tags=['فروشندگان و پورسانت'], summary="لیست قوانین پورسانت و پاداش"),

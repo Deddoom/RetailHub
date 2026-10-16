@@ -1019,6 +1019,160 @@ class AdvanceRequestLog(models.Model):
         ordering = ['created_at']
 
 
+
+# ── EmployeeRequest (درخواست کارکنان) ─────────────────────────────────────────
+class EmployeeRequest(models.Model):
+    TYPE_CHOICES = [
+        ('LEAVE',    'مرخصی'),
+        ('ADVANCE',  'مساعده'),
+        ('OVERTIME', 'اضافه‌کاری'),
+        ('MISC',     'متفرقه'),
+    ]
+    LEAVE_MODE_CHOICES = [
+        ('DAILY',  'روزانه'),
+        ('HOURLY', 'ساعتی'),
+    ]
+    STATUS_CHOICES = [
+        ('PENDING_SUPERIOR',     'در انتظار تایید بالادستی'),
+        ('REJECTED_BY_SUPERIOR', 'رد شده توسط بالادستی'),
+        ('PENDING_ADMIN',        'در انتظار تایید ادمین'),
+        ('REJECTED_BY_ADMIN',    'رد شده توسط ادمین'),
+        ('PENDING_FINANCE',      'در انتظار تایید مدیر مالی'),
+        ('REJECTED_BY_FINANCE',  'رد شده توسط مدیر مالی'),
+        ('APPROVED',             'تایید نهایی'),
+        # مساعده: وضعیت پرداخت
+        ('PAID',                 'پرداخت شده (مساعده)'),
+        # لغو توسط کارمند
+        ('CANCELLED',            'لغو شده توسط کارمند'),
+    ]
+
+    id           = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    requester    = models.ForeignKey(
+        CustomUser, on_delete=models.CASCADE,
+        related_name='employee_requests', verbose_name='درخواست‌کننده',
+    )
+    request_type = models.CharField(max_length=10, choices=TYPE_CHOICES, verbose_name='نوع درخواست')
+    description  = models.TextField(blank=True, null=True, verbose_name='توضیحات')
+    status       = models.CharField(
+        max_length=30, choices=STATUS_CHOICES,
+        default='PENDING_SUPERIOR', verbose_name='وضعیت',
+    )
+
+    # ── بالادستی انتخابی ──────────────────────────────────────────────────────
+    target_superior = models.ForeignKey(
+        CustomUser, on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='received_employee_requests',
+        verbose_name='بالادستی انتخاب‌شده',
+    )
+
+    # ── مرحله بالادستی ────────────────────────────────────────────────────────
+    superior_reviewer    = models.ForeignKey(
+        CustomUser, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='reviewed_employee_requests_as_superior',
+        verbose_name='بالادستی بررسی‌کننده',
+    )
+    superior_note        = models.TextField(blank=True, null=True, verbose_name='توضیحات بالادستی')
+    superior_reviewed_at = models.DateTimeField(null=True, blank=True, verbose_name='تاریخ بررسی بالادستی')
+
+    # ── مرحله ادمین ───────────────────────────────────────────────────────────
+    admin_reviewer    = models.ForeignKey(
+        CustomUser, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='reviewed_employee_requests_as_admin',
+        verbose_name='ادمین بررسی‌کننده',
+    )
+    admin_note        = models.TextField(blank=True, null=True, verbose_name='توضیحات ادمین')
+    admin_reviewed_at = models.DateTimeField(null=True, blank=True, verbose_name='تاریخ بررسی ادمین')
+
+    # ── مرحله مدیر مالی ───────────────────────────────────────────────────────
+    finance_reviewer    = models.ForeignKey(
+        CustomUser, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='reviewed_employee_requests_as_finance',
+        verbose_name='مدیر مالی بررسی‌کننده',
+    )
+    finance_note        = models.TextField(blank=True, null=True, verbose_name='توضیحات مدیر مالی')
+    finance_reviewed_at = models.DateTimeField(null=True, blank=True, verbose_name='تاریخ بررسی مدیر مالی')
+    # فقط برای مساعده — تاریخ پرداخت
+    payment_date        = models.DateField(null=True, blank=True, verbose_name='تاریخ پرداخت (مساعده)')
+
+    # ── فیلدهای اختصاصی مرخصی ─────────────────────────────────────────────────
+    leave_mode       = models.CharField(
+        max_length=10, choices=LEAVE_MODE_CHOICES,
+        null=True, blank=True, verbose_name='مدل مرخصی',
+    )
+    # روزانه: لیست روزها به صورت رشته‌های تاریخ (YYYY-MM-DD)
+    leave_days       = models.JSONField(null=True, blank=True, verbose_name='روزهای مرخصی (روزانه)')
+    # ساعتی: یک روز مشخص + بازه اختیاری
+    leave_day        = models.DateField(null=True, blank=True, verbose_name='روز مرخصی (ساعتی)')
+    leave_start_time = models.TimeField(null=True, blank=True, verbose_name='ساعت شروع مرخصی')
+    leave_end_time   = models.TimeField(null=True, blank=True, verbose_name='ساعت پایان مرخصی')
+
+    # ── فیلد اختصاصی مساعده ───────────────────────────────────────────────────
+    advance_amount = models.DecimalField(
+        max_digits=12, decimal_places=2,
+        null=True, blank=True, verbose_name='مبلغ مساعده',
+    )
+
+    # ── فیلدهای اختصاصی اضافه‌کاری ────────────────────────────────────────────
+    overtime_day   = models.DateField(null=True, blank=True, verbose_name='روز اضافه‌کاری')
+    overtime_start = models.TimeField(null=True, blank=True, verbose_name='ساعت شروع اضافه‌کاری')
+    overtime_end   = models.TimeField(null=True, blank=True, verbose_name='ساعت پایان اضافه‌کاری')
+
+    # ── فیلد اختصاصی متفرقه ────────────────────────────────────────────────────
+    misc_title = models.CharField(
+        max_length=200, null=True, blank=True, verbose_name='عنوان (متفرقه)',
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.get_request_type_display()} — {self.requester.username} ({self.get_status_display()})"
+
+
+# ── EmployeeRequestLog (لاگ درخواست کارکنان) ──────────────────────────────────
+class EmployeeRequestLog(models.Model):
+    """
+    تاریخچه کامل هر درخواست کارکنان.
+    هر ردیف یک رویداد است: ثبت، تایید، رد، لغو، پرداخت.
+    فیلد stage مرحله‌ای که این رویداد در آن رخ داده را مشخص می‌کند.
+    """
+    STAGE_CHOICES = [
+        ('SUBMIT',   'ثبت درخواست'),
+        ('SUPERIOR', 'بررسی بالادستی'),
+        ('ADMIN',    'بررسی ادمین'),
+        ('FINANCE',  'بررسی مدیر مالی'),
+        ('CANCEL',   'لغو توسط کارمند'),
+    ]
+
+    id               = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    employee_request = models.ForeignKey(
+        EmployeeRequest, on_delete=models.CASCADE,
+        related_name='logs', verbose_name='درخواست مرتبط',
+    )
+    actor = models.ForeignKey(
+        CustomUser, on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='employee_request_logs_created',
+        verbose_name='کاربر عامل',
+    )
+    stage  = models.CharField(
+        max_length=10, choices=STAGE_CHOICES,
+        default='SUBMIT', verbose_name='مرحله',
+    )
+    action = models.TextField(verbose_name='متن رویداد')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"[{self.created_at.date()}] {self.get_stage_display()} — {self.action[:60]}"
+
+
 # ── SellerCommissionConfig (تنظیمات سیستم پورسانت فروشنده) ────────────────────
 class SellerCommissionConfig(models.Model):
     MODEL_CHOICES = [

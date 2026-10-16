@@ -16,6 +16,7 @@ from core.models import (
     ReportDefinition, ReportSubmission, ReportImage,
     BranchTransfer, TransferItem, TransferLog,
     WasteReport, WasteItem, AdvanceRequest, AdvanceRequestLog,
+    EmployeeRequest, EmployeeRequestLog,
     SellerCommissionConfig, SellerDailySale,
     LiquidityDailyRevenueSetting, LiquidityExpense, LiquidityExpensePayment, LiquidityCardTransaction,
     LiquidityDailyCharge, LiquidityCheck
@@ -2526,7 +2527,239 @@ class AdvancePayRequestSerializer(serializers.Serializer):
     note = serializers.CharField(required=False, allow_blank=True, help_text="توضیحات مدیر مالی")
 
 
+# ── درخواست کارکنان (EmployeeRequest) ─────────────────────────────────────────
+
+class EmployeeRequestLogSerializer(serializers.ModelSerializer):
+    """
+    یک رویداد از تاریخچه درخواست کارکنان.
+    شامل مرحله (stage)، کاربر عامل، و متن رویداد.
+    """
+    actor_name     = serializers.CharField(source='actor.get_full_name', read_only=True)
+    actor_username = serializers.CharField(source='actor.username',      read_only=True)
+    stage_display  = serializers.CharField(source='get_stage_display',   read_only=True)
+
+    class Meta:
+        model  = EmployeeRequestLog
+        fields = ['id', 'stage', 'stage_display', 'actor_name', 'actor_username', 'action', 'created_at']
 
 
+class EmployeeRequestSerializer(serializers.ModelSerializer):
+    """سریالایزر ایجاد درخواست + مشاهده جزئیات کامل."""
+    logs = EmployeeRequestLogSerializer(many=True, read_only=True)
+
+    requester_name         = serializers.CharField(source='requester.get_full_name',         read_only=True)
+    target_superior_name   = serializers.CharField(source='target_superior.get_full_name',   read_only=True)
+    superior_reviewer_name = serializers.CharField(source='superior_reviewer.get_full_name', read_only=True)
+    admin_reviewer_name    = serializers.CharField(source='admin_reviewer.get_full_name',    read_only=True)
+    finance_reviewer_name  = serializers.CharField(source='finance_reviewer.get_full_name',  read_only=True)
+    request_type_display   = serializers.CharField(source='get_request_type_display', read_only=True)
+    status_display         = serializers.CharField(source='get_status_display',       read_only=True)
+    leave_mode_display     = serializers.CharField(source='get_leave_mode_display',   read_only=True)
+
+    # write-only: کاربر فقط ID بالادستی را می‌فرستد
+    superior_id = serializers.PrimaryKeyRelatedField(
+        queryset=CustomUser.objects.filter(is_deleted=False),
+        source='target_superior',
+        write_only=True,
+        required=False,
+        allow_null=True,
+        help_text="شناسه بالادستی انتخابی (اگر چند بالادستی دارید)",
+    )
+
+    class Meta:
+        model  = EmployeeRequest
+        fields = [
+            'id', 'requester', 'requester_name',
+            'request_type', 'request_type_display',
+            'description', 'status', 'status_display',
+            'target_superior', 'target_superior_name', 'superior_id',
+            # مرخصی
+            'leave_mode', 'leave_mode_display',
+            'leave_days', 'leave_day', 'leave_start_time', 'leave_end_time',
+            # مساعده
+            'advance_amount',
+            # اضافه‌کاری
+            'overtime_day', 'overtime_start', 'overtime_end',
+            # متفرقه
+            'misc_title',
+            # مراحل تایید
+            'superior_reviewer', 'superior_reviewer_name',
+            'superior_note', 'superior_reviewed_at',
+            'admin_reviewer', 'admin_reviewer_name',
+            'admin_note', 'admin_reviewed_at',
+            'finance_reviewer', 'finance_reviewer_name',
+            'finance_note', 'finance_reviewed_at', 'payment_date',
+            # لاگ تاریخچه
+            'logs', 'created_at', 'updated_at',
+        ]
+        read_only_fields = [
+            'requester', 'target_superior', 'status',
+            'superior_reviewer', 'superior_note', 'superior_reviewed_at',
+            'admin_reviewer', 'admin_note', 'admin_reviewed_at',
+            'finance_reviewer', 'finance_note', 'finance_reviewed_at', 'payment_date',
+        ]
+
+    def validate(self, attrs):
+        # ── ۱. اعتبارسنجی بالادستی ──────────────────────────────────────────────
+        request = self.context.get('request')
+        if request and request.user:
+            user            = request.user
+            target_superior = attrs.get('target_superior')
+            superiors       = list(user.superiors.all())
+
+            if superiors:
+                if target_superior:
+                    if target_superior not in superiors:
+                        raise serializers.ValidationError(
+                            {"superior_id": "کاربر انتخاب‌شده در لیست بالادستی‌های شما نیست."}
+                        )
+                elif len(superiors) == 1:
+                    attrs['target_superior'] = superiors[0]
+                else:
+                    raise serializers.ValidationError(
+                        {"superior_id": "شما چند بالادستی دارید. لطفاً بالادستی مورد نظر را انتخاب کنید."}
+                    )
+
+        # ── ۲. اعتبارسنجی فیلدهای اختصاصی هر نوع ──────────────────────────────
+        req_type = attrs.get('request_type')
+
+        if req_type == 'LEAVE':
+            leave_mode = attrs.get('leave_mode')
+            if not leave_mode:
+                raise serializers.ValidationError(
+                    {"leave_mode": "مدل مرخصی (ساعتی/روزانه) الزامی است."}
+                )
+            if leave_mode == 'DAILY':
+                if not attrs.get('leave_days'):
+                    raise serializers.ValidationError(
+                        {"leave_days": "لیست روزهای مرخصی (روزانه) الزامی است."}
+                    )
+            elif leave_mode == 'HOURLY':
+                if not attrs.get('leave_day'):
+                    raise serializers.ValidationError(
+                        {"leave_day": "روز مرخصی (ساعتی) الزامی است."}
+                    )
+
+        elif req_type == 'ADVANCE':
+            if not attrs.get('advance_amount'):
+                raise serializers.ValidationError(
+                    {"advance_amount": "مبلغ مساعده الزامی است."}
+                )
+
+        elif req_type == 'OVERTIME':
+            if not attrs.get('overtime_day'):
+                raise serializers.ValidationError(
+                    {"overtime_day": "روز اضافه‌کاری الزامی است."}
+                )
+            if not attrs.get('overtime_start') or not attrs.get('overtime_end'):
+                raise serializers.ValidationError(
+                    {"overtime_start": "بازه ساعت اضافه‌کاری (overtime_start و overtime_end) الزامی است."}
+                )
+
+        elif req_type == 'MISC':
+            if not attrs.get('misc_title'):
+                raise serializers.ValidationError(
+                    {"misc_title": "عنوان درخواست متفرقه الزامی است."}
+                )
+
+        return attrs
+
+
+class EmployeeRequestListSerializer(serializers.ModelSerializer):
+    """سریالایزر فشرده برای لیست‌ها."""
+    requester_name       = serializers.CharField(source='requester.get_full_name', read_only=True)
+    requester_username   = serializers.CharField(source='requester.username',      read_only=True)
+    target_superior_name = serializers.CharField(source='target_superior.get_full_name', read_only=True)
+    request_type_display = serializers.CharField(source='get_request_type_display', read_only=True)
+    status_display       = serializers.CharField(source='get_status_display',       read_only=True)
+
+    class Meta:
+        model  = EmployeeRequest
+        fields = [
+            'id', 'requester', 'requester_name', 'requester_username',
+            'request_type', 'request_type_display',
+            'target_superior', 'target_superior_name',
+            'status', 'status_display',
+            'created_at',
+        ]
+
+
+class EmployeeRequestInboxSerializer(serializers.ModelSerializer):
+    """
+    سریالایزر کارتابل:
+    برای بالادستی، ادمین، و مدیر مالی جهت بررسی درخواست‌ها.
+    شامل جزئیات کامل + لاگ تاریخچه.
+    """
+    logs = EmployeeRequestLogSerializer(many=True, read_only=True)
+
+    requester_name         = serializers.CharField(source='requester.get_full_name',         read_only=True)
+    requester_username     = serializers.CharField(source='requester.username',              read_only=True)
+    target_superior_name   = serializers.CharField(source='target_superior.get_full_name',   read_only=True)
+    superior_reviewer_name = serializers.CharField(source='superior_reviewer.get_full_name', read_only=True)
+    admin_reviewer_name    = serializers.CharField(source='admin_reviewer.get_full_name',    read_only=True)
+    finance_reviewer_name  = serializers.CharField(source='finance_reviewer.get_full_name',  read_only=True)
+    request_type_display   = serializers.CharField(source='get_request_type_display', read_only=True)
+    status_display         = serializers.CharField(source='get_status_display',       read_only=True)
+    leave_mode_display     = serializers.CharField(source='get_leave_mode_display',   read_only=True)
+
+    class Meta:
+        model  = EmployeeRequest
+        fields = [
+            'id', 'requester', 'requester_name', 'requester_username',
+            'request_type', 'request_type_display',
+            'description', 'status', 'status_display',
+            'target_superior', 'target_superior_name',
+            # مرخصی
+            'leave_mode', 'leave_mode_display',
+            'leave_days', 'leave_day', 'leave_start_time', 'leave_end_time',
+            # مساعده
+            'advance_amount',
+            # اضافه‌کاری
+            'overtime_day', 'overtime_start', 'overtime_end',
+            # متفرقه
+            'misc_title',
+            # مراحل تایید
+            'superior_reviewer', 'superior_reviewer_name',
+            'superior_note', 'superior_reviewed_at',
+            'admin_reviewer', 'admin_reviewer_name',
+            'admin_note', 'admin_reviewed_at',
+            'finance_reviewer', 'finance_reviewer_name',
+            'finance_note', 'finance_reviewed_at', 'payment_date',
+            # لاگ
+            'logs', 'created_at', 'updated_at',
+        ]
+        read_only_fields = fields
+
+
+class EmployeeReviewRequestSerializer(serializers.Serializer):
+    """ورودی مرحله تایید/رد (بالادستی یا ادمین)."""
+    action = serializers.ChoiceField(
+        choices=['approve', 'reject'],
+        help_text="approve = تایید | reject = رد",
+    )
+    note = serializers.CharField(
+        required=False, allow_blank=True,
+        help_text="توضیحات (برای رد اجباری است)",
+    )
+
+
+class EmployeeFinanceReviewSerializer(serializers.Serializer):
+    """
+    ورودی مرحله مدیر مالی.
+    برای همه انواع: approve یا reject.
+    برای مساعده (ADVANCE) که نتیجه‌اش PAID می‌شود، payment_date هم الزامی است.
+    """
+    action = serializers.ChoiceField(
+        choices=['approve', 'reject'],
+        help_text="approve = تایید/پرداخت | reject = رد",
+    )
+    note = serializers.CharField(
+        required=False, allow_blank=True,
+        help_text="توضیحات مدیر مالی",
+    )
+    payment_date = serializers.DateField(
+        required=False, allow_null=True,
+        help_text="تاریخ پرداخت — فقط برای نوع مساعده (ADVANCE) الزامی است",
+    )
 
 
