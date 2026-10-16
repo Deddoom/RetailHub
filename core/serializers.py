@@ -11,7 +11,7 @@ from core.models import (
     Checklist, Task,
     DepositOrder, DepositOrderItem,
     BRANCH_CHOICES, Mission, ChecklistLog, ChecklistLogItem,
-    Claim, ClaimItem, ClaimFollowUp, DamageRegistration, DamageItem,
+    Claim, ClaimItem, ClaimFollowUp, DamageRegistration, DamageItem, DamageRegistrationLog,
     ReturnRequest, ReturnItem, ExchangeItem,
     ReportDefinition, ReportSubmission, ReportImage,
     BranchTransfer, TransferItem, TransferLog,
@@ -749,29 +749,110 @@ class DamageItemSerializer(serializers.ModelSerializer):
         fields = ['id', 'item_name', 'quantity', 'unit_price', 'total_price']
 
 
+class DamageRegistrationLogSerializer(serializers.ModelSerializer):
+    """سریالایزر لاگ تاریخچه ثبت خسارت."""
+    actor_name     = serializers.CharField(source='actor.get_full_name', read_only=True)
+    actor_username = serializers.CharField(source='actor.username',      read_only=True)
+    stage_display  = serializers.CharField(source='get_stage_display',   read_only=True)
+
+    class Meta:
+        model  = DamageRegistrationLog
+        fields = ['id', 'stage', 'stage_display', 'actor_name', 'actor_username', 'action', 'created_at']
+
+
 class DamageRegistrationSerializer(serializers.ModelSerializer):
-    items           = DamageItemSerializer(many=True)
-    created_by_name = serializers.CharField(source='created_by.first_name', read_only=True)
+    items               = DamageItemSerializer(many=True)
+    created_by_name     = serializers.CharField(source='created_by.get_full_name', read_only=True)
+    created_by_username = serializers.CharField(source='created_by.username',      read_only=True)
+    supervisor_name     = serializers.CharField(source='supervisor.get_full_name', read_only=True)
+    supervisor_username = serializers.CharField(source='supervisor.username',      read_only=True)
+    supervisor_reviewer_name = serializers.CharField(source='supervisor_reviewer.get_full_name', read_only=True)
+    status_display      = serializers.CharField(source='get_status_display', read_only=True)
+    reason_display      = serializers.CharField(source='get_reason_display', read_only=True)
+    logs                = DamageRegistrationLogSerializer(many=True, read_only=True)
+
+    supervisor_id = serializers.PrimaryKeyRelatedField(
+        queryset=CustomUser.objects.filter(is_deleted=False),
+        source='supervisor',
+        write_only=True,
+        required=True,
+        help_text="شناسه سرپرست شعبه انتخاب‌شده",
+    )
 
     class Meta:
         model  = DamageRegistration
         fields = [
-            'id', 'date', 'branch', 'reason', 'culprit', 'description',
-            'created_by', 'created_by_name', 'items', 'created_at'
+            'id', 'date', 'branch', 'reason', 'reason_display', 'culprit', 'description',
+            'status', 'status_display',
+            'created_by', 'created_by_name', 'created_by_username',
+            'supervisor', 'supervisor_name', 'supervisor_username', 'supervisor_id',
+            'supervisor_reviewer', 'supervisor_reviewer_name',
+            'supervisor_note', 'supervisor_reviewed_at',
+            'items', 'logs', 'created_at', 'updated_at',
         ]
-        read_only_fields = ['created_by', 'created_at']
+        read_only_fields = [
+            'status', 'created_by', 'supervisor',
+            'supervisor_reviewer', 'supervisor_note', 'supervisor_reviewed_at',
+            'created_at', 'updated_at',
+        ]
+
+    def validate(self, attrs):
+        request = self.context.get('request')
+        user = request.user if request else None
+
+        # اعتبارسنجی نقش ثبت‌کننده در متد create
+        if self.instance is None and user and user.is_authenticated:
+            is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
+            is_warehouse_or_stat = any(r.code in ['WAREHOUSE', 'STATISTICIAN'] for r in user.roles.all())
+            if not (is_admin or is_warehouse_or_stat):
+                raise serializers.ValidationError(
+                    {"created_by": "ثبت خسارت فقط توسط انباردار یا آمارگیر (یا ادمین) امکان‌پذیر است."}
+                )
+
+        # اعتبارسنجی سرپرست انتخاب‌شده
+        supervisor = attrs.get('supervisor')
+        if supervisor:
+            is_sup = supervisor.is_superuser or any(r.code in ['SUPERVISOR', 'ADMIN'] for r in supervisor.roles.all())
+            if not is_sup:
+                raise serializers.ValidationError(
+                    {"supervisor_id": "کاربر انتخاب‌شده باید دارای نقش سرپرست یا ادمین باشد."}
+                )
+
+        # اعتبارسنجی اقلام
+        items_data = self.initial_data.get('items', [])
+        if not items_data and self.instance is None:
+            raise serializers.ValidationError({"items": "حداقل ثبت یک قلم کالای خسارت‌دیده الزامی است."})
+
+        return attrs
 
     @transaction.atomic
     def create(self, validated_data):
         items_data = validated_data.pop('items', [])
-        validated_data['created_by'] = self.context['request'].user
+        user = self.context['request'].user
+        validated_data['created_by'] = user
+        validated_data['status'] = 'PENDING_SUPERVISOR'
+
         registration = DamageRegistration.objects.create(**validated_data)
         for item in items_data:
             DamageItem.objects.create(registration=registration, **item)
+
+        # ایجاد لاگ اولیه ثبت
+        sup_name = registration.supervisor.get_full_name() or registration.supervisor.username if registration.supervisor else 'نامشخص'
+        DamageRegistrationLog.objects.create(
+            damage_registration=registration,
+            actor=user,
+            stage='SUBMIT',
+            action=f"ثبت اولیه خسارت {registration.branch} و ارجاع به سرپرست ({sup_name})",
+        )
         return registration
 
     @transaction.atomic
     def update(self, instance, validated_data):
+        user = self.context['request'].user
+        is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
+        if instance.status != 'PENDING_SUPERVISOR' and not is_admin:
+            raise serializers.ValidationError("گزارش خسارت پس از بررسی سرپرست قابل ویرایش نیست.")
+
         items_data = validated_data.pop('items', None)
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
@@ -782,6 +863,62 @@ class DamageRegistrationSerializer(serializers.ModelSerializer):
             for item in items_data:
                 DamageItem.objects.create(registration=instance, **item)
         return instance
+
+
+class DamageRegistrationListSerializer(serializers.ModelSerializer):
+    """سریالایزر خلاصه برای لیست ثبت‌های خسارت."""
+    created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True)
+    supervisor_name = serializers.CharField(source='supervisor.get_full_name', read_only=True)
+    status_display  = serializers.CharField(source='get_status_display',       read_only=True)
+    reason_display  = serializers.CharField(source='get_reason_display',       read_only=True)
+    items_count     = serializers.IntegerField(source='items.count',           read_only=True)
+
+    class Meta:
+        model  = DamageRegistration
+        fields = [
+            'id', 'date', 'branch', 'reason', 'reason_display', 'culprit',
+            'status', 'status_display',
+            'created_by', 'created_by_name',
+            'supervisor', 'supervisor_name',
+            'items_count', 'created_at',
+        ]
+
+
+class DamageRegistrationReviewSerializer(serializers.Serializer):
+    """ورودی تایید یا رد ثبت خسارت توسط سرپرست شعبه."""
+    action = serializers.ChoiceField(
+        choices=['approve', 'reject'],
+        help_text="approve = تایید | reject = رد",
+    )
+    note = serializers.CharField(
+        required=False, allow_blank=True,
+        help_text="توضیحات سرپرست (برای رد اجباری است)",
+    )
+
+
+class DamageRegistrationInboxSerializer(serializers.ModelSerializer):
+    """سریالایزر جامع کارتابل سرپرست شامل اقلام و تاریخچه لاگ."""
+    items                    = DamageItemSerializer(many=True, read_only=True)
+    created_by_name          = serializers.CharField(source='created_by.get_full_name',          read_only=True)
+    created_by_username      = serializers.CharField(source='created_by.username',               read_only=True)
+    supervisor_name          = serializers.CharField(source='supervisor.get_full_name',          read_only=True)
+    supervisor_reviewer_name = serializers.CharField(source='supervisor_reviewer.get_full_name', read_only=True)
+    status_display           = serializers.CharField(source='get_status_display',                read_only=True)
+    reason_display           = serializers.CharField(source='get_reason_display',                read_only=True)
+    logs                     = DamageRegistrationLogSerializer(many=True, read_only=True)
+
+    class Meta:
+        model  = DamageRegistration
+        fields = [
+            'id', 'date', 'branch', 'reason', 'reason_display', 'culprit', 'description',
+            'status', 'status_display',
+            'created_by', 'created_by_name', 'created_by_username',
+            'supervisor', 'supervisor_name',
+            'supervisor_reviewer', 'supervisor_reviewer_name',
+            'supervisor_note', 'supervisor_reviewed_at',
+            'items', 'logs', 'created_at', 'updated_at',
+        ]
+        read_only_fields = fields
 
 
 # ── Return Request Serializers ────────────────────────────────────────────────

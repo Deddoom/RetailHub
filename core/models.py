@@ -594,8 +594,14 @@ class ClaimFollowUp(models.Model):
     def __str__(self):
         return f"پیگیری {self.get_follow_up_type_display()} توسط {self.follower.username}"
     
-# ── DamageRegistration (ثبت ضایعات) ──────────────────────────────────────────
+# ── DamageRegistration (ثبت ضایعات و خسارت چندمرحله‌ای) ──────────────────────
 class DamageRegistration(models.Model):
+    STATUS_CHOICES = [
+        ('PENDING_SUPERVISOR', 'در انتظار تایید سرپرست'),
+        ('APPROVED',           'تایید شده توسط سرپرست'),
+        ('REJECTED',           'رد شده توسط سرپرست'),
+        ('CANCELLED',          'لغو شده توسط ثبت‌کننده'),
+    ]
     REASON_CHOICES = [
         ('IRRIGATION', 'آبیاری'),
         ('PEST',       'آفت'),
@@ -605,28 +611,65 @@ class DamageRegistration(models.Model):
         ('UNKNOWN',    'نامعلوم'),
     ]
     id          = models.UUIDField(primary_key=True, default=uuid4, editable=False)
-    date        = models.DateField()
-    branch      = models.CharField(max_length=50, choices=BRANCH_CHOICES)
-    created_by  = models.ForeignKey(CustomUser, on_delete=models.PROTECT, related_name='damage_registrations')
-    reason      = models.CharField(max_length=20, choices=REASON_CHOICES)
-    culprit     = models.CharField(max_length=150, blank=True, null=True, help_text="مقصر")
-    description = models.TextField(blank=True, null=True)
+    date        = models.DateField(verbose_name='تاریخ خسارت')
+    branch      = models.CharField(max_length=50, choices=BRANCH_CHOICES, verbose_name='شعبه')
+    created_by  = models.ForeignKey(CustomUser, on_delete=models.PROTECT, related_name='damage_registrations', verbose_name='ثبت‌کننده')
+    reason      = models.CharField(max_length=20, choices=REASON_CHOICES, verbose_name='علت خسارت')
+    culprit     = models.CharField(max_length=150, blank=True, null=True, help_text="مقصر", verbose_name='مقصر')
+    description = models.TextField(blank=True, null=True, verbose_name='توضیحات')
+
+    # فیلدهای گردش کار و سرپرست شعبه
+    status                 = models.CharField(max_length=25, choices=STATUS_CHOICES, default='PENDING_SUPERVISOR', verbose_name='وضعیت')
+    supervisor             = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='supervised_damage_registrations', verbose_name='سرپرست شعبه')
+    supervisor_reviewer    = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='reviewed_damage_registrations', verbose_name='سرپرست بررسی‌کننده')
+    supervisor_note        = models.TextField(blank=True, null=True, verbose_name='توضیحات سرپرست')
+    supervisor_reviewed_at = models.DateTimeField(null=True, blank=True, verbose_name='زمان بررسی سرپرست')
+
     created_at  = models.DateTimeField(auto_now_add=True)
+    updated_at  = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
 
     def __str__(self):
-        return f"ضایعات {self.branch} - {self.date}"
+        return f"خسارت {self.branch} - {self.date} ({self.get_status_display()})"
+
 
 class DamageItem(models.Model):
     id           = models.UUIDField(primary_key=True, default=uuid4, editable=False)
-    registration = models.ForeignKey(DamageRegistration, on_delete=models.CASCADE, related_name='items')
-    item_name    = models.CharField(max_length=150)
-    quantity     = models.IntegerField()
-    unit_price   = models.DecimalField(max_digits=12, decimal_places=2)
-    total_price  = models.DecimalField(max_digits=12, decimal_places=2, editable=False)
+    registration = models.ForeignKey(DamageRegistration, on_delete=models.CASCADE, related_name='items', verbose_name='ثبت خسارت مربوطه')
+    item_name    = models.CharField(max_length=150, verbose_name='نام کالا')
+    quantity     = models.IntegerField(verbose_name='تعداد')
+    unit_price   = models.DecimalField(max_digits=12, decimal_places=2, verbose_name='قیمت واحد')
+    total_price  = models.DecimalField(max_digits=12, decimal_places=2, editable=False, verbose_name='قیمت کل')
 
     def save(self, *args, **kwargs):
         self.total_price = Decimal(str(self.quantity)) * Decimal(str(self.unit_price))
         super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.item_name} × {self.quantity}"
+
+
+# ── DamageRegistrationLog (لاگ تاریخچه ثبت خسارت) ─────────────────────────────
+class DamageRegistrationLog(models.Model):
+    STAGE_CHOICES = [
+        ('SUBMIT',     'ثبت اولیه'),
+        ('SUPERVISOR', 'بررسی سرپرست'),
+        ('CANCEL',     'لغو توسط ثبت‌کننده'),
+    ]
+    id                  = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    damage_registration = models.ForeignKey(DamageRegistration, on_delete=models.CASCADE, related_name='logs', verbose_name='ثبت خسارت مرتبط')
+    actor               = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='damage_registration_logs', verbose_name='کاربر عامل')
+    stage               = models.CharField(max_length=15, choices=STAGE_CHOICES, default='SUBMIT', verbose_name='مرحله')
+    action              = models.TextField(verbose_name='متن رویداد')
+    created_at          = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"[{self.created_at.date()}] {self.get_stage_display()} — {self.action[:60]}"
 
 
 # ── ReturnRequest (درخواست برگشتی کالا و وجه) ──────────────────────────────────

@@ -22,7 +22,7 @@ from core.models import (
     Checklist, Task,
     DepositOrder, DepositOrderItem,
     BRANCH_CHOICES, Mission, Role, ChecklistLog,
-    Claim, ClaimFollowUp, DamageRegistration, ReturnRequest,
+    Claim, ClaimFollowUp, DamageRegistration, DamageRegistrationLog, ReturnRequest,
     ReportDefinition, ReportSubmission,
     BranchTransfer, TransferItem, TransferLog,
     WasteReport, WasteItem, UserOnlineLog, AdvanceRequest, AdvanceRequestLog,
@@ -42,7 +42,9 @@ from core.serializers import (
     DepositOrderSerializer, DepositOrderListSerializer,
     MissionSerializer, RoleSerializer, ChecklistLogSerializer,
     ClaimSerializer, ClaimFollowUpSerializer,
-    DamageRegistrationSerializer, ReturnRequestSerializer,
+    DamageRegistrationSerializer, DamageRegistrationListSerializer,
+    DamageRegistrationReviewSerializer, DamageRegistrationInboxSerializer,
+    ReturnRequestSerializer,
     ReportDefinitionSerializer, ReportSubmissionSerializer, ReportImageSerializer,
     BranchTransferSerializer, BranchTransferListSerializer,
     WasteReportSerializer, WasteReportListSerializer,
@@ -1721,7 +1723,7 @@ class ClaimViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
-# ── Damage Registration ───────────────────────────────────────────────────────
+# ── Damage Registration (ثبت خسارت و ضایعات چندمرحله‌ای) ──────────────────────
 
 @extend_schema_view(
     list=extend_schema(
@@ -1729,52 +1731,215 @@ class ClaimViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         summary="لیست ثبت‌های خسارت و ضایعات",
         parameters=[
             OpenApiParameter('branch', OpenApiTypes.STR, description="فیلتر بر اساس نام شعبه", required=False),
+            OpenApiParameter('status', OpenApiTypes.STR, description="فیلتر بر اساس وضعیت (PENDING_SUPERVISOR|APPROVED|REJECTED|CANCELLED)", required=False),
             OpenApiParameter('reason', OpenApiTypes.STR, description="فیلتر بر اساس علت ضایعات", required=False),
             OpenApiParameter('from_date', OpenApiTypes.DATE, description="از تاریخ ثبت (YYYY-MM-DD)", required=False),
             OpenApiParameter('to_date', OpenApiTypes.DATE, description="تا تاریخ ثبت (YYYY-MM-DD)", required=False),
         ]
     ),
-    retrieve=extend_schema(tags=['خسارت و ضایعات'], summary="مشاهده جزئیات ثبت خسارت"),
-    create=extend_schema(tags=['خسارت و ضایعات'], summary="ثبت خسارت و اقلام ضایعات جدید"),
-    update=extend_schema(tags=['خسارت و ضایعات'], summary="ویرایش کامل ثبت خسارت"),
+    retrieve=extend_schema(tags=['خسارت و ضایعات'], summary="مشاهده جزئیات کامل ثبت خسارت به همراه اقلام و تاریخچه"),
+    create=extend_schema(tags=['خسارت و ضایعات'], summary="ثبت خسارت جدید توسط انباردار یا آمارگیر و ارجاع به سرپرست"),
+    update=extend_schema(tags=['خسارت و ضایعات'], summary="ویرایش کامل ثبت خسارت (فقط قبل از بررسی سرپرست)"),
     partial_update=extend_schema(tags=['خسارت و ضایعات'], summary="ویرایش جزئی ثبت خسارت"),
     destroy=extend_schema(tags=['خسارت و ضایعات'], summary="حذف ثبت خسارت"),
 )
 class DamageRegistrationViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     queryset           = DamageRegistration.objects.all().order_by('-created_at')
-    serializer_class   = DamageRegistrationSerializer
     permission_classes = [permissions.IsAuthenticated]
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return DamageRegistrationListSerializer
+        if self.action == 'my_inbox':
+            return DamageRegistrationInboxSerializer
+        return DamageRegistrationSerializer
 
     def get_queryset(self):
         if getattr(self, 'swagger_fake_view', False):
             return DamageRegistration.objects.none()
 
-        qs   = super().get_queryset()
         user = self.request.user
         if not (user and user.is_authenticated):
             return DamageRegistration.objects.none()
 
-        # ادمین، مدیر مالی و انباردار دسترسی کامل به تمامی ثبت‌های ضایعات دارند
-        if not (user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER', 'WAREHOUSE'] for r in user.roles.all())):
-            qs = qs.filter(created_by=user)
+        is_admin = user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in user.roles.all())
 
-        branch = self.request.query_params.get('branch')
-        if branch:
-            qs = qs.filter(branch=branch)
+        if is_admin:
+            qs = DamageRegistration.objects.all()
+        else:
+            # کاربر مواردی که خودش ثبت کرده یا به عنوان سرپرست به او ارجاع شده را می‌بیند
+            qs = DamageRegistration.objects.filter(
+                Q(created_by=user) | Q(supervisor=user)
+            ).distinct()
 
-        reason = self.request.query_params.get('reason')
-        if reason:
-            qs = qs.filter(reason=reason)
+        branch       = self.request.query_params.get('branch')
+        status_param = self.request.query_params.get('status')
+        reason       = self.request.query_params.get('reason')
+        from_date    = self.request.query_params.get('from_date')
+        to_date      = self.request.query_params.get('to_date')
 
-        from_date = self.request.query_params.get('from_date')
-        if from_date:
-            qs = qs.filter(date__gte=from_date)
+        if branch:       qs = qs.filter(branch=branch)
+        if status_param: qs = qs.filter(status=status_param)
+        if reason:       qs = qs.filter(reason=reason)
+        if from_date:    qs = qs.filter(date__gte=from_date)
+        if to_date:      qs = qs.filter(date__lte=to_date)
 
-        to_date = self.request.query_params.get('to_date')
-        if to_date:
-            qs = qs.filter(date__lte=to_date)
+        return qs.select_related(
+            'created_by', 'supervisor', 'supervisor_reviewer'
+        ).prefetch_related('items', 'logs').order_by('-created_at')
 
-        return qs
+    # ─────────────────────────────────────────────────────────────────────────
+    # ۱. تایید یا رد توسط سرپرست
+    # ─────────────────────────────────────────────────────────────────────────
+    @extend_schema(
+        tags=['خسارت و ضایعات'],
+        summary="تایید یا رد ثبت خسارت توسط سرپرست شعبه",
+        request=DamageRegistrationReviewSerializer,
+        responses={200: OpenApiTypes.OBJECT},
+    )
+    @action(detail=True, methods=['post'], url_path='supervisor-review')
+    @transaction.atomic
+    def supervisor_review(self, request, pk=None):
+        instance = self.get_object()
+        user     = request.user
+
+        if instance.status != 'PENDING_SUPERVISOR':
+            return Response(
+                {"error": "این رکورد در وضعیت در انتظار تایید سرپرست نیست."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
+        # فقط سرپرست مشخص‌شده یا ادمین سیستم اجازه تایید/رد دارند
+        if not is_admin and instance.supervisor != user:
+            return Response(
+                {"error": "شما سرپرست منتسب به این گزارش خسارت نیستید."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = DamageRegistrationReviewSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        action_type = serializer.validated_data['action']
+        note        = serializer.validated_data.get('note', '')
+
+        if action_type == 'reject' and not note:
+            return Response(
+                {"error": "برای رد گزارش خسارت، نوشتن توضیحات (note) الزامی است."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        instance.supervisor_reviewer    = user
+        instance.supervisor_note        = note
+        instance.supervisor_reviewed_at = timezone.now()
+        instance.status = 'APPROVED' if action_type == 'approve' else 'REJECTED'
+        instance.save()
+
+        actor_name = user.get_full_name() or user.username
+        action_text = (
+            "تایید شد."
+            if action_type == 'approve'
+            else f"رد شد. دلیل: {note}"
+        )
+        DamageRegistrationLog.objects.create(
+            damage_registration=instance,
+            actor=user,
+            stage='SUPERVISOR',
+            action=f"بررسی سرپرست ({actor_name}): {action_text}" + (f" توضیحات: {note}" if note and action_type == 'approve' else ""),
+        )
+
+        return Response(
+            {"message": f"گزارش خسارت با موفقیت {'تایید' if action_type == 'approve' else 'رد'} شد."},
+            status=status.HTTP_200_OK,
+        )
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # ۲. لغو توسط ثبت‌کننده
+    # ─────────────────────────────────────────────────────────────────────────
+    @extend_schema(
+        tags=['خسارت و ضایعات'],
+        summary="لغو ثبت خسارت توسط ثبت‌کننده (فقط تا قبل از تایید سرپرست)",
+        request=None,
+        responses={200: OpenApiTypes.OBJECT},
+    )
+    @action(detail=True, methods=['post'], url_path='cancel')
+    @transaction.atomic
+    def cancel(self, request, pk=None):
+        instance = self.get_object()
+        user     = request.user
+
+        is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
+        if instance.created_by != user and not is_admin:
+            return Response(
+                {"error": "فقط کاربر ثبت‌کننده می‌تواند این گزارش را لغو کند."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if instance.status != 'PENDING_SUPERVISOR':
+            return Response(
+                {"error": "لغو فقط زمانی ممکن است که گزارش هنوز در انتظار تایید سرپرست باشد."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        instance.status = 'CANCELLED'
+        instance.save()
+
+        actor_name = user.get_full_name() or user.username
+        DamageRegistrationLog.objects.create(
+            damage_registration=instance,
+            actor=user,
+            stage='CANCEL',
+            action=f"گزارش خسارت توسط ثبت‌کننده ({actor_name}) لغو شد.",
+        )
+
+        return Response({"message": "گزارش خسارت با موفقیت لغو شد."}, status=status.HTTP_200_OK)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # ۳. کارتابل سرپرست
+    # ─────────────────────────────────────────────────────────────────────────
+    @extend_schema(
+        tags=['خسارت و ضایعات'],
+        summary="کارتابل سرپرست — خسارت‌های ارجاع‌شده به کاربر جاری جهت تایید",
+        parameters=[
+            OpenApiParameter('status',    OpenApiTypes.STR,  description="فیلتر وضعیت (پیش‌فرض: همه یا PENDING_SUPERVISOR)", required=False),
+            OpenApiParameter('branch',    OpenApiTypes.STR,  description="فیلتر شعبه", required=False),
+            OpenApiParameter('from_date', OpenApiTypes.DATE, description="از تاریخ", required=False),
+            OpenApiParameter('to_date',   OpenApiTypes.DATE, description="تا تاریخ", required=False),
+            OpenApiParameter('search',    OpenApiTypes.STR,  description="جستجو در مشخصات ثبت‌کننده", required=False),
+        ],
+        responses={200: DamageRegistrationInboxSerializer(many=True)},
+    )
+    @action(detail=False, methods=['get'], url_path='my-inbox')
+    def my_inbox(self, request):
+        user = request.user
+        qs   = DamageRegistration.objects.filter(supervisor=user)
+
+        status_param = request.query_params.get('status')
+        branch       = request.query_params.get('branch')
+        from_date    = request.query_params.get('from_date')
+        to_date      = request.query_params.get('to_date')
+        search       = request.query_params.get('search')
+
+        if status_param: qs = qs.filter(status=status_param)
+        if branch:       qs = qs.filter(branch=branch)
+        if from_date:    qs = qs.filter(date__gte=from_date)
+        if to_date:      qs = qs.filter(date__lte=to_date)
+        if search:
+            qs = qs.filter(
+                Q(created_by__first_name__icontains=search) |
+                Q(created_by__last_name__icontains=search)  |
+                Q(created_by__username__icontains=search)   |
+                Q(culprit__icontains=search)
+            )
+
+        qs = qs.select_related(
+            'created_by', 'supervisor', 'supervisor_reviewer'
+        ).prefetch_related('items', 'logs').order_by('-created_at')
+
+        page = self.paginate_queryset(qs)
+        if page is not None:
+            serializer = DamageRegistrationInboxSerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        return Response(DamageRegistrationInboxSerializer(qs, many=True).data)
 
 
 # ── Return Request ────────────────────────────────────────────────────────────
