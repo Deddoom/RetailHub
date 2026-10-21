@@ -54,7 +54,7 @@ from core.serializers import (
     EmployeeReviewRequestSerializer, EmployeeFinanceReviewSerializer,
     SellerCommissionConfigSerializer, SellerDailySaleSerializer, SellerDailySaleBulkSerializer,
     LiquidityDailyRevenueSettingSerializer, LiquidityExpensePaymentSerializer,
-    LiquidityCardTransactionSerializer, LiquidityExpenseSerializer, LiquidityExpenseListSerializer,
+    LiquidityCardTransactionSerializer, LiquidityAllTransactionsSerializer, LiquidityExpenseSerializer, LiquidityExpenseListSerializer,
     FileUploadRequestSerializer, FileUploadResponseSerializer,
     LiquidityExpensePaymentCreateSerializer, LiquidityExpensePaymentCreateResponseSerializer,
     LiquidityExpenseActionResponseSerializer, LiquidityExpenseSummaryResponseSerializer,
@@ -72,7 +72,7 @@ from core.serializers import (
     WasteReviewRequestSerializer, WasteDecisionRequestSerializer,
     AdvanceReviewRequestSerializer, AdvancePayRequestSerializer,
 )
-from core.pagination import OptionalPageNumberPagination
+from core.pagination import OptionalPageNumberPagination, EnforcedPageNumberPagination
 from drf_spectacular.utils import (
     extend_schema, extend_schema_view, OpenApiParameter, OpenApiTypes, OpenApiExample
 )
@@ -1731,17 +1731,17 @@ class ClaimViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         summary="لیست ثبت‌های خسارت و ضایعات",
         parameters=[
             OpenApiParameter('branch', OpenApiTypes.STR, description="فیلتر بر اساس نام شعبه", required=False),
-            OpenApiParameter('status', OpenApiTypes.STR, description="فیلتر بر اساس وضعیت (PENDING_SUPERVISOR|APPROVED|REJECTED|CANCELLED)", required=False),
+            OpenApiParameter('status', OpenApiTypes.STR, description="فیلتر بر اساس وضعیت (PENDING_WAREHOUSE|PENDING_MANAGEMENT|PENDING_FINANCIAL|APPROVED|REJECTED|CANCELLED)", required=False),
             OpenApiParameter('reason', OpenApiTypes.STR, description="فیلتر بر اساس علت ضایعات", required=False),
             OpenApiParameter('from_date', OpenApiTypes.DATE, description="از تاریخ ثبت (YYYY-MM-DD)", required=False),
             OpenApiParameter('to_date', OpenApiTypes.DATE, description="تا تاریخ ثبت (YYYY-MM-DD)", required=False),
         ]
     ),
-    retrieve=extend_schema(tags=['خسارت و ضایعات'], summary="مشاهده جزئیات کامل ثبت خسارت به همراه اقلام و تاریخچه"),
-    create=extend_schema(tags=['خسارت و ضایعات'], summary="ثبت خسارت جدید توسط انباردار یا آمارگیر و ارجاع به سرپرست"),
-    update=extend_schema(tags=['خسارت و ضایعات'], summary="ویرایش کامل ثبت خسارت (فقط قبل از بررسی سرپرست)"),
-    partial_update=extend_schema(tags=['خسارت و ضایعات'], summary="ویرایش جزئی ثبت خسارت"),
-    destroy=extend_schema(tags=['خسارت و ضایعات'], summary="حذف ثبت خسارت"),
+    retrieve=extend_schema(tags=['خسارت و ضایعات'], summary="مشاهده جزئیات کامل ثبت ضایعات به همراه اقلام و تاریخچه"),
+    create=extend_schema(tags=['خسارت و ضایعات'], summary="ثبت ضایعات جدید توسط سرپرست شعبه یا ادمین"),
+    update=extend_schema(tags=['خسارت و ضایعات'], summary="ویرایش کامل ثبت ضایعات (فقط قبل از بررسی انباردار)"),
+    partial_update=extend_schema(tags=['خسارت و ضایعات'], summary="ویرایش جزئی ثبت ضایعات"),
+    destroy=extend_schema(tags=['خسارت و ضایعات'], summary="حذف ثبت ضایعات"),
 )
 class DamageRegistrationViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     queryset           = DamageRegistration.objects.all().order_by('-created_at')
@@ -1762,12 +1762,16 @@ class DamageRegistrationViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         if not (user and user.is_authenticated):
             return DamageRegistration.objects.none()
 
-        is_admin = user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in user.roles.all())
+        user_roles = [r.code for r in user.roles.all()]
+        is_admin = user.is_superuser or 'ADMIN' in user_roles
+        is_financial = 'FINANCIAL_MANAGER' in user_roles
+        is_warehouse = any(r in ['WAREHOUSE', 'STATISTICIAN'] for r in user_roles)
 
-        if is_admin:
+        # مدیر مالی، انباردار، آمارگیر و ادمین به تمامی ضایعات دسترسی دارند
+        if is_admin or is_financial or is_warehouse:
             qs = DamageRegistration.objects.all()
         else:
-            # کاربر مواردی که خودش ثبت کرده یا به عنوان سرپرست به او ارجاع شده را می‌بیند
+            # سرپرست فقط مواردی که خودش ثبت کرده یا به او ارجاع شده را می‌بیند
             qs = DamageRegistration.objects.filter(
                 Q(created_by=user) | Q(supervisor=user)
             ).distinct()
@@ -1785,15 +1789,183 @@ class DamageRegistrationViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         if to_date:      qs = qs.filter(date__lte=to_date)
 
         return qs.select_related(
-            'created_by', 'supervisor', 'supervisor_reviewer'
+            'created_by', 'supervisor', 'warehouse_reviewer', 'management_reviewer', 'financial_reviewer', 'supervisor_reviewer'
         ).prefetch_related('items', 'logs').order_by('-created_at')
 
     # ─────────────────────────────────────────────────────────────────────────
-    # ۱. تایید یا رد توسط سرپرست
+    # ۱. مرحله ۱: تایید یا رد توسط انباردار یا آمارگیر
     # ─────────────────────────────────────────────────────────────────────────
     @extend_schema(
         tags=['خسارت و ضایعات'],
-        summary="تایید یا رد ثبت خسارت توسط سرپرست شعبه",
+        summary="مرحله ۱: تایید یا رد ثبت ضایعات توسط انباردار یا آمارگیر",
+        request=DamageRegistrationReviewSerializer,
+        responses={200: OpenApiTypes.OBJECT},
+    )
+    @action(detail=True, methods=['post'], url_path='warehouse-review')
+    @transaction.atomic
+    def warehouse_review(self, request, pk=None):
+        instance = self.get_object()
+        user     = request.user
+
+        if instance.status != 'PENDING_WAREHOUSE':
+            return Response(
+                {"error": f"این رکورد در وضعیت در انتظار تایید انباردار نیست (وضعیت فعلی: {instance.get_status_display()})."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user_roles = [r.code for r in user.roles.all()]
+        is_admin = user.is_superuser or 'ADMIN' in user_roles
+        is_warehouse_or_stat = any(r in ['WAREHOUSE', 'STATISTICIAN'] for r in user_roles)
+
+        if not (is_admin or is_warehouse_or_stat):
+            return Response(
+                {"error": "فقط کاربران دارای نقش انباردار یا آمارگیر (یا ادمین) مجاز به بررسی این مرحله هستند."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = DamageRegistrationReviewSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        action_type = serializer.validated_data['action']
+        note        = serializer.validated_data.get('note', '')
+
+        instance.warehouse_reviewer    = user
+        instance.warehouse_note        = note
+        instance.warehouse_reviewed_at = timezone.now()
+        instance.status = 'PENDING_MANAGEMENT' if action_type == 'approve' else 'REJECTED'
+        instance.save()
+
+        actor_name = user.get_full_name() or user.username
+        action_text = "تایید شد و به مرحله مدیریت ارجاع گردید." if action_type == 'approve' else f"رد شد."
+        DamageRegistrationLog.objects.create(
+            damage_registration=instance,
+            actor=user,
+            stage='WAREHOUSE',
+            action=f"بررسی انباردار/آمارگیر ({actor_name}): {action_text}" + (f" توضیحات: {note}" if note else ""),
+        )
+
+        return Response(
+            {"message": f"گزارش ضایعات با موفقیت {'تایید و به مدیریت ارجاع' if action_type == 'approve' else 'رد'} شد."},
+            status=status.HTTP_200_OK,
+        )
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # ۲. مرحله ۲: تایید یا رد توسط مدیریت
+    # ─────────────────────────────────────────────────────────────────────────
+    @extend_schema(
+        tags=['خسارت و ضایعات'],
+        summary="مرحله ۲: تایید یا رد ثبت ضایعات توسط مدیریت",
+        description="تایید یا رد ثبت ضایعات توسط مدیریت و ارسال به مدیر مالی. فیلد توضیحات اختیاری است.",
+        request=DamageRegistrationReviewSerializer,
+        responses={200: OpenApiTypes.OBJECT},
+    )
+    @action(detail=True, methods=['post'], url_path='management-review')
+    @transaction.atomic
+    def management_review(self, request, pk=None):
+        instance = self.get_object()
+        user     = request.user
+
+        if instance.status != 'PENDING_MANAGEMENT':
+            return Response(
+                {"error": f"این رکورد در وضعیت در انتظار تایید مدیریت نیست (وضعیت فعلی: {instance.get_status_display()})."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user_roles = [r.code for r in user.roles.all()]
+        is_admin = user.is_superuser or any(r in ['ADMIN', 'EXECUTIVE_MANAGER'] for r in user_roles)
+
+        if not is_admin:
+            return Response(
+                {"error": "فقط مدیریت سیستم مجاز به بررسی و تایید این مرحله است."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = DamageRegistrationReviewSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        action_type = serializer.validated_data['action']
+        note        = serializer.validated_data.get('note', '')
+
+        instance.management_reviewer    = user
+        instance.management_note        = note
+        instance.management_reviewed_at = timezone.now()
+        instance.status = 'PENDING_FINANCIAL' if action_type == 'approve' else 'REJECTED'
+        instance.save()
+
+        actor_name = user.get_full_name() or user.username
+        action_text = "تایید شد و به مرحله مدیر مالی ارجاع گردید." if action_type == 'approve' else f"رد شد."
+        DamageRegistrationLog.objects.create(
+            damage_registration=instance,
+            actor=user,
+            stage='MANAGEMENT',
+            action=f"بررسی مدیریت ({actor_name}): {action_text}" + (f" توضیحات: {note}" if note else ""),
+        )
+
+        return Response(
+            {"message": f"گزارش ضایعات با موفقیت {'تایید و به مدیر مالی ارجاع' if action_type == 'approve' else 'رد'} شد."},
+            status=status.HTTP_200_OK,
+        )
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # ۳. مرحله ۳: تایید یا رد توسط مدیر مالی
+    # ─────────────────────────────────────────────────────────────────────────
+    @extend_schema(
+        tags=['خسارت و ضایعات'],
+        summary="مرحله ۳: تایید نهایی یا رد ثبت ضایعات توسط مدیر مالی",
+        request=DamageRegistrationReviewSerializer,
+        responses={200: OpenApiTypes.OBJECT},
+    )
+    @action(detail=True, methods=['post'], url_path='financial-review')
+    @transaction.atomic
+    def financial_review(self, request, pk=None):
+        instance = self.get_object()
+        user     = request.user
+
+        if instance.status != 'PENDING_FINANCIAL':
+            return Response(
+                {"error": f"این رکورد در وضعیت در انتظار تایید مدیر مالی نیست (وضعیت فعلی: {instance.get_status_display()})."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user_roles = [r.code for r in user.roles.all()]
+        is_admin = user.is_superuser or 'ADMIN' in user_roles
+        is_financial = 'FINANCIAL_MANAGER' in user_roles
+
+        if not (is_admin or is_financial):
+            return Response(
+                {"error": "فقط مدیر مالی (یا ادمین) مجاز به بررسی و تایید نهایی این مرحله است."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = DamageRegistrationReviewSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        action_type = serializer.validated_data['action']
+        note        = serializer.validated_data.get('note', '')
+
+        instance.financial_reviewer    = user
+        instance.financial_note        = note
+        instance.financial_reviewed_at = timezone.now()
+        instance.status = 'APPROVED' if action_type == 'approve' else 'REJECTED'
+        instance.save()
+
+        actor_name = user.get_full_name() or user.username
+        action_text = "تایید نهایی شد." if action_type == 'approve' else f"رد شد."
+        DamageRegistrationLog.objects.create(
+            damage_registration=instance,
+            actor=user,
+            stage='FINANCIAL',
+            action=f"بررسی مدیر مالی ({actor_name}): {action_text}" + (f" توضیحات: {note}" if note else ""),
+        )
+
+        return Response(
+            {"message": f"گزارش ضایعات با موفقیت {'تایید نهایی' if action_type == 'approve' else 'رد'} شد."},
+            status=status.HTTP_200_OK,
+        )
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # ۴. اکشن سازگاری با رکوردهای قدیمی سرپرست
+    # ─────────────────────────────────────────────────────────────────────────
+    @extend_schema(
+        tags=['خسارت و ضایعات'],
+        summary="تایید یا رد رکوردهای قدیمی در انتظار سرپرست",
         request=DamageRegistrationReviewSerializer,
         responses={200: OpenApiTypes.OBJECT},
     )
@@ -1805,12 +1977,11 @@ class DamageRegistrationViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
 
         if instance.status != 'PENDING_SUPERVISOR':
             return Response(
-                {"error": "این رکورد در وضعیت در انتظار تایید سرپرست نیست."},
+                {"error": "این رکورد در وضعیت در انتظار تایید سرپرست (قدیمی) نیست."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
-        # فقط سرپرست مشخص‌شده یا ادمین سیستم اجازه تایید/رد دارند
         if not is_admin and instance.supervisor != user:
             return Response(
                 {"error": "شما سرپرست منتسب به این گزارش خسارت نیستید."},
@@ -1822,12 +1993,6 @@ class DamageRegistrationViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         action_type = serializer.validated_data['action']
         note        = serializer.validated_data.get('note', '')
 
-        if action_type == 'reject' and not note:
-            return Response(
-                {"error": "برای رد گزارش خسارت، نوشتن توضیحات (note) الزامی است."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         instance.supervisor_reviewer    = user
         instance.supervisor_note        = note
         instance.supervisor_reviewed_at = timezone.now()
@@ -1835,16 +2000,11 @@ class DamageRegistrationViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         instance.save()
 
         actor_name = user.get_full_name() or user.username
-        action_text = (
-            "تایید شد."
-            if action_type == 'approve'
-            else f"رد شد. دلیل: {note}"
-        )
         DamageRegistrationLog.objects.create(
             damage_registration=instance,
             actor=user,
             stage='SUPERVISOR',
-            action=f"بررسی سرپرست ({actor_name}): {action_text}" + (f" توضیحات: {note}" if note and action_type == 'approve' else ""),
+            action=f"بررسی سرپرست ({actor_name}): {'تایید شد.' if action_type == 'approve' else f'رد شد. دلیل: {note}'}" + (f" توضیحات: {note}" if note and action_type == 'approve' else ""),
         )
 
         return Response(
@@ -1853,11 +2013,11 @@ class DamageRegistrationViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         )
 
     # ─────────────────────────────────────────────────────────────────────────
-    # ۲. لغو توسط ثبت‌کننده
+    # ۵. لغو توسط ثبت‌کننده (سرپرست)
     # ─────────────────────────────────────────────────────────────────────────
     @extend_schema(
         tags=['خسارت و ضایعات'],
-        summary="لغو ثبت خسارت توسط ثبت‌کننده (فقط تا قبل از تایید سرپرست)",
+        summary="لغو ثبت ضایعات توسط ثبت‌کننده (فقط تا قبل از تایید انباردار)",
         request=None,
         responses={200: OpenApiTypes.OBJECT},
     )
@@ -1874,9 +2034,9 @@ class DamageRegistrationViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        if instance.status != 'PENDING_SUPERVISOR':
+        if instance.status not in ['PENDING_WAREHOUSE', 'PENDING_SUPERVISOR']:
             return Response(
-                {"error": "لغو فقط زمانی ممکن است که گزارش هنوز در انتظار تایید سرپرست باشد."},
+                {"error": "لغو فقط زمانی ممکن است که گزارش هنوز در انتظار بررسی اولیه باشد."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -1888,19 +2048,19 @@ class DamageRegistrationViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
             damage_registration=instance,
             actor=user,
             stage='CANCEL',
-            action=f"گزارش خسارت توسط ثبت‌کننده ({actor_name}) لغو شد.",
+            action=f"گزارش ضایعات توسط ثبت‌کننده ({actor_name}) لغو شد.",
         )
 
-        return Response({"message": "گزارش خسارت با موفقیت لغو شد."}, status=status.HTTP_200_OK)
+        return Response({"message": "گزارش ضایعات با موفقیت لغو شد."}, status=status.HTTP_200_OK)
 
     # ─────────────────────────────────────────────────────────────────────────
-    # ۳. کارتابل سرپرست
+    # ۶. کارتابل هوشمند ضایعات
     # ─────────────────────────────────────────────────────────────────────────
     @extend_schema(
         tags=['خسارت و ضایعات'],
-        summary="کارتابل سرپرست — خسارت‌های ارجاع‌شده به کاربر جاری جهت تایید",
+        summary="کارتابل ضایعات — موارد نیازمند اقدام یا ثبت‌شده متناسب با نقش کاربر فعال",
         parameters=[
-            OpenApiParameter('status',    OpenApiTypes.STR,  description="فیلتر وضعیت (پیش‌فرض: همه یا PENDING_SUPERVISOR)", required=False),
+            OpenApiParameter('status',    OpenApiTypes.STR,  description="فیلتر وضعیت", required=False),
             OpenApiParameter('branch',    OpenApiTypes.STR,  description="فیلتر شعبه", required=False),
             OpenApiParameter('from_date', OpenApiTypes.DATE, description="از تاریخ", required=False),
             OpenApiParameter('to_date',   OpenApiTypes.DATE, description="تا تاریخ", required=False),
@@ -1911,7 +2071,24 @@ class DamageRegistrationViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='my-inbox')
     def my_inbox(self, request):
         user = request.user
-        qs   = DamageRegistration.objects.filter(supervisor=user)
+        user_roles = [r.code for r in user.roles.all()]
+        is_admin = user.is_superuser or 'ADMIN' in user_roles
+        is_financial = 'FINANCIAL_MANAGER' in user_roles
+        is_warehouse = any(r in ['WAREHOUSE', 'STATISTICIAN'] for r in user_roles)
+        is_supervisor = 'SUPERVISOR' in user_roles
+
+        if is_admin:
+            qs = DamageRegistration.objects.filter(
+                status__in=['PENDING_WAREHOUSE', 'PENDING_MANAGEMENT', 'PENDING_FINANCIAL']
+            )
+        elif is_financial:
+            qs = DamageRegistration.objects.filter(status='PENDING_FINANCIAL')
+        elif is_warehouse:
+            qs = DamageRegistration.objects.filter(status='PENDING_WAREHOUSE')
+        elif is_supervisor:
+            qs = DamageRegistration.objects.filter(Q(created_by=user) | Q(supervisor=user))
+        else:
+            qs = DamageRegistration.objects.filter(created_by=user)
 
         status_param = request.query_params.get('status')
         branch       = request.query_params.get('branch')
@@ -1932,7 +2109,7 @@ class DamageRegistrationViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
             )
 
         qs = qs.select_related(
-            'created_by', 'supervisor', 'supervisor_reviewer'
+            'created_by', 'supervisor', 'warehouse_reviewer', 'management_reviewer', 'financial_reviewer', 'supervisor_reviewer'
         ).prefetch_related('items', 'logs').order_by('-created_at')
 
         page = self.paginate_queryset(qs)
@@ -4794,13 +4971,93 @@ class LiquidityCardsViewSet(viewsets.ViewSet):
         return self._add_card_transaction(request, card_code)
 
     @extend_schema(
-        operation_id="liquidity_cards_general_transaction_create",
+        operation_id="liquidity_cards_general_transactions",
         tags=['مدیریت نقدینگی - کارت‌ها'],
-        summary="ثبت تراکنش عمومی در کارت‌های نقدینگی با تعیین نوع کارت در بدنه",
+        summary="ثبت تراکنش عمومی در کارت‌های نقدینگی (POST) یا مشاهده لیست تجمیعی کلیه تراکنش‌ها (GET)",
+        description="متد GET: دریافت کلیه تراکنش‌های واریز، برداشت و پرداخت هزینه با صفحه‌بندی ۲۰تایی. متد POST: ثبت تراکنش جدید با تعیین card_type.",
+        parameters=[
+            OpenApiParameter('card_type', OpenApiTypes.STR, description="فیلتر بر اساس نوع کارت (مثلاً salary, rent, supplier, ...)", required=False),
+            OpenApiParameter('type', OpenApiTypes.STR, description="فیلتر نوع تراکنش: deposit (واریز), withdrawal (برداشت عادی), expense (پرداخت هزینه)", required=False),
+            OpenApiParameter('from_date', OpenApiTypes.DATE, description="از تاریخ (YYYY-MM-DD)", required=False),
+            OpenApiParameter('to_date', OpenApiTypes.DATE, description="تا تاریخ (YYYY-MM-DD)", required=False),
+            OpenApiParameter('search', OpenApiTypes.STR, description="جستجو در توضیحات یا عنوان هزینه", required=False),
+            OpenApiParameter('page', OpenApiTypes.INT, description="شماره صفحه (پیش‌فرض: ۱)", required=False),
+            OpenApiParameter('page_size', OpenApiTypes.INT, description="تعداد در هر صفحه (پیش‌فرض: ۲۰، حداکثر: ۱۰۰)", required=False),
+        ],
         request=LiquidityCardTransactionCreateSerializer,
-        responses={201: LiquidityCardTransactionCreateResponseSerializer}
+        responses={201: LiquidityCardTransactionCreateResponseSerializer, 200: LiquidityAllTransactionsSerializer(many=True)}
     )
-    @action(detail=False, methods=['post'], url_path='transactions')
+    @action(detail=False, methods=['get', 'post'], url_path='transactions')
+    def transactions(self, request):
+        """
+        GET: دریافت لیست تراکنش‌های کلیه کارت‌ها با صفحه‌بندی
+        POST: ثبت تراکنش واریز یا برداشت کارت با ارسال card_type در بدنه
+        """
+        if request.method.upper() == 'GET':
+            return self.get_all_transactions(request)
+        return self.add_general_transaction(request)
+
+    @extend_schema(
+        tags=['مدیریت نقدینگی - کارت‌ها'],
+        summary="لیست تجمیعی و صفحه‌بندی‌شده کلیه تراکنش‌های مالی کارت‌ها (واریز، برداشت و پرداخت هزینه)",
+        description="دریافت کلیه واریزی‌ها، برداشت‌ها و کسر هزینه‌های تسویه شده به ترتیب تاریخ و زمان نزولی همراه با نام هزینه، نوع تراکنش، عنوان کارت و صفحه‌بندی الزامی (پیش‌فرض ۲۰ عددی).",
+        parameters=[
+            OpenApiParameter('card_type', OpenApiTypes.STR, description="فیلتر بر اساس نوع کارت (مثلاً salary, rent, supplier, ...)", required=False),
+            OpenApiParameter('type', OpenApiTypes.STR, description="فیلتر نوع تراکنش: deposit (واریز), withdrawal (برداشت عادی), expense (پرداخت هزینه)", required=False),
+            OpenApiParameter('from_date', OpenApiTypes.DATE, description="از تاریخ (YYYY-MM-DD)", required=False),
+            OpenApiParameter('to_date', OpenApiTypes.DATE, description="تا تاریخ (YYYY-MM-DD)", required=False),
+            OpenApiParameter('search', OpenApiTypes.STR, description="جستجو در توضیحات یا عنوان هزینه", required=False),
+            OpenApiParameter('page', OpenApiTypes.INT, description="شماره صفحه (پیش‌فرض: ۱)", required=False),
+            OpenApiParameter('page_size', OpenApiTypes.INT, description="تعداد در هر صفحه (پیش‌فرض: ۲۰، حداکثر: ۱۰۰)", required=False),
+        ],
+        responses={200: LiquidityAllTransactionsSerializer(many=True)}
+    )
+    @action(detail=False, methods=['get'], url_path='all-transactions')
+    def all_transactions(self, request):
+        return self.get_all_transactions(request)
+
+    def get_all_transactions(self, request):
+        qs = LiquidityCardTransaction.objects.select_related(
+            'created_by', 'expense'
+        ).order_by('-date', '-created_at')
+
+        card_type_param = request.query_params.get('card_type')
+        if card_type_param:
+            norm_card = self._normalize_card_type(card_type_param)
+            if norm_card:
+                qs = qs.filter(card_type=norm_card)
+
+        tx_type_param = request.query_params.get('type')
+        if tx_type_param:
+            t = tx_type_param.strip().lower()
+            if t == 'deposit':
+                qs = qs.filter(transaction_type='DEPOSIT')
+            elif t == 'withdrawal':
+                qs = qs.filter(transaction_type='WITHDRAWAL', expense__isnull=True)
+            elif t in ['expense', 'expense_payment']:
+                qs = qs.filter(expense__isnull=False)
+
+        from_date = request.query_params.get('from_date')
+        if from_date:
+            qs = qs.filter(date__gte=from_date)
+
+        to_date = request.query_params.get('to_date')
+        if to_date:
+            qs = qs.filter(date__lte=to_date)
+
+        search = request.query_params.get('search')
+        if search:
+            qs = qs.filter(
+                Q(description__icontains=search) |
+                Q(expense__title__icontains=search)
+            )
+
+        paginator = EnforcedPageNumberPagination()
+
+        page = paginator.paginate_queryset(qs, request)
+        serializer = LiquidityAllTransactionsSerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
+
     def add_general_transaction(self, request):
         """
         ثبت تراکنش واریز یا برداشت کارت با ارسال card_type در بدنه:

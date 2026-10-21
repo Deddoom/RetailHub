@@ -537,11 +537,12 @@ class DepositOrderItem(models.Model):
 # ── Claim (مطالبه) ──────────────────────────────────────────────────────────────
 class Claim(models.Model):
     STATUS_CHOICES = [
-        ('UNPAID',      'پرداخت نشده'),
-        ('IN_PROGRESS', 'در حال پیگیری'),
-        ('NO_ANSWER',   'پاسخگو نیست'),
-        ('REFUSED',     'عدم پرداخت'),
-        ('PAID',        'پرداخت شده'),
+        ('UNPAID',       'پرداخت نشده'),
+        ('PAID',         'پرداخت شده'),
+        ('WILL_NOT_PAY', 'پرداخت نمی‌کند'),
+        ('REFUSED',      'پرداخت نمی‌کند (عدم پرداخت)'),
+        ('IN_PROGRESS',  'در حال پیگیری'),
+        ('NO_ANSWER',    'پاسخگو نیست'),
     ]
     
     id                = models.UUIDField(primary_key=True, default=uuid4, editable=False)
@@ -597,10 +598,13 @@ class ClaimFollowUp(models.Model):
 # ── DamageRegistration (ثبت ضایعات و خسارت چندمرحله‌ای) ──────────────────────
 class DamageRegistration(models.Model):
     STATUS_CHOICES = [
-        ('PENDING_SUPERVISOR', 'در انتظار تایید سرپرست'),
-        ('APPROVED',           'تایید شده توسط سرپرست'),
-        ('REJECTED',           'رد شده توسط سرپرست'),
-        ('CANCELLED',          'لغو شده توسط ثبت‌کننده'),
+        ('PENDING_WAREHOUSE',   'در انتظار تایید انباردار'),
+        ('PENDING_MANAGEMENT',  'در انتظار تایید مدیریت'),
+        ('PENDING_FINANCIAL',   'در انتظار تایید مدیر مالی'),
+        ('APPROVED',            'تایید نهایی شده'),
+        ('REJECTED',            'رد شده'),
+        ('CANCELLED',           'لغو شده توسط ثبت‌کننده'),
+        ('PENDING_SUPERVISOR',  'در انتظار تایید سرپرست (قدیمی)'),
     ]
     REASON_CHOICES = [
         ('IRRIGATION', 'آبیاری'),
@@ -618,12 +622,29 @@ class DamageRegistration(models.Model):
     culprit     = models.CharField(max_length=150, blank=True, null=True, help_text="مقصر", verbose_name='مقصر')
     description = models.TextField(blank=True, null=True, verbose_name='توضیحات')
 
-    # فیلدهای گردش کار و سرپرست شعبه
-    status                 = models.CharField(max_length=25, choices=STATUS_CHOICES, default='PENDING_SUPERVISOR', verbose_name='وضعیت')
-    supervisor             = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='supervised_damage_registrations', verbose_name='سرپرست شعبه')
-    supervisor_reviewer    = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='reviewed_damage_registrations', verbose_name='سرپرست بررسی‌کننده')
-    supervisor_note        = models.TextField(blank=True, null=True, verbose_name='توضیحات سرپرست')
-    supervisor_reviewed_at = models.DateTimeField(null=True, blank=True, verbose_name='زمان بررسی سرپرست')
+    # وضعیت گردش کار
+    status                 = models.CharField(max_length=25, choices=STATUS_CHOICES, default='PENDING_WAREHOUSE', verbose_name='وضعیت')
+    supervisor             = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='supervised_damage_registrations', verbose_name='سرپرست ثبت‌کننده/شعبه')
+
+    # ۱. مرحله انباردار / آمارگیر
+    warehouse_reviewer     = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='warehouse_reviewed_damage_registrations', verbose_name='انباردار/آمارگیر بررسی‌کننده')
+    warehouse_note         = models.TextField(blank=True, null=True, verbose_name='توضیحات انباردار')
+    warehouse_reviewed_at  = models.DateTimeField(null=True, blank=True, verbose_name='زمان بررسی انباردار')
+
+    # ۲. مرحله مدیریت
+    management_reviewer    = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='management_reviewed_damage_registrations', verbose_name='مدیر بررسی‌کننده')
+    management_note        = models.TextField(blank=True, null=True, verbose_name='توضیحات مدیریت')
+    management_reviewed_at = models.DateTimeField(null=True, blank=True, verbose_name='زمان بررسی مدیریت')
+
+    # ۳. مرحله مدیر مالی
+    financial_reviewer     = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='financial_reviewed_damage_registrations', verbose_name='مدیر مالی بررسی‌کننده')
+    financial_note         = models.TextField(blank=True, null=True, verbose_name='توضیحات مدیر مالی')
+    financial_reviewed_at  = models.DateTimeField(null=True, blank=True, verbose_name='زمان بررسی مدیر مالی')
+
+    # فیلدهای قدیمی جهت سازگاری
+    supervisor_reviewer    = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='reviewed_damage_registrations', verbose_name='سرپرست بررسی‌کننده (قدیمی)')
+    supervisor_note        = models.TextField(blank=True, null=True, verbose_name='توضیحات سرپرست (قدیمی)')
+    supervisor_reviewed_at = models.DateTimeField(null=True, blank=True, verbose_name='زمان بررسی سرپرست (قدیمی)')
 
     created_at  = models.DateTimeField(auto_now_add=True)
     updated_at  = models.DateTimeField(auto_now=True)
@@ -654,8 +675,11 @@ class DamageItem(models.Model):
 # ── DamageRegistrationLog (لاگ تاریخچه ثبت خسارت) ─────────────────────────────
 class DamageRegistrationLog(models.Model):
     STAGE_CHOICES = [
-        ('SUBMIT',     'ثبت اولیه'),
-        ('SUPERVISOR', 'بررسی سرپرست'),
+        ('SUBMIT',     'ثبت اولیه توسط سرپرست'),
+        ('WAREHOUSE',  'بررسی انباردار/آمارگیر'),
+        ('MANAGEMENT', 'بررسی مدیریت'),
+        ('FINANCIAL',  'بررسی مدیر مالی'),
+        ('SUPERVISOR', 'بررسی سرپرست (قدیمی)'),
         ('CANCEL',     'لغو توسط ثبت‌کننده'),
     ]
     id                  = models.UUIDField(primary_key=True, default=uuid4, editable=False)

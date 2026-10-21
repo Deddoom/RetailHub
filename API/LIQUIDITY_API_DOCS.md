@@ -187,7 +187,79 @@
 
 ---
 
-### 2.4. حذف یک تراکنش از کارت
+### 2.4. دریافت لیست تجمیعی کلیه تراکنش‌های مالی کارت‌ها (واریز، برداشت و پرداخت هزینه)
+- **متد:** `GET`
+- **آدرس:** `/api/liquidity/cards/transactions/` (یا `/api/liquidity/cards/all-transactions/`)
+- **دسترسی:** کاربران مدیر نقدینگی (`ADMIN`، `FINANCIAL_MANAGER`)
+- **مرتب‌سازی:** به ترتیب نزولی تاریخ و زمان وقوع (`-date, -created_at`)
+- **صفحه‌بندی الزامی (Pagination):** خروجی به صورت پیش‌فرض با اندازه صفحه ۲۰تایی ارائه می‌شود.
+
+#### پارامترهای فیلتر (Query Parameters):
+| پارامتر | نوع | توضیح |
+|---|---|---|
+| `page` | عدد صحیح | شماره صفحه (پیش‌فرض: `1`) |
+| `page_size` | عدد صحیح | تعداد آیتم در صفحه (پیش‌فرض: `20`، حداکثر: `100`) |
+| `card_type` | رشته | فیلتر روی یک کارت معین (مانند: `salary`, `rent`, `supplier`, `installments`, `other_expenses`, ...) |
+| `type` | رشته | فیلتر نوع تراکنش: `deposit` (واریزی‌ها), `withdrawal` (برداشت‌های عادی), `expense` (پرداخت و کسر هزینه‌ها) |
+| `from_date` | تاریخ (`YYYY-MM-DD`) | از تاریخ |
+| `to_date` | تاریخ (`YYYY-MM-DD`) | تا تاریخ |
+| `search` | متن | جستجو در توضیحات تراکنش یا عنوان هزینه تسویه‌شده |
+
+#### نمونه پاسخ (HTTP 200 OK):
+```json
+{
+  "count": 142,
+  "total_pages": 8,
+  "current_page": 1,
+  "page_size": 20,
+  "next": "http://.../api/liquidity/cards/transactions/?page=2",
+  "previous": null,
+  "results": [
+    {
+      "id": "e98e29a1-0a12-48e1-83fb-b4cba8c162d1",
+      "date": "2026-10-22",
+      "date_jalali": "1405/07/30",
+      "amount": "15000000.00",
+      "transaction_type": "WITHDRAWAL",
+      "transaction_type_code": "EXPENSE_PAYMENT",
+      "transaction_type_display": "پرداخت هزینه",
+      "card_type": "RENT",
+      "card_title": "کارت اجاره",
+      "expense_id": "84b3d81b-56e9-40b5-a63c-da1eb87d6c9a",
+      "expense_title": "اجاره ماه مهر شعبه بهشتی",
+      "expense_category": "RENT",
+      "expense_category_display": "اجاره",
+      "description": "تسویه و پرداخت هزینه: اجاره ماه مهر شعبه بهشتی",
+      "created_by": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "created_by_name": "امیر حسینی",
+      "created_at": "2026-10-22T10:15:30Z"
+    },
+    {
+      "id": "18cf793a-fe97-49ea-aee3-1e9bf59590fc",
+      "date": "2026-10-21",
+      "date_jalali": "1405/07/29",
+      "amount": "50000000.00",
+      "transaction_type": "DEPOSIT",
+      "transaction_type_code": "DEPOSIT",
+      "transaction_type_display": "واریز به کارت",
+      "card_type": "SALARY",
+      "card_title": "کارت حقوق",
+      "expense_id": null,
+      "expense_title": null,
+      "expense_category": null,
+      "expense_category_display": null,
+      "description": "شارژ کارت حقوق از محل فروش روزانه",
+      "created_by": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "created_by_name": "امیر حسینی",
+      "created_at": "2026-10-21T18:00:00Z"
+    }
+  ]
+}
+```
+
+---
+
+### 2.5. حذف یک تراکنش از کارت
 - **متد:** `DELETE`
 - **آدرس:** `/api/liquidity/cards/transactions/{tx_id}/`
 

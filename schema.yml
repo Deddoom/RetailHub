@@ -1066,6 +1066,11 @@ paths:
           type: string
         description: فیلتر بر اساس علت ضایعات
       - in: query
+        name: status
+        schema:
+          type: string
+        description: فیلتر بر اساس وضعیت (PENDING_WAREHOUSE|PENDING_MANAGEMENT|PENDING_FINANCIAL|APPROVED|REJECTED|CANCELLED)
+      - in: query
         name: to_date
         schema:
           type: string
@@ -1082,11 +1087,11 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/DamageRegistration'
+                  $ref: '#/components/schemas/DamageRegistrationList'
           description: ''
     post:
       operationId: damage_registrations_create
-      summary: ثبت خسارت و اقلام ضایعات جدید
+      summary: ثبت ضایعات جدید توسط سرپرست شعبه یا ادمین
       tags:
       - خسارت و ضایعات
       requestBody:
@@ -1113,7 +1118,7 @@ paths:
   /api/damage-registrations/{id}/:
     get:
       operationId: damage_registrations_retrieve
-      summary: مشاهده جزئیات ثبت خسارت
+      summary: مشاهده جزئیات کامل ثبت ضایعات به همراه اقلام و تاریخچه
       parameters:
       - in: path
         name: id
@@ -1135,7 +1140,7 @@ paths:
           description: ''
     put:
       operationId: damage_registrations_update
-      summary: ویرایش کامل ثبت خسارت
+      summary: ویرایش کامل ثبت ضایعات (فقط قبل از بررسی انباردار)
       parameters:
       - in: path
         name: id
@@ -1169,7 +1174,7 @@ paths:
           description: ''
     patch:
       operationId: damage_registrations_partial_update
-      summary: ویرایش جزئی ثبت خسارت
+      summary: ویرایش جزئی ثبت ضایعات
       parameters:
       - in: path
         name: id
@@ -1202,7 +1207,7 @@ paths:
           description: ''
     delete:
       operationId: damage_registrations_destroy
-      summary: حذف ثبت خسارت
+      summary: حذف ثبت ضایعات
       parameters:
       - in: path
         name: id
@@ -1218,6 +1223,222 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/damage-registrations/{id}/cancel/:
+    post:
+      operationId: damage_registrations_cancel_create
+      summary: لغو ثبت ضایعات توسط ثبت‌کننده (فقط تا قبل از تایید انباردار)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: یک رشته UUID که این damage registration را شناسایی میکند.
+        required: true
+      tags:
+      - خسارت و ضایعات
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/damage-registrations/{id}/financial-review/:
+    post:
+      operationId: damage_registrations_financial_review_create
+      summary: 'مرحله ۳: تایید نهایی یا رد ثبت ضایعات توسط مدیر مالی'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: یک رشته UUID که این damage registration را شناسایی میکند.
+        required: true
+      tags:
+      - خسارت و ضایعات
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DamageRegistrationReviewRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DamageRegistrationReviewRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DamageRegistrationReviewRequest'
+        required: true
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/damage-registrations/{id}/management-review/:
+    post:
+      operationId: damage_registrations_management_review_create
+      description: تایید یا رد ثبت ضایعات توسط مدیریت و ارسال به مدیر مالی. فیلد توضیحات
+        اختیاری است.
+      summary: 'مرحله ۲: تایید یا رد ثبت ضایعات توسط مدیریت'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: یک رشته UUID که این damage registration را شناسایی میکند.
+        required: true
+      tags:
+      - خسارت و ضایعات
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DamageRegistrationReviewRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DamageRegistrationReviewRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DamageRegistrationReviewRequest'
+        required: true
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/damage-registrations/{id}/supervisor-review/:
+    post:
+      operationId: damage_registrations_supervisor_review_create
+      summary: تایید یا رد رکوردهای قدیمی در انتظار سرپرست
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: یک رشته UUID که این damage registration را شناسایی میکند.
+        required: true
+      tags:
+      - خسارت و ضایعات
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DamageRegistrationReviewRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DamageRegistrationReviewRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DamageRegistrationReviewRequest'
+        required: true
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/damage-registrations/{id}/warehouse-review/:
+    post:
+      operationId: damage_registrations_warehouse_review_create
+      summary: 'مرحله ۱: تایید یا رد ثبت ضایعات توسط انباردار یا آمارگیر'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: یک رشته UUID که این damage registration را شناسایی میکند.
+        required: true
+      tags:
+      - خسارت و ضایعات
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DamageRegistrationReviewRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DamageRegistrationReviewRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DamageRegistrationReviewRequest'
+        required: true
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/damage-registrations/my-inbox/:
+    get:
+      operationId: damage_registrations_my_inbox_list
+      summary: کارتابل ضایعات — موارد نیازمند اقدام یا ثبت‌شده متناسب با نقش کاربر
+        فعال
+      parameters:
+      - in: query
+        name: branch
+        schema:
+          type: string
+        description: فیلتر شعبه
+      - in: query
+        name: from_date
+        schema:
+          type: string
+          format: date
+        description: از تاریخ
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: جستجو در مشخصات ثبت‌کننده
+      - in: query
+        name: status
+        schema:
+          type: string
+        description: فیلتر وضعیت
+      - in: query
+        name: to_date
+        schema:
+          type: string
+          format: date
+        description: تا تاریخ
+      tags:
+      - خسارت و ضایعات
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DamageRegistrationInbox'
+          description: ''
   /api/damage-reports/:
     get:
       operationId: damage_reports_list
@@ -1585,6 +1806,404 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DepositOrder'
+          description: ''
+  /api/employee-requests/:
+    get:
+      operationId: employee_requests_list
+      summary: لیست درخواست‌های من
+      parameters:
+      - in: query
+        name: from_date
+        schema:
+          type: string
+          format: date
+        description: از تاریخ ثبت (YYYY-MM-DD)
+      - in: query
+        name: request_type
+        schema:
+          type: string
+        description: فیلتر نوع (LEAVE|ADVANCE|OVERTIME|MISC)
+      - in: query
+        name: status
+        schema:
+          type: string
+        description: فیلتر وضعیت
+      - in: query
+        name: to_date
+        schema:
+          type: string
+          format: date
+        description: تا تاریخ ثبت (YYYY-MM-DD)
+      tags:
+      - درخواست کارکنان
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EmployeeRequestList'
+          description: ''
+    post:
+      operationId: employee_requests_create
+      summary: ثبت درخواست جدید
+      tags:
+      - درخواست کارکنان
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmployeeRequestRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/EmployeeRequestRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/EmployeeRequestRequest'
+        required: true
+      security:
+      - BearerAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmployeeRequest'
+          description: ''
+  /api/employee-requests/{id}/:
+    get:
+      operationId: employee_requests_retrieve
+      summary: جزئیات کامل درخواست کارکنان
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: یک رشته UUID که این employee request را شناسایی میکند.
+        required: true
+      tags:
+      - درخواست کارکنان
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmployeeRequest'
+          description: ''
+    put:
+      operationId: employee_requests_update
+      summary: ویرایش کامل درخواست
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: یک رشته UUID که این employee request را شناسایی میکند.
+        required: true
+      tags:
+      - درخواست کارکنان
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmployeeRequestRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/EmployeeRequestRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/EmployeeRequestRequest'
+        required: true
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmployeeRequest'
+          description: ''
+    patch:
+      operationId: employee_requests_partial_update
+      summary: ویرایش جزئی درخواست
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: یک رشته UUID که این employee request را شناسایی میکند.
+        required: true
+      tags:
+      - درخواست کارکنان
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedEmployeeRequestRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedEmployeeRequestRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedEmployeeRequestRequest'
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmployeeRequest'
+          description: ''
+    delete:
+      operationId: employee_requests_destroy
+      summary: حذف درخواست
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: یک رشته UUID که این employee request را شناسایی میکند.
+        required: true
+      tags:
+      - درخواست کارکنان
+      security:
+      - BearerAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/employee-requests/{id}/admin-review/:
+    post:
+      operationId: employee_requests_admin_review_create
+      summary: تایید یا رد درخواست توسط ادمین
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: یک رشته UUID که این employee request را شناسایی میکند.
+        required: true
+      tags:
+      - درخواست کارکنان
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmployeeReviewRequestRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/EmployeeReviewRequestRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/EmployeeReviewRequestRequest'
+        required: true
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/employee-requests/{id}/cancel/:
+    post:
+      operationId: employee_requests_cancel_create
+      summary: لغو درخواست توسط کارمند (فقط تا قبل از هر تایید)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: یک رشته UUID که این employee request را شناسایی میکند.
+        required: true
+      tags:
+      - درخواست کارکنان
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/employee-requests/{id}/finance-review/:
+    post:
+      operationId: employee_requests_finance_review_create
+      summary: 'تایید یا رد نهایی توسط مدیر مالی (برای مساعده: ثبت پرداخت)'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: یک رشته UUID که این employee request را شناسایی میکند.
+        required: true
+      tags:
+      - درخواست کارکنان
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmployeeFinanceReviewRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/EmployeeFinanceReviewRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/EmployeeFinanceReviewRequest'
+        required: true
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/employee-requests/{id}/superior-review/:
+    post:
+      operationId: employee_requests_superior_review_create
+      summary: تایید یا رد درخواست توسط بالادستی
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: یک رشته UUID که این employee request را شناسایی میکند.
+        required: true
+      tags:
+      - درخواست کارکنان
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmployeeReviewRequestRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/EmployeeReviewRequestRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/EmployeeReviewRequestRequest'
+        required: true
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/employee-requests/admin-list/:
+    get:
+      operationId: employee_requests_admin_list_list
+      summary: لیست جامع کلیه درخواست‌های کارکنان (ادمین / مدیر مالی)
+      parameters:
+      - in: query
+        name: from_date
+        schema:
+          type: string
+          format: date
+      - in: query
+        name: request_type
+        schema:
+          type: string
+      - in: query
+        name: requester_id
+        schema:
+          type: string
+          format: uuid
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: جستجو در نام/نام‌کاربری درخواست‌کننده
+      - in: query
+        name: status
+        schema:
+          type: string
+      - in: query
+        name: superior_id
+        schema:
+          type: string
+          format: uuid
+      - in: query
+        name: to_date
+        schema:
+          type: string
+          format: date
+      tags:
+      - درخواست کارکنان
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EmployeeRequestInbox'
+          description: ''
+  /api/employee-requests/my-inbox/:
+    get:
+      operationId: employee_requests_my_inbox_list
+      summary: کارتابل درخواست‌های ارجاع‌شده به کاربر جاری (بالادستی)
+      parameters:
+      - in: query
+        name: from_date
+        schema:
+          type: string
+          format: date
+      - in: query
+        name: request_type
+        schema:
+          type: string
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: جستجو در نام/نام‌کاربری درخواست‌کننده
+      - in: query
+        name: status
+        schema:
+          type: string
+      - in: query
+        name: to_date
+        schema:
+          type: string
+          format: date
+      tags:
+      - درخواست کارکنان
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EmployeeRequestInbox'
           description: ''
   /api/expenses/:
     get:
@@ -1982,6 +2601,66 @@ paths:
               schema:
                 $ref: '#/components/schemas/LiquidityCardTransactionCreateResponse'
           description: ''
+  /api/liquidity/cards/all-transactions/:
+    get:
+      operationId: liquidity_cards_all_transactions_list
+      description: دریافت کلیه واریزی‌ها، برداشت‌ها و کسر هزینه‌های تسویه شده به ترتیب
+        تاریخ و زمان نزولی همراه با نام هزینه، نوع تراکنش، عنوان کارت و صفحه‌بندی
+        الزامی (پیش‌فرض ۲۰ عددی).
+      summary: لیست تجمیعی و صفحه‌بندی‌شده کلیه تراکنش‌های مالی کارت‌ها (واریز، برداشت
+        و پرداخت هزینه)
+      parameters:
+      - in: query
+        name: card_type
+        schema:
+          type: string
+        description: فیلتر بر اساس نوع کارت (مثلاً salary, rent, supplier, ...)
+      - in: query
+        name: from_date
+        schema:
+          type: string
+          format: date
+        description: از تاریخ (YYYY-MM-DD)
+      - in: query
+        name: page
+        schema:
+          type: integer
+        description: 'شماره صفحه (پیش‌فرض: ۱)'
+      - in: query
+        name: page_size
+        schema:
+          type: integer
+        description: 'تعداد در هر صفحه (پیش‌فرض: ۲۰، حداکثر: ۱۰۰)'
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: جستجو در توضیحات یا عنوان هزینه
+      - in: query
+        name: to_date
+        schema:
+          type: string
+          format: date
+        description: تا تاریخ (YYYY-MM-DD)
+      - in: query
+        name: type
+        schema:
+          type: string
+        description: 'فیلتر نوع تراکنش: deposit (واریز), withdrawal (برداشت عادی),
+          expense (پرداخت هزینه)'
+      tags:
+      - مدیریت نقدینگی - کارت‌ها
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LiquidityAllTransactions'
+          description: ''
   /api/liquidity/cards/overview/:
     get:
       operationId: liquidity_cards_overview_retrieve
@@ -2002,12 +2681,115 @@ paths:
                 $ref: '#/components/schemas/LiquidityCardsOverview'
           description: ''
   /api/liquidity/cards/transactions/:
+    get:
+      operationId: liquidity_cards_general_transactions
+      description: 'متد GET: دریافت کلیه تراکنش‌های واریز، برداشت و پرداخت هزینه با
+        صفحه‌بندی ۲۰تایی. متد POST: ثبت تراکنش جدید با تعیین card_type.'
+      summary: ثبت تراکنش عمومی در کارت‌های نقدینگی (POST) یا مشاهده لیست تجمیعی کلیه
+        تراکنش‌ها (GET)
+      parameters:
+      - in: query
+        name: card_type
+        schema:
+          type: string
+        description: فیلتر بر اساس نوع کارت (مثلاً salary, rent, supplier, ...)
+      - in: query
+        name: from_date
+        schema:
+          type: string
+          format: date
+        description: از تاریخ (YYYY-MM-DD)
+      - in: query
+        name: page
+        schema:
+          type: integer
+        description: 'شماره صفحه (پیش‌فرض: ۱)'
+      - in: query
+        name: page_size
+        schema:
+          type: integer
+        description: 'تعداد در هر صفحه (پیش‌فرض: ۲۰، حداکثر: ۱۰۰)'
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: جستجو در توضیحات یا عنوان هزینه
+      - in: query
+        name: to_date
+        schema:
+          type: string
+          format: date
+        description: تا تاریخ (YYYY-MM-DD)
+      - in: query
+        name: type
+        schema:
+          type: string
+        description: 'فیلتر نوع تراکنش: deposit (واریز), withdrawal (برداشت عادی),
+          expense (پرداخت هزینه)'
+      tags:
+      - مدیریت نقدینگی - کارت‌ها
+      security:
+      - BearerAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiquidityCardTransactionCreateResponse'
+          description: ''
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LiquidityAllTransactions'
+          description: ''
     post:
-      operationId: liquidity_cards_general_transaction_create
-      description: |-
-        ثبت تراکنش واریز یا برداشت کارت با ارسال card_type در بدنه:
-        POST /api/liquidity/cards/transactions/
-      summary: ثبت تراکنش عمومی در کارت‌های نقدینگی با تعیین نوع کارت در بدنه
+      operationId: liquidity_cards_general_transactions_2
+      description: 'متد GET: دریافت کلیه تراکنش‌های واریز، برداشت و پرداخت هزینه با
+        صفحه‌بندی ۲۰تایی. متد POST: ثبت تراکنش جدید با تعیین card_type.'
+      summary: ثبت تراکنش عمومی در کارت‌های نقدینگی (POST) یا مشاهده لیست تجمیعی کلیه
+        تراکنش‌ها (GET)
+      parameters:
+      - in: query
+        name: card_type
+        schema:
+          type: string
+        description: فیلتر بر اساس نوع کارت (مثلاً salary, rent, supplier, ...)
+      - in: query
+        name: from_date
+        schema:
+          type: string
+          format: date
+        description: از تاریخ (YYYY-MM-DD)
+      - in: query
+        name: page
+        schema:
+          type: integer
+        description: 'شماره صفحه (پیش‌فرض: ۱)'
+      - in: query
+        name: page_size
+        schema:
+          type: integer
+        description: 'تعداد در هر صفحه (پیش‌فرض: ۲۰، حداکثر: ۱۰۰)'
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: جستجو در توضیحات یا عنوان هزینه
+      - in: query
+        name: to_date
+        schema:
+          type: string
+          format: date
+        description: تا تاریخ (YYYY-MM-DD)
+      - in: query
+        name: type
+        schema:
+          type: string
+        description: 'فیلتر نوع تراکنش: deposit (واریز), withdrawal (برداشت عادی),
+          expense (پرداخت هزینه)'
       tags:
       - مدیریت نقدینگی - کارت‌ها
       requestBody:
@@ -2030,6 +2812,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/LiquidityCardTransactionCreateResponse'
+          description: ''
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LiquidityAllTransactions'
           description: ''
   /api/liquidity/cards/transactions/{tx_id}/:
     delete:
@@ -6601,6 +7391,28 @@ components:
         * `HOUSE` - خانه
         * `SHOP` - مغازه
         * `OTHER` - متفرقه
+    CardTypeDb7Enum:
+      enum:
+      - SUPPLIER
+      - SALARY
+      - RENT
+      - INSTALLMENTS
+      - OTHER_EXPENSES
+      - MANAGEMENT
+      - SAVINGS
+      - CHARITY
+      - EQUIPMENT
+      type: string
+      description: |-
+        * `SUPPLIER` - کارت تامین کننده
+        * `SALARY` - کارت حقوق
+        * `RENT` - کارت اجاره
+        * `INSTALLMENTS` - کارت اقساط
+        * `OTHER_EXPENSES` - کارت سایر هزینه ها
+        * `MANAGEMENT` - کارت مدیریت
+        * `SAVINGS` - کارت پس انداز
+        * `CHARITY` - کارت خیریه
+        * `EQUIPMENT` - کارت تجهیزات
     CategoryEnum:
       enum:
       - SUPPLIER
@@ -6927,6 +7739,9 @@ components:
           pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
         status:
           $ref: '#/components/schemas/ClaimStatusEnum'
+        status_display:
+          type: string
+          readOnly: true
         taken_date:
           type: string
           format: date
@@ -6985,6 +7800,7 @@ components:
       - items
       - payment_deadline
       - seller
+      - status_display
       - taken_date
       - total_debt_amount
       - updated_at
@@ -7130,17 +7946,19 @@ components:
     ClaimStatusEnum:
       enum:
       - UNPAID
+      - PAID
+      - WILL_NOT_PAY
+      - REFUSED
       - IN_PROGRESS
       - NO_ANSWER
-      - REFUSED
-      - PAID
       type: string
       description: |-
         * `UNPAID` - پرداخت نشده
+        * `PAID` - پرداخت شده
+        * `WILL_NOT_PAY` - پرداخت نمی‌کند
+        * `REFUSED` - پرداخت نمی‌کند (عدم پرداخت)
         * `IN_PROGRESS` - در حال پیگیری
         * `NO_ANSWER` - پاسخگو نیست
-        * `REFUSED` - عدم پرداخت
-        * `PAID` - پرداخت شده
     CodeEnum:
       enum:
       - ADMIN
@@ -7273,16 +8091,19 @@ components:
           format: uuid
         item_name:
           type: string
+          title: نام کالا
           maxLength: 150
         quantity:
           type: integer
           maximum: 9223372036854775807
           minimum: -9223372036854775808
           format: int64
+          title: تعداد
         unit_price:
           type: string
           format: decimal
           pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+          title: قیمت واحد
         total_price:
           type: string
           format: decimal
@@ -7302,16 +8123,19 @@ components:
         item_name:
           type: string
           minLength: 1
+          title: نام کالا
           maxLength: 150
         quantity:
           type: integer
           maximum: 9223372036854775807
           minimum: -9223372036854775808
           format: int64
+          title: تعداد
         unit_price:
           type: string
           format: decimal
           pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+          title: قیمت واحد
       required:
       - item_name
       - quantity
@@ -7326,29 +8150,423 @@ components:
         date:
           type: string
           format: date
+          title: تاریخ خسارت
         branch:
-          $ref: '#/components/schemas/BranchChoiceEnum'
+          allOf:
+          - $ref: '#/components/schemas/BranchChoiceEnum'
+          title: شعبه
         reason:
-          $ref: '#/components/schemas/DamageRegistrationReasonEnum'
+          allOf:
+          - $ref: '#/components/schemas/Reason8a2Enum'
+          title: علت خسارت
+        reason_display:
+          type: string
+          readOnly: true
         culprit:
           type: string
           nullable: true
+          title: مقصر
           description: مقصر
           maxLength: 150
         description:
           type: string
           nullable: true
+          title: توضیحات
+        status:
+          allOf:
+          - $ref: '#/components/schemas/StatusAbaEnum'
+          readOnly: true
+          title: وضعیت
+        status_display:
+          type: string
+          readOnly: true
         created_by:
           type: string
           format: uuid
           readOnly: true
+          title: ثبت‌کننده
         created_by_name:
           type: string
           readOnly: true
+        created_by_username:
+          type: string
+          readOnly: true
+        supervisor:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+          title: سرپرست ثبت‌کننده/شعبه
+        supervisor_name:
+          type: string
+          readOnly: true
+        supervisor_username:
+          type: string
+          readOnly: true
+        warehouse_reviewer:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+          title: انباردار/آمارگیر بررسی‌کننده
+        warehouse_reviewer_name:
+          type: string
+          readOnly: true
+        warehouse_note:
+          type: string
+          readOnly: true
+          nullable: true
+          title: توضیحات انباردار
+        warehouse_reviewed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: زمان بررسی انباردار
+        management_reviewer:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+          title: مدیر بررسی‌کننده
+        management_reviewer_name:
+          type: string
+          readOnly: true
+        management_note:
+          type: string
+          readOnly: true
+          nullable: true
+          title: توضیحات مدیریت
+        management_reviewed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: زمان بررسی مدیریت
+        financial_reviewer:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+          title: مدیر مالی بررسی‌کننده
+        financial_reviewer_name:
+          type: string
+          readOnly: true
+        financial_note:
+          type: string
+          readOnly: true
+          nullable: true
+          title: توضیحات مدیر مالی
+        financial_reviewed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: زمان بررسی مدیر مالی
+        supervisor_reviewer:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+          title: سرپرست بررسی‌کننده (قدیمی)
+        supervisor_note:
+          type: string
+          readOnly: true
+          nullable: true
+          title: توضیحات سرپرست (قدیمی)
+        supervisor_reviewed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: زمان بررسی سرپرست (قدیمی)
         items:
           type: array
           items:
             $ref: '#/components/schemas/DamageItem'
+        logs:
+          type: array
+          items:
+            $ref: '#/components/schemas/DamageRegistrationLog'
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - branch
+      - created_at
+      - created_by
+      - created_by_name
+      - created_by_username
+      - date
+      - financial_note
+      - financial_reviewed_at
+      - financial_reviewer
+      - financial_reviewer_name
+      - id
+      - items
+      - logs
+      - management_note
+      - management_reviewed_at
+      - management_reviewer
+      - management_reviewer_name
+      - reason
+      - reason_display
+      - status
+      - status_display
+      - supervisor
+      - supervisor_name
+      - supervisor_note
+      - supervisor_reviewed_at
+      - supervisor_reviewer
+      - supervisor_username
+      - updated_at
+      - warehouse_note
+      - warehouse_reviewed_at
+      - warehouse_reviewer
+      - warehouse_reviewer_name
+    DamageRegistrationInbox:
+      type: object
+      description: سریالایزر جامع کارتابل ضایعات شامل اقلام و تاریخچه کامل لاگ‌ها.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        date:
+          type: string
+          format: date
+          readOnly: true
+          title: تاریخ خسارت
+        branch:
+          allOf:
+          - $ref: '#/components/schemas/BranchChoiceEnum'
+          readOnly: true
+          title: شعبه
+        reason:
+          allOf:
+          - $ref: '#/components/schemas/Reason8a2Enum'
+          readOnly: true
+          title: علت خسارت
+        reason_display:
+          type: string
+          readOnly: true
+        culprit:
+          type: string
+          readOnly: true
+          nullable: true
+          title: مقصر
+          description: مقصر
+        description:
+          type: string
+          readOnly: true
+          nullable: true
+          title: توضیحات
+        status:
+          allOf:
+          - $ref: '#/components/schemas/StatusAbaEnum'
+          readOnly: true
+          title: وضعیت
+        status_display:
+          type: string
+          readOnly: true
+        created_by:
+          type: string
+          format: uuid
+          readOnly: true
+          title: ثبت‌کننده
+        created_by_name:
+          type: string
+          readOnly: true
+        created_by_username:
+          type: string
+          readOnly: true
+        supervisor:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+          title: سرپرست ثبت‌کننده/شعبه
+        supervisor_name:
+          type: string
+          readOnly: true
+        warehouse_reviewer:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+          title: انباردار/آمارگیر بررسی‌کننده
+        warehouse_reviewer_name:
+          type: string
+          readOnly: true
+        warehouse_note:
+          type: string
+          readOnly: true
+          nullable: true
+          title: توضیحات انباردار
+        warehouse_reviewed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: زمان بررسی انباردار
+        management_reviewer:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+          title: مدیر بررسی‌کننده
+        management_reviewer_name:
+          type: string
+          readOnly: true
+        management_note:
+          type: string
+          readOnly: true
+          nullable: true
+          title: توضیحات مدیریت
+        management_reviewed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: زمان بررسی مدیریت
+        financial_reviewer:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+          title: مدیر مالی بررسی‌کننده
+        financial_reviewer_name:
+          type: string
+          readOnly: true
+        financial_note:
+          type: string
+          readOnly: true
+          nullable: true
+          title: توضیحات مدیر مالی
+        financial_reviewed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: زمان بررسی مدیر مالی
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/DamageItem'
+          readOnly: true
+        logs:
+          type: array
+          items:
+            $ref: '#/components/schemas/DamageRegistrationLog'
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - branch
+      - created_at
+      - created_by
+      - created_by_name
+      - created_by_username
+      - culprit
+      - date
+      - description
+      - financial_note
+      - financial_reviewed_at
+      - financial_reviewer
+      - financial_reviewer_name
+      - id
+      - items
+      - logs
+      - management_note
+      - management_reviewed_at
+      - management_reviewer
+      - management_reviewer_name
+      - reason
+      - reason_display
+      - status
+      - status_display
+      - supervisor
+      - supervisor_name
+      - updated_at
+      - warehouse_note
+      - warehouse_reviewed_at
+      - warehouse_reviewer
+      - warehouse_reviewer_name
+    DamageRegistrationList:
+      type: object
+      description: سریالایزر خلاصه برای لیست ثبت‌های ضایعات.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        date:
+          type: string
+          format: date
+          title: تاریخ خسارت
+        branch:
+          allOf:
+          - $ref: '#/components/schemas/BranchChoiceEnum'
+          title: شعبه
+        reason:
+          allOf:
+          - $ref: '#/components/schemas/Reason8a2Enum'
+          title: علت خسارت
+        reason_display:
+          type: string
+          readOnly: true
+        culprit:
+          type: string
+          nullable: true
+          title: مقصر
+          description: مقصر
+          maxLength: 150
+        status:
+          allOf:
+          - $ref: '#/components/schemas/StatusAbaEnum'
+          title: وضعیت
+        status_display:
+          type: string
+          readOnly: true
+        created_by:
+          type: string
+          format: uuid
+          title: ثبت‌کننده
+        created_by_name:
+          type: string
+          readOnly: true
+        supervisor:
+          type: string
+          format: uuid
+          nullable: true
+          title: سرپرست ثبت‌کننده/شعبه
+        supervisor_name:
+          type: string
+          readOnly: true
+        warehouse_reviewer_name:
+          type: string
+          readOnly: true
+        management_reviewer_name:
+          type: string
+          readOnly: true
+        financial_reviewer_name:
+          type: string
+          readOnly: true
+        items_count:
+          type: integer
+          readOnly: true
         created_at:
           type: string
           format: date-time
@@ -7359,43 +8577,112 @@ components:
       - created_by
       - created_by_name
       - date
+      - financial_reviewer_name
       - id
-      - items
+      - items_count
+      - management_reviewer_name
       - reason
-    DamageRegistrationReasonEnum:
+      - reason_display
+      - status_display
+      - supervisor_name
+      - warehouse_reviewer_name
+    DamageRegistrationLog:
+      type: object
+      description: سریالایزر لاگ تاریخچه ثبت خسارت.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        stage:
+          allOf:
+          - $ref: '#/components/schemas/DamageRegistrationLogStageEnum'
+          title: مرحله
+        stage_display:
+          type: string
+          readOnly: true
+        actor_name:
+          type: string
+          readOnly: true
+        actor_username:
+          type: string
+          readOnly: true
+        action:
+          type: string
+          title: متن رویداد
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - action
+      - actor_name
+      - actor_username
+      - created_at
+      - id
+      - stage_display
+    DamageRegistrationLogRequest:
+      type: object
+      description: سریالایزر لاگ تاریخچه ثبت خسارت.
+      properties:
+        stage:
+          allOf:
+          - $ref: '#/components/schemas/DamageRegistrationLogStageEnum'
+          title: مرحله
+        action:
+          type: string
+          minLength: 1
+          title: متن رویداد
+      required:
+      - action
+    DamageRegistrationLogStageEnum:
       enum:
-      - IRRIGATION
-      - PEST
-      - BREAKAGE
-      - LIGHT
-      - OTHER
-      - UNKNOWN
+      - SUBMIT
+      - WAREHOUSE
+      - MANAGEMENT
+      - FINANCIAL
+      - SUPERVISOR
+      - CANCEL
       type: string
       description: |-
-        * `IRRIGATION` - آبیاری
-        * `PEST` - آفت
-        * `BREAKAGE` - شکستگی
-        * `LIGHT` - نور
-        * `OTHER` - متفرقه
-        * `UNKNOWN` - نامعلوم
+        * `SUBMIT` - ثبت اولیه توسط سرپرست
+        * `WAREHOUSE` - بررسی انباردار/آمارگیر
+        * `MANAGEMENT` - بررسی مدیریت
+        * `FINANCIAL` - بررسی مدیر مالی
+        * `SUPERVISOR` - بررسی سرپرست (قدیمی)
+        * `CANCEL` - لغو توسط ثبت‌کننده
     DamageRegistrationRequest:
       type: object
       properties:
         date:
           type: string
           format: date
+          title: تاریخ خسارت
         branch:
-          $ref: '#/components/schemas/BranchChoiceEnum'
+          allOf:
+          - $ref: '#/components/schemas/BranchChoiceEnum'
+          title: شعبه
         reason:
-          $ref: '#/components/schemas/DamageRegistrationReasonEnum'
+          allOf:
+          - $ref: '#/components/schemas/Reason8a2Enum'
+          title: علت خسارت
         culprit:
           type: string
           nullable: true
+          title: مقصر
           description: مقصر
           maxLength: 150
         description:
           type: string
           nullable: true
+          title: توضیحات
+        supervisor_id:
+          type: string
+          format: uuid
+          writeOnly: true
+          nullable: true
+          description: شناسه سرپرست شعبه (اختیاری؛ در صورت عدم ارسال، به طور خودکار
+            کاربر ثبت‌کننده در نظر گرفته می‌شود)
         items:
           type: array
           items:
@@ -7405,6 +8692,24 @@ components:
       - date
       - items
       - reason
+    DamageRegistrationReviewRequest:
+      type: object
+      description: ورودی تایید یا رد مراحل ثبت ضایعات (انباردار، مدیریت، مدیر مالی).
+      properties:
+        action:
+          allOf:
+          - $ref: '#/components/schemas/ActionEnum'
+          description: |-
+            approve = تایید | reject = رد
+
+            * `approve` - approve
+            * `reject` - reject
+        note:
+          type: string
+          default: ''
+          description: توضیحات اختیاری بررسی‌کننده
+      required:
+      - action
     DamageReport:
       type: object
       properties:
@@ -7835,6 +9140,676 @@ components:
         * `CHEQUE` - چک
         * `POS` - کارتخوان
         * `OTHER` - سایر
+    EmployeeFinanceReviewRequest:
+      type: object
+      description: |-
+        ورودی مرحله مدیر مالی.
+        برای همه انواع: approve یا reject.
+        برای مساعده (ADVANCE) که نتیجه‌اش PAID می‌شود، payment_date هم الزامی است.
+      properties:
+        action:
+          allOf:
+          - $ref: '#/components/schemas/ActionEnum'
+          description: |-
+            approve = تایید/پرداخت | reject = رد
+
+            * `approve` - approve
+            * `reject` - reject
+        note:
+          type: string
+          description: توضیحات مدیر مالی
+        payment_date:
+          type: string
+          format: date
+          nullable: true
+          description: تاریخ پرداخت — فقط برای نوع مساعده (ADVANCE) الزامی است
+      required:
+      - action
+    EmployeeRequest:
+      type: object
+      description: سریالایزر ایجاد درخواست + مشاهده جزئیات کامل.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        requester:
+          type: string
+          format: uuid
+          readOnly: true
+          title: درخواست‌کننده
+        requester_name:
+          type: string
+          readOnly: true
+        request_type:
+          allOf:
+          - $ref: '#/components/schemas/RequestTypeEnum'
+          title: نوع درخواست
+        request_type_display:
+          type: string
+          readOnly: true
+        description:
+          type: string
+          nullable: true
+          title: توضیحات
+        status:
+          allOf:
+          - $ref: '#/components/schemas/Status1f6Enum'
+          readOnly: true
+          title: وضعیت
+        status_display:
+          type: string
+          readOnly: true
+        target_superior:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+          title: بالادستی انتخاب‌شده
+        target_superior_name:
+          type: string
+          readOnly: true
+        leave_mode:
+          nullable: true
+          title: مدل مرخصی
+          oneOf:
+          - $ref: '#/components/schemas/LeaveModeEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        leave_mode_display:
+          type: string
+          readOnly: true
+        leave_days:
+          nullable: true
+          title: روزهای مرخصی (روزانه)
+        leave_day:
+          type: string
+          format: date
+          nullable: true
+          title: روز مرخصی (ساعتی)
+        leave_start_time:
+          type: string
+          format: time
+          nullable: true
+          title: ساعت شروع مرخصی
+        leave_end_time:
+          type: string
+          format: time
+          nullable: true
+          title: ساعت پایان مرخصی
+        advance_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+          nullable: true
+          title: مبلغ مساعده
+        overtime_day:
+          type: string
+          format: date
+          nullable: true
+          title: روز اضافه‌کاری
+        overtime_start:
+          type: string
+          format: time
+          nullable: true
+          title: ساعت شروع اضافه‌کاری
+        overtime_end:
+          type: string
+          format: time
+          nullable: true
+          title: ساعت پایان اضافه‌کاری
+        misc_title:
+          type: string
+          nullable: true
+          title: عنوان (متفرقه)
+          maxLength: 200
+        superior_reviewer:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+          title: بالادستی بررسی‌کننده
+        superior_reviewer_name:
+          type: string
+          readOnly: true
+        superior_note:
+          type: string
+          readOnly: true
+          nullable: true
+          title: توضیحات بالادستی
+        superior_reviewed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: تاریخ بررسی بالادستی
+        admin_reviewer:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+          title: ادمین بررسی‌کننده
+        admin_reviewer_name:
+          type: string
+          readOnly: true
+        admin_note:
+          type: string
+          readOnly: true
+          nullable: true
+          title: توضیحات ادمین
+        admin_reviewed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: تاریخ بررسی ادمین
+        finance_reviewer:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+          title: مدیر مالی بررسی‌کننده
+        finance_reviewer_name:
+          type: string
+          readOnly: true
+        finance_note:
+          type: string
+          readOnly: true
+          nullable: true
+          title: توضیحات مدیر مالی
+        finance_reviewed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: تاریخ بررسی مدیر مالی
+        payment_date:
+          type: string
+          format: date
+          readOnly: true
+          nullable: true
+          title: تاریخ پرداخت (مساعده)
+        logs:
+          type: array
+          items:
+            $ref: '#/components/schemas/EmployeeRequestLog'
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - admin_note
+      - admin_reviewed_at
+      - admin_reviewer
+      - admin_reviewer_name
+      - created_at
+      - finance_note
+      - finance_reviewed_at
+      - finance_reviewer
+      - finance_reviewer_name
+      - id
+      - leave_mode_display
+      - logs
+      - payment_date
+      - request_type
+      - request_type_display
+      - requester
+      - requester_name
+      - status
+      - status_display
+      - superior_note
+      - superior_reviewed_at
+      - superior_reviewer
+      - superior_reviewer_name
+      - target_superior
+      - target_superior_name
+      - updated_at
+    EmployeeRequestInbox:
+      type: object
+      description: |-
+        سریالایزر کارتابل:
+        برای بالادستی، ادمین، و مدیر مالی جهت بررسی درخواست‌ها.
+        شامل جزئیات کامل + لاگ تاریخچه.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        requester:
+          type: string
+          format: uuid
+          readOnly: true
+          title: درخواست‌کننده
+        requester_name:
+          type: string
+          readOnly: true
+        requester_username:
+          type: string
+          readOnly: true
+        request_type:
+          allOf:
+          - $ref: '#/components/schemas/RequestTypeEnum'
+          readOnly: true
+          title: نوع درخواست
+        request_type_display:
+          type: string
+          readOnly: true
+        description:
+          type: string
+          readOnly: true
+          nullable: true
+          title: توضیحات
+        status:
+          allOf:
+          - $ref: '#/components/schemas/Status1f6Enum'
+          readOnly: true
+          title: وضعیت
+        status_display:
+          type: string
+          readOnly: true
+        target_superior:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+          title: بالادستی انتخاب‌شده
+        target_superior_name:
+          type: string
+          readOnly: true
+        leave_mode:
+          readOnly: true
+          nullable: true
+          title: مدل مرخصی
+          oneOf:
+          - $ref: '#/components/schemas/LeaveModeEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        leave_mode_display:
+          type: string
+          readOnly: true
+        leave_days:
+          readOnly: true
+          nullable: true
+          title: روزهای مرخصی (روزانه)
+        leave_day:
+          type: string
+          format: date
+          readOnly: true
+          nullable: true
+          title: روز مرخصی (ساعتی)
+        leave_start_time:
+          type: string
+          format: time
+          readOnly: true
+          nullable: true
+          title: ساعت شروع مرخصی
+        leave_end_time:
+          type: string
+          format: time
+          readOnly: true
+          nullable: true
+          title: ساعت پایان مرخصی
+        advance_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+          readOnly: true
+          nullable: true
+          title: مبلغ مساعده
+        overtime_day:
+          type: string
+          format: date
+          readOnly: true
+          nullable: true
+          title: روز اضافه‌کاری
+        overtime_start:
+          type: string
+          format: time
+          readOnly: true
+          nullable: true
+          title: ساعت شروع اضافه‌کاری
+        overtime_end:
+          type: string
+          format: time
+          readOnly: true
+          nullable: true
+          title: ساعت پایان اضافه‌کاری
+        misc_title:
+          type: string
+          readOnly: true
+          nullable: true
+          title: عنوان (متفرقه)
+        superior_reviewer:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+          title: بالادستی بررسی‌کننده
+        superior_reviewer_name:
+          type: string
+          readOnly: true
+        superior_note:
+          type: string
+          readOnly: true
+          nullable: true
+          title: توضیحات بالادستی
+        superior_reviewed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: تاریخ بررسی بالادستی
+        admin_reviewer:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+          title: ادمین بررسی‌کننده
+        admin_reviewer_name:
+          type: string
+          readOnly: true
+        admin_note:
+          type: string
+          readOnly: true
+          nullable: true
+          title: توضیحات ادمین
+        admin_reviewed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: تاریخ بررسی ادمین
+        finance_reviewer:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+          title: مدیر مالی بررسی‌کننده
+        finance_reviewer_name:
+          type: string
+          readOnly: true
+        finance_note:
+          type: string
+          readOnly: true
+          nullable: true
+          title: توضیحات مدیر مالی
+        finance_reviewed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: تاریخ بررسی مدیر مالی
+        payment_date:
+          type: string
+          format: date
+          readOnly: true
+          nullable: true
+          title: تاریخ پرداخت (مساعده)
+        logs:
+          type: array
+          items:
+            $ref: '#/components/schemas/EmployeeRequestLog'
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - admin_note
+      - admin_reviewed_at
+      - admin_reviewer
+      - admin_reviewer_name
+      - advance_amount
+      - created_at
+      - description
+      - finance_note
+      - finance_reviewed_at
+      - finance_reviewer
+      - finance_reviewer_name
+      - id
+      - leave_day
+      - leave_days
+      - leave_end_time
+      - leave_mode
+      - leave_mode_display
+      - leave_start_time
+      - logs
+      - misc_title
+      - overtime_day
+      - overtime_end
+      - overtime_start
+      - payment_date
+      - request_type
+      - request_type_display
+      - requester
+      - requester_name
+      - requester_username
+      - status
+      - status_display
+      - superior_note
+      - superior_reviewed_at
+      - superior_reviewer
+      - superior_reviewer_name
+      - target_superior
+      - target_superior_name
+      - updated_at
+    EmployeeRequestList:
+      type: object
+      description: سریالایزر فشرده برای لیست‌ها.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        requester:
+          type: string
+          format: uuid
+          title: درخواست‌کننده
+        requester_name:
+          type: string
+          readOnly: true
+        requester_username:
+          type: string
+          readOnly: true
+        request_type:
+          allOf:
+          - $ref: '#/components/schemas/RequestTypeEnum'
+          title: نوع درخواست
+        request_type_display:
+          type: string
+          readOnly: true
+        target_superior:
+          type: string
+          format: uuid
+          nullable: true
+          title: بالادستی انتخاب‌شده
+        target_superior_name:
+          type: string
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/Status1f6Enum'
+          title: وضعیت
+        status_display:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - id
+      - request_type
+      - request_type_display
+      - requester
+      - requester_name
+      - requester_username
+      - status_display
+      - target_superior_name
+    EmployeeRequestLog:
+      type: object
+      description: |-
+        یک رویداد از تاریخچه درخواست کارکنان.
+        شامل مرحله (stage)، کاربر عامل، و متن رویداد.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        stage:
+          allOf:
+          - $ref: '#/components/schemas/EmployeeRequestLogStageEnum'
+          title: مرحله
+        stage_display:
+          type: string
+          readOnly: true
+        actor_name:
+          type: string
+          readOnly: true
+        actor_username:
+          type: string
+          readOnly: true
+        action:
+          type: string
+          title: متن رویداد
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - action
+      - actor_name
+      - actor_username
+      - created_at
+      - id
+      - stage_display
+    EmployeeRequestLogRequest:
+      type: object
+      description: |-
+        یک رویداد از تاریخچه درخواست کارکنان.
+        شامل مرحله (stage)، کاربر عامل، و متن رویداد.
+      properties:
+        stage:
+          allOf:
+          - $ref: '#/components/schemas/EmployeeRequestLogStageEnum'
+          title: مرحله
+        action:
+          type: string
+          minLength: 1
+          title: متن رویداد
+      required:
+      - action
+    EmployeeRequestLogStageEnum:
+      enum:
+      - SUBMIT
+      - SUPERIOR
+      - ADMIN
+      - FINANCE
+      - CANCEL
+      type: string
+      description: |-
+        * `SUBMIT` - ثبت درخواست
+        * `SUPERIOR` - بررسی بالادستی
+        * `ADMIN` - بررسی ادمین
+        * `FINANCE` - بررسی مدیر مالی
+        * `CANCEL` - لغو توسط کارمند
+    EmployeeRequestRequest:
+      type: object
+      description: سریالایزر ایجاد درخواست + مشاهده جزئیات کامل.
+      properties:
+        request_type:
+          allOf:
+          - $ref: '#/components/schemas/RequestTypeEnum'
+          title: نوع درخواست
+        description:
+          type: string
+          nullable: true
+          title: توضیحات
+        superior_id:
+          type: string
+          format: uuid
+          writeOnly: true
+          nullable: true
+          description: شناسه بالادستی انتخابی (اگر چند بالادستی دارید)
+        leave_mode:
+          nullable: true
+          title: مدل مرخصی
+          oneOf:
+          - $ref: '#/components/schemas/LeaveModeEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        leave_days:
+          nullable: true
+          title: روزهای مرخصی (روزانه)
+        leave_day:
+          type: string
+          format: date
+          nullable: true
+          title: روز مرخصی (ساعتی)
+        leave_start_time:
+          type: string
+          format: time
+          nullable: true
+          title: ساعت شروع مرخصی
+        leave_end_time:
+          type: string
+          format: time
+          nullable: true
+          title: ساعت پایان مرخصی
+        advance_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+          nullable: true
+          title: مبلغ مساعده
+        overtime_day:
+          type: string
+          format: date
+          nullable: true
+          title: روز اضافه‌کاری
+        overtime_start:
+          type: string
+          format: time
+          nullable: true
+          title: ساعت شروع اضافه‌کاری
+        overtime_end:
+          type: string
+          format: time
+          nullable: true
+          title: ساعت پایان اضافه‌کاری
+        misc_title:
+          type: string
+          nullable: true
+          title: عنوان (متفرقه)
+          maxLength: 200
+      required:
+      - request_type
+    EmployeeReviewRequestRequest:
+      type: object
+      description: ورودی مرحله تایید/رد (بالادستی یا ادمین).
+      properties:
+        action:
+          allOf:
+          - $ref: '#/components/schemas/ActionEnum'
+          description: |-
+            approve = تایید | reject = رد
+
+            * `approve` - approve
+            * `reject` - reject
+        note:
+          type: string
+          description: توضیحات (برای رد اجباری است)
+      required:
+      - action
     ExchangeItem:
       type: object
       properties:
@@ -8123,6 +10098,115 @@ components:
       - item_name
       - quantity
       - reason
+    LeaveModeEnum:
+      enum:
+      - DAILY
+      - HOURLY
+      type: string
+      description: |-
+        * `DAILY` - روزانه
+        * `HOURLY` - ساعتی
+    LiquidityAllTransactions:
+      type: object
+      description: |-
+        سریالایزر جامع کلیه تراکنش‌های مالی کارت‌ها (واریز، برداشت و پرداخت هزینه)
+        همراه با نام هزینه، نوع تراکنش، عنوان کارت و صفحه‌بندی
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        date:
+          type: string
+          format: date
+          readOnly: true
+          title: تاریخ تراکنش
+        date_jalali:
+          type: string
+          nullable: true
+          readOnly: true
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          readOnly: true
+          title: مبلغ
+        transaction_type:
+          allOf:
+          - $ref: '#/components/schemas/TransactionType2b6Enum'
+          readOnly: true
+          title: نوع تراکنش
+        transaction_type_code:
+          type: string
+          readOnly: true
+          description: 'کد نوع تراکنش: DEPOSIT (واریز), WITHDRAWAL (برداشت), EXPENSE_PAYMENT
+            (پرداخت هزینه)'
+        transaction_type_display:
+          type: string
+          readOnly: true
+          description: عنوان نمایشی فارسی نوع تراکنش
+        card_type:
+          allOf:
+          - $ref: '#/components/schemas/CardTypeDb7Enum'
+          readOnly: true
+          title: نوع کارت
+        card_title:
+          type: string
+          readOnly: true
+        expense_id:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        expense_title:
+          type: string
+          readOnly: true
+          nullable: true
+        expense_category:
+          type: string
+          readOnly: true
+          nullable: true
+        expense_category_display:
+          type: string
+          readOnly: true
+          nullable: true
+        description:
+          type: string
+          readOnly: true
+          nullable: true
+          title: توضیحات تراکنش
+        created_by:
+          type: string
+          format: uuid
+          readOnly: true
+          title: ثبت‌کننده
+        created_by_name:
+          type: string
+          nullable: true
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+          title: زمان ثبت
+      required:
+      - amount
+      - card_title
+      - card_type
+      - created_at
+      - created_by
+      - created_by_name
+      - date
+      - date_jalali
+      - description
+      - expense_category
+      - expense_category_display
+      - expense_id
+      - expense_title
+      - id
+      - transaction_type
+      - transaction_type_code
+      - transaction_type_display
     LiquidityCardDetailResponse:
       type: object
       properties:
@@ -8174,14 +10258,14 @@ components:
           readOnly: true
         card_type:
           allOf:
-          - $ref: '#/components/schemas/LiquidityCardTransactionCardTypeEnum'
+          - $ref: '#/components/schemas/CardTypeDb7Enum'
           title: نوع کارت
         card_type_display:
           type: string
           readOnly: true
         transaction_type:
           allOf:
-          - $ref: '#/components/schemas/LiquidityCardTransactionTransactionTypeEnum'
+          - $ref: '#/components/schemas/TransactionType2b6Enum'
           title: نوع تراکنش
         transaction_type_display:
           type: string
@@ -8238,28 +10322,6 @@ components:
       - id
       - transaction_type
       - transaction_type_display
-    LiquidityCardTransactionCardTypeEnum:
-      enum:
-      - SUPPLIER
-      - SALARY
-      - RENT
-      - INSTALLMENTS
-      - OTHER_EXPENSES
-      - MANAGEMENT
-      - SAVINGS
-      - CHARITY
-      - EQUIPMENT
-      type: string
-      description: |-
-        * `SUPPLIER` - کارت تامین کننده
-        * `SALARY` - کارت حقوق
-        * `RENT` - کارت اجاره
-        * `INSTALLMENTS` - کارت اقساط
-        * `OTHER_EXPENSES` - کارت سایر هزینه ها
-        * `MANAGEMENT` - کارت مدیریت
-        * `SAVINGS` - کارت پس انداز
-        * `CHARITY` - کارت خیریه
-        * `EQUIPMENT` - کارت تجهیزات
     LiquidityCardTransactionCreateCardTypeEnum:
       enum:
       - SUPPLIER
@@ -8342,14 +10404,6 @@ components:
       description: |-
         * `DEPOSIT` - DEPOSIT
         * `WITHDRAWAL` - WITHDRAWAL
-    LiquidityCardTransactionTransactionTypeEnum:
-      enum:
-      - DEPOSIT
-      - WITHDRAWAL
-      type: string
-      description: |-
-        * `DEPOSIT` - واریز / پرداخت به کارت
-        * `WITHDRAWAL` - برداشت / خرج از کارت
     LiquidityCardsOverview:
       type: object
       properties:
@@ -9911,18 +11965,32 @@ components:
         date:
           type: string
           format: date
+          title: تاریخ خسارت
         branch:
-          $ref: '#/components/schemas/BranchChoiceEnum'
+          allOf:
+          - $ref: '#/components/schemas/BranchChoiceEnum'
+          title: شعبه
         reason:
-          $ref: '#/components/schemas/DamageRegistrationReasonEnum'
+          allOf:
+          - $ref: '#/components/schemas/Reason8a2Enum'
+          title: علت خسارت
         culprit:
           type: string
           nullable: true
+          title: مقصر
           description: مقصر
           maxLength: 150
         description:
           type: string
           nullable: true
+          title: توضیحات
+        supervisor_id:
+          type: string
+          format: uuid
+          writeOnly: true
+          nullable: true
+          description: شناسه سرپرست شعبه (اختیاری؛ در صورت عدم ارسال، به طور خودکار
+            کاربر ثبت‌کننده در نظر گرفته می‌شود)
         items:
           type: array
           items:
@@ -9998,6 +12066,75 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/DepositOrderItemRequest'
+    PatchedEmployeeRequestRequest:
+      type: object
+      description: سریالایزر ایجاد درخواست + مشاهده جزئیات کامل.
+      properties:
+        request_type:
+          allOf:
+          - $ref: '#/components/schemas/RequestTypeEnum'
+          title: نوع درخواست
+        description:
+          type: string
+          nullable: true
+          title: توضیحات
+        superior_id:
+          type: string
+          format: uuid
+          writeOnly: true
+          nullable: true
+          description: شناسه بالادستی انتخابی (اگر چند بالادستی دارید)
+        leave_mode:
+          nullable: true
+          title: مدل مرخصی
+          oneOf:
+          - $ref: '#/components/schemas/LeaveModeEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        leave_days:
+          nullable: true
+          title: روزهای مرخصی (روزانه)
+        leave_day:
+          type: string
+          format: date
+          nullable: true
+          title: روز مرخصی (ساعتی)
+        leave_start_time:
+          type: string
+          format: time
+          nullable: true
+          title: ساعت شروع مرخصی
+        leave_end_time:
+          type: string
+          format: time
+          nullable: true
+          title: ساعت پایان مرخصی
+        advance_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+          nullable: true
+          title: مبلغ مساعده
+        overtime_day:
+          type: string
+          format: date
+          nullable: true
+          title: روز اضافه‌کاری
+        overtime_start:
+          type: string
+          format: time
+          nullable: true
+          title: ساعت شروع اضافه‌کاری
+        overtime_end:
+          type: string
+          format: time
+          nullable: true
+          title: ساعت پایان اضافه‌کاری
+        misc_title:
+          type: string
+          nullable: true
+          title: عنوان (متفرقه)
+          maxLength: 200
     PatchedExpenseRequest:
       type: object
       properties:
@@ -10694,6 +12831,22 @@ components:
         * `DEPOSIT` - بیعانه
         * `REMAINING` - وجه مانده
         * `OTHER` - سایر
+    Reason8a2Enum:
+      enum:
+      - IRRIGATION
+      - PEST
+      - BREAKAGE
+      - LIGHT
+      - OTHER
+      - UNKNOWN
+      type: string
+      description: |-
+        * `IRRIGATION` - آبیاری
+        * `PEST` - آفت
+        * `BREAKAGE` - شکستگی
+        * `LIGHT` - نور
+        * `OTHER` - متفرقه
+        * `UNKNOWN` - نامعلوم
     RefundMethodEnum:
       enum:
       - CASH
@@ -10977,6 +13130,18 @@ components:
       description: |-
         * `RECURRING` - تکراری
         * `DEADLINE` - مهلت‌دار
+    RequestTypeEnum:
+      enum:
+      - LEAVE
+      - ADVANCE
+      - OVERTIME
+      - MISC
+      type: string
+      description: |-
+        * `LEAVE` - مرخصی
+        * `ADVANCE` - مساعده
+        * `OVERTIME` - اضافه‌کاری
+        * `MISC` - متفرقه
     ReturnItem:
       type: object
       properties:
@@ -11691,6 +13856,46 @@ components:
       required:
       - branch
       - name
+    Status1f6Enum:
+      enum:
+      - PENDING_SUPERIOR
+      - REJECTED_BY_SUPERIOR
+      - PENDING_ADMIN
+      - REJECTED_BY_ADMIN
+      - PENDING_FINANCE
+      - REJECTED_BY_FINANCE
+      - APPROVED
+      - PAID
+      - CANCELLED
+      type: string
+      description: |-
+        * `PENDING_SUPERIOR` - در انتظار تایید بالادستی
+        * `REJECTED_BY_SUPERIOR` - رد شده توسط بالادستی
+        * `PENDING_ADMIN` - در انتظار تایید ادمین
+        * `REJECTED_BY_ADMIN` - رد شده توسط ادمین
+        * `PENDING_FINANCE` - در انتظار تایید مدیر مالی
+        * `REJECTED_BY_FINANCE` - رد شده توسط مدیر مالی
+        * `APPROVED` - تایید نهایی
+        * `PAID` - پرداخت شده (مساعده)
+        * `CANCELLED` - لغو شده توسط کارمند
+    StatusAbaEnum:
+      enum:
+      - PENDING_WAREHOUSE
+      - PENDING_MANAGEMENT
+      - PENDING_FINANCIAL
+      - APPROVED
+      - REJECTED
+      - CANCELLED
+      - PENDING_SUPERVISOR
+      type: string
+      description: |-
+        * `PENDING_WAREHOUSE` - در انتظار تایید انباردار
+        * `PENDING_MANAGEMENT` - در انتظار تایید مدیریت
+        * `PENDING_FINANCIAL` - در انتظار تایید مدیر مالی
+        * `APPROVED` - تایید نهایی شده
+        * `REJECTED` - رد شده
+        * `CANCELLED` - لغو شده توسط ثبت‌کننده
+        * `PENDING_SUPERVISOR` - در انتظار تایید سرپرست (قدیمی)
     Task:
       type: object
       properties:
@@ -11749,6 +13954,14 @@ components:
           nullable: true
       required:
       - title
+    TransactionType2b6Enum:
+      enum:
+      - DEPOSIT
+      - WITHDRAWAL
+      type: string
+      description: |-
+        * `DEPOSIT` - واریز / پرداخت به کارت
+        * `WITHDRAWAL` - برداشت / خرج از کارت
     TransferItem:
       type: object
       properties:
