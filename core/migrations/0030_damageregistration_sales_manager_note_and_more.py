@@ -5,6 +5,17 @@ from django.conf import settings
 from django.db import migrations, models
 
 
+def ensure_roles_exist(apps, schema_editor):
+    Role = apps.get_model('core', 'Role')
+    roles = [
+        'ADMIN', 'FINANCIAL_MANAGER', 'EXECUTIVE_MANAGER', 'SUPERVISOR',
+        'ACCOUNTANT', 'STATISTICIAN', 'CASHIER', 'USER', 'SALES_MANAGER',
+        'SELLER_STAFF', 'IRRIGATOR', 'GREEN_SPACE', 'ADVERTISING', 'WAREHOUSE'
+    ]
+    for r in roles:
+        Role.objects.get_or_create(code=r)
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -37,4 +48,6 @@ class Migration(migrations.Migration):
             name='stage',
             field=models.CharField(choices=[('SUBMIT', 'ثبت اولیه توسط سرپرست'), ('SALES_MANAGER', 'بررسی مدیر فروش'), ('WAREHOUSE', 'بررسی انباردار/آمارگیر'), ('MANAGEMENT', 'بررسی مدیریت'), ('FINANCIAL', 'بررسی مدیر مالی'), ('SUPERVISOR', 'بررسی سرپرست (قدیمی)'), ('CANCEL', 'لغو توسط ثبت\u200cکننده')], default='SUBMIT', max_length=15, verbose_name='مرحله'),
         ),
+        migrations.RunPython(ensure_roles_exist, reverse_code=migrations.RunPython.noop),
     ]
+
