@@ -9,7 +9,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from django.db import transaction, models
-from django.db.models import ProtectedError, Q, F, Sum
+from django.db.models import ProtectedError, Q, F, Sum, Count
 from django.utils import timezone
 from django.core.files.storage import default_storage
 from decimal import Decimal
@@ -295,7 +295,7 @@ class UserViewSet(viewsets.ModelViewSet):
     def get_permissions(self):
         # صندوق‌داران و سایر پرسنل لاگین‌شده می‌توانند لیست و جزئیات کاربران و سرپرستان را مشاهده کنند
         public_actions = [
-            'list', 'retrieve', 'subordinates', 'update_branch',
+            'list', 'retrieve', 'subordinates', 'superiors', 'update_branch',
             'complete_profile', 'supervisors', 'performance',
             'all_users_status', 'mark_online', 'pending_counts', 'reports'
         ]
@@ -447,6 +447,44 @@ class UserViewSet(viewsets.ModelViewSet):
             subordinate_users = current_user.subordinate_users.filter(is_deleted=False).prefetch_related('roles', 'superiors')
 
         serializer = self.get_serializer(subordinate_users, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        tags=['مدیریت کاربران'],
+        summary="دریافت لیست افراد و مدیران بالادستی",
+        description="بازگرداندن مدیران و افراد بالادستی مستقیم کاربر لاگین‌شده. در صورت ارسال ?chain=true تمام زنجیره هرمی بالادستی‌ها تا مدیریت بازگردانده می‌شود.",
+        parameters=[
+            OpenApiParameter('chain', OpenApiTypes.BOOL, description="در صورت ارسال true، تمامی زنجیره بالادستی‌ها بازگردانده می‌شود", required=False),
+            OpenApiParameter('user_id', OpenApiTypes.UUID, description="شناسه کاربر هدف (ویژه ادمین)", required=False),
+        ],
+        responses={200: UserSerializer(many=True)}
+    )
+    @action(detail=False, methods=['get'], url_path='superiors')
+    def superiors(self, request):
+        current_user = request.user
+        target_user = current_user
+
+        user_id_param = request.query_params.get('user_id')
+        if user_id_param:
+            is_admin = current_user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in current_user.roles.all())
+            if not is_admin:
+                return Response(
+                    {"error": "تنها مدیران سیستم اجازه بررسی بالادستی‌های سایر کاربران را دارند."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            try:
+                target_user = CustomUser.objects.get(pk=user_id_param, is_deleted=False)
+            except CustomUser.DoesNotExist:
+                return Response({"error": "کاربر مورد نظر یافت نشد."}, status=status.HTTP_404_NOT_FOUND)
+
+        chain_param = request.query_params.get('chain', 'false').lower() in ['true', '1']
+
+        if chain_param:
+            superior_users = list(target_user.get_all_superiors())
+        else:
+            superior_users = list(target_user.superiors.filter(is_deleted=False).prefetch_related('roles', 'superiors'))
+
+        serializer = self.get_serializer(superior_users, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @extend_schema(
@@ -1647,10 +1685,14 @@ class ChecklistLogViewSet(viewsets.ReadOnlyModelViewSet):
 @extend_schema_view(
     list=extend_schema(
         tags=['مطالبات و پیگیری‌ها'],
-        summary="لیست مطالبات معوق",
+        summary="لیست پرونده‌های مطالبات با امکان صفحه‌بندی، فیلتر وضعیت و جستجو",
         parameters=[
-            OpenApiParameter('status', OpenApiTypes.STR, description="فیلتر بر اساس وضعیت مطالبه", required=False),
+            OpenApiParameter('page', OpenApiTypes.INT, description="شماره صفحه", required=False),
+            OpenApiParameter('page_size', OpenApiTypes.INT, description="تعداد رکورد در هر صفحه (پیش‌فرض: ۲۰)", required=False),
+            OpenApiParameter('status', OpenApiTypes.STR, description="فیلتر وضعیت (تکی یا چندگانه جداشده با کاما: UNPAID,WILL_NOT_PAY)", required=False),
             OpenApiParameter('assigned_to', OpenApiTypes.UUID, description="فیلتر بر اساس کاربر پیگیری‌کننده", required=False),
+            OpenApiParameter('search', OpenApiTypes.STR, description="جستجو در نام و شماره مشتری، فروشنده، توضیحات و نام اقلام", required=False),
+            OpenApiParameter('ordering', OpenApiTypes.STR, description="مرتب‌سازی (created_at, total_debt_amount, payment_deadline)", required=False),
         ]
     ),
     retrieve=extend_schema(tags=['مطالبات و پیگیری‌ها'], summary="مشاهده جزئیات مطالبه و پیگیری‌ها"),
@@ -1663,6 +1705,11 @@ class ClaimViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
     queryset           = Claim.objects.all()
     serializer_class   = ClaimSerializer
     permission_classes = [permissions.IsAuthenticated]
+    pagination_class   = OptionalPageNumberPagination
+    filter_backends    = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields      = ['customer_name', 'customer_phone', 'seller', 'description', 'items__item_name']
+    ordering_fields    = ['created_at', 'total_debt_amount', 'payment_deadline', 'taken_date', 'customer_name']
+    ordering           = ['-created_at']
 
     def get_queryset(self):
         if getattr(self, 'swagger_fake_view', False):
@@ -1674,7 +1721,7 @@ class ClaimViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         is_admin = user.is_superuser or any(r.code in ['ADMIN', 'FINANCIAL_MANAGER'] for r in user.roles.all())
 
         if is_admin:
-            qs = Claim.objects.all().order_by('-created_at')
+            qs = Claim.objects.all()
         else:
             # ✅ رفع N+1: یک بار BFS بالا‌به‌پایین به جای N بار is_superior_to
             subordinate_ids = [u.id for u in user.get_all_subordinates()]
@@ -1684,15 +1731,67 @@ class ClaimViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
                 Q(assigned_to=user) |
                 Q(created_by_id__in=subordinate_ids) |
                 Q(assigned_to_id__in=subordinate_ids)
-            ).distinct().order_by('-created_at')
+            )
 
-        status_param   = self.request.query_params.get('status')
+        status_params  = self.request.query_params.getlist('status')
         assigned_param = self.request.query_params.get('assigned_to')
 
-        if status_param:   qs = qs.filter(status=status_param)
-        if assigned_param: qs = qs.filter(assigned_to_id=assigned_param)
+        if status_params:
+            statuses = []
+            for sp in status_params:
+                statuses.extend([s.strip() for s in sp.split(',') if s.strip()])
+            if statuses:
+                qs = qs.filter(status__in=statuses)
 
-        return qs
+        if assigned_param:
+            qs = qs.filter(assigned_to_id=assigned_param)
+
+        return qs.select_related('created_by', 'assigned_to').prefetch_related('items', 'follow_ups').distinct().order_by('-created_at')
+
+    @extend_schema(
+        tags=['مطالبات و پیگیری‌ها'],
+        summary="دریافت آمار و تعداد مطالبات بر اساس وضعیت",
+        description="شمارش تعداد و جمع مبلغ بدهی به تفکیک تمام وضعیت‌های مطالبات جهت استفاده در تب‌ها و بج‌های فرانت‌اند.",
+        responses={200: OpenApiTypes.OBJECT}
+    )
+    @action(detail=False, methods=['get'], url_path='status-summary')
+    def status_summary(self, request):
+        qs = self.get_queryset()
+
+        search_term = request.query_params.get('search')
+        if search_term:
+            qs = qs.filter(
+                Q(customer_name__icontains=search_term) |
+                Q(customer_phone__icontains=search_term) |
+                Q(seller__icontains=search_term) |
+                Q(description__icontains=search_term) |
+                Q(items__item_name__icontains=search_term)
+            ).distinct()
+
+        summary = {code: {'code': code, 'label': label, 'count': 0, 'total_amount': '0.00'}
+                   for code, label in Claim.STATUS_CHOICES}
+
+        stats = qs.order_by().values('status').annotate(
+            count=Count('id', distinct=True),
+            total_amount=Sum('total_debt_amount')
+        )
+        total_count = 0
+        total_amount = Decimal('0.00')
+        for item in stats:
+            st = item['status']
+            cnt = item['count'] or 0
+            amt = item['total_amount'] or Decimal('0.00')
+            if st in summary:
+                summary[st]['count'] = cnt
+                summary[st]['total_amount'] = f"{amt:.2f}"
+            total_count += cnt
+            total_amount += amt
+
+        return Response({
+            'total_count': total_count,
+            'total_amount': f"{total_amount:.2f}",
+            'by_status': summary,
+        }, status=status.HTTP_200_OK)
 
     @extend_schema(
         tags=['مطالبات و پیگیری‌ها'],
@@ -1766,9 +1865,10 @@ class DamageRegistrationViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         is_admin = user.is_superuser or 'ADMIN' in user_roles
         is_financial = 'FINANCIAL_MANAGER' in user_roles
         is_warehouse = any(r in ['WAREHOUSE', 'STATISTICIAN'] for r in user_roles)
+        is_sales_manager = 'SALES_MANAGER' in user_roles
 
-        # مدیر مالی، انباردار، آمارگیر و ادمین به تمامی ضایعات دسترسی دارند
-        if is_admin or is_financial or is_warehouse:
+        # مدیر مالی، مدیر فروش، انباردار، آمارگیر و ادمین به تمامی ضایعات دسترسی دارند
+        if is_admin or is_financial or is_warehouse or is_sales_manager:
             qs = DamageRegistration.objects.all()
         else:
             # سرپرست فقط مواردی که خودش ثبت کرده یا به او ارجاع شده را می‌بیند
@@ -1789,15 +1889,72 @@ class DamageRegistrationViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         if to_date:      qs = qs.filter(date__lte=to_date)
 
         return qs.select_related(
-            'created_by', 'supervisor', 'warehouse_reviewer', 'management_reviewer', 'financial_reviewer', 'supervisor_reviewer'
+            'created_by', 'supervisor', 'sales_manager_reviewer', 'warehouse_reviewer', 'management_reviewer', 'financial_reviewer', 'supervisor_reviewer'
         ).prefetch_related('items', 'logs').order_by('-created_at')
 
     # ─────────────────────────────────────────────────────────────────────────
-    # ۱. مرحله ۱: تایید یا رد توسط انباردار یا آمارگیر
+    # ۱. مرحله ۱: تایید یا رد توسط مدیر فروش
     # ─────────────────────────────────────────────────────────────────────────
     @extend_schema(
         tags=['خسارت و ضایعات'],
-        summary="مرحله ۱: تایید یا رد ثبت ضایعات توسط انباردار یا آمارگیر",
+        summary="مرحله ۱: تایید یا رد ثبت ضایعات توسط مدیر فروش",
+        description="تایید یا رد ثبت ضایعات توسط مدیر فروش و ارجاع به انباردار. فیلد توضیحات اختیاری است.",
+        request=DamageRegistrationReviewSerializer,
+        responses={200: OpenApiTypes.OBJECT},
+    )
+    @action(detail=True, methods=['post'], url_path='sales-manager-review')
+    @transaction.atomic
+    def sales_manager_review(self, request, pk=None):
+        instance = self.get_object()
+        user     = request.user
+
+        if instance.status != 'PENDING_SALES_MANAGER':
+            return Response(
+                {"error": f"این رکورد در وضعیت در انتظار تایید مدیر فروش نیست (وضعیت فعلی: {instance.get_status_display()})."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user_roles = [r.code for r in user.roles.all()]
+        is_admin = user.is_superuser or 'ADMIN' in user_roles
+        is_sales_manager = 'SALES_MANAGER' in user_roles
+
+        if not (is_admin or is_sales_manager):
+            return Response(
+                {"error": "فقط مدیر فروش (یا ادمین) مجاز به بررسی و تایید این مرحله است."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = DamageRegistrationReviewSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        action_type = serializer.validated_data['action']
+        note        = serializer.validated_data.get('note', '')
+
+        instance.sales_manager_reviewer    = user
+        instance.sales_manager_note        = note
+        instance.sales_manager_reviewed_at = timezone.now()
+        instance.status = 'PENDING_WAREHOUSE' if action_type == 'approve' else 'REJECTED'
+        instance.save()
+
+        actor_name = user.get_full_name() or user.username
+        action_text = "تایید شد و به مرحله انباردار ارجاع گردید." if action_type == 'approve' else "رد شد."
+        DamageRegistrationLog.objects.create(
+            damage_registration=instance,
+            actor=user,
+            stage='SALES_MANAGER',
+            action=f"بررسی مدیر فروش ({actor_name}): {action_text}" + (f" توضیحات: {note}" if note else ""),
+        )
+
+        return Response(
+            {"message": f"گزارش ضایعات با موفقیت {'تایید و به انباردار ارجاع' if action_type == 'approve' else 'رد'} شد."},
+            status=status.HTTP_200_OK,
+        )
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # ۲. مرحله ۲: تایید یا رد توسط انباردار یا آمارگیر
+    # ─────────────────────────────────────────────────────────────────────────
+    @extend_schema(
+        tags=['خسارت و ضایعات'],
+        summary="مرحله ۲: تایید یا رد ثبت ضایعات توسط انباردار یا آمارگیر",
         request=DamageRegistrationReviewSerializer,
         responses={200: OpenApiTypes.OBJECT},
     )
@@ -2034,9 +2191,9 @@ class DamageRegistrationViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        if instance.status not in ['PENDING_WAREHOUSE', 'PENDING_SUPERVISOR']:
+        if instance.status not in ['PENDING_SALES_MANAGER', 'PENDING_WAREHOUSE', 'PENDING_SUPERVISOR']:
             return Response(
-                {"error": "لغو فقط زمانی ممکن است که گزارش هنوز در انتظار بررسی اولیه باشد."},
+                {"error": "لغو فقط زمانی ممکن است که گزارش هنوز در انتظار بررسی اولیه مدیر فروش یا انباردار باشد."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -2075,12 +2232,15 @@ class DamageRegistrationViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         is_admin = user.is_superuser or 'ADMIN' in user_roles
         is_financial = 'FINANCIAL_MANAGER' in user_roles
         is_warehouse = any(r in ['WAREHOUSE', 'STATISTICIAN'] for r in user_roles)
+        is_sales_manager = 'SALES_MANAGER' in user_roles
         is_supervisor = 'SUPERVISOR' in user_roles
 
         if is_admin:
             qs = DamageRegistration.objects.filter(
-                status__in=['PENDING_WAREHOUSE', 'PENDING_MANAGEMENT', 'PENDING_FINANCIAL']
+                status__in=['PENDING_SALES_MANAGER', 'PENDING_WAREHOUSE', 'PENDING_MANAGEMENT', 'PENDING_FINANCIAL']
             )
+        elif is_sales_manager:
+            qs = DamageRegistration.objects.filter(status='PENDING_SALES_MANAGER')
         elif is_financial:
             qs = DamageRegistration.objects.filter(status='PENDING_FINANCIAL')
         elif is_warehouse:
@@ -2109,7 +2269,7 @@ class DamageRegistrationViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
             )
 
         qs = qs.select_related(
-            'created_by', 'supervisor', 'warehouse_reviewer', 'management_reviewer', 'financial_reviewer', 'supervisor_reviewer'
+            'created_by', 'supervisor', 'sales_manager_reviewer', 'warehouse_reviewer', 'management_reviewer', 'financial_reviewer', 'supervisor_reviewer'
         ).prefetch_related('items', 'logs').order_by('-created_at')
 
         page = self.paginate_queryset(qs)
