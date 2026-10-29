@@ -220,6 +220,14 @@ class AuthTokenView(APIView):
         access_token = StatelessTokenService.generate_token(user)
         roles = list(user.roles.values_list('code', flat=True))
 
+        from django.conf import settings
+        readonly_liquidity_users = getattr(settings, 'LIQUIDITY_READONLY_USERNAMES', ['chahkandi', 'ali'])
+        can_modify_liquidity = True
+        if (user.username or '').strip().lower() in readonly_liquidity_users:
+            can_modify_liquidity = False
+        elif not (user.is_superuser or any(r in ['ADMIN', 'FINANCIAL_MANAGER'] for r in roles)):
+            can_modify_liquidity = False
+
         return Response(
             {
                 "access_token": access_token,
@@ -228,7 +236,8 @@ class AuthTokenView(APIView):
                 "id": str(user.id),
                 "first_name": user.first_name,
                 "last_name": user.last_name,
-                "is_profile_completed": user.is_profile_completed
+                "is_profile_completed": user.is_profile_completed,
+                "can_modify_liquidity": can_modify_liquidity
             },
             status=status.HTTP_200_OK
         )
@@ -2629,8 +2638,9 @@ class BranchTransferViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
         if not (user and user.is_authenticated):
             return BranchTransfer.objects.none()
         is_admin = user.is_superuser or any(r.code == 'ADMIN' for r in user.roles.all())
+        is_warehouse = any(r.code == 'WAREHOUSE' for r in user.roles.all())
 
-        if is_admin:
+        if is_admin or is_warehouse:
             qs = BranchTransfer.objects.all()
         else:
             qs = BranchTransfer.objects.filter(
@@ -3834,7 +3844,14 @@ class EmployeeRequestViewSet(SafeDestroyMixin, viewsets.ModelViewSet):
 
 
 @extend_schema_view(
-    list=extend_schema(tags=['فروشندگان و پورسانت'], summary="لیست قوانین پورسانت و پاداش"),
+    list=extend_schema(
+        tags=['فروشندگان و پورسانت'],
+        summary="لیست قوانین پورسانت و پاداش با فیلتر فروشنده",
+        parameters=[
+            OpenApiParameter('seller', OpenApiTypes.UUID, OpenApiParameter.QUERY, description="شناسه فروشنده جهت فیلتر تنظیمات"),
+            OpenApiParameter('is_active', OpenApiTypes.BOOL, OpenApiParameter.QUERY, description="فیلتر وضعیت فعال بودن تنظیمات"),
+        ]
+    ),
     retrieve=extend_schema(tags=['فروشندگان و پورسانت'], summary="مشاهده جزئیات تنظیمات پورسانت یک فروشنده"),
     create=extend_schema(tags=['فروشندگان و پورسانت'], summary="ثبت قوانین پورسانت جدید برای فروشنده"),
     update=extend_schema(tags=['فروشندگان و پورسانت'], summary="ویرایش کامل تنظیمات پورسانت"),
@@ -3874,14 +3891,27 @@ class SellerCommissionConfigViewSet(viewsets.ModelViewSet):
             return self.queryset.none()
 
         if self._is_admin_or_finance(user):
-            return self.queryset
+            qs = self.queryset
+        else:
+            # برای سایر کاربران: اگر خود فروشنده است، یا بالادستی فروشنده است
+            seller_ids = [
+                u.id for u in CustomUser.objects.filter(roles__code='SELLER_STAFF', is_deleted=False)
+                if user.is_superior_to(u) or u.pk == user.pk
+            ]
+            qs = self.queryset.filter(seller_id__in=seller_ids)
 
-        # برای سایر کاربران: اگر خود فروشنده است، یا بالادستی فروشنده است
-        seller_ids = [
-            u.id for u in CustomUser.objects.filter(roles__code='SELLER_STAFF', is_deleted=False)
-            if user.is_superior_to(u) or u.pk == user.pk
-        ]
-        return self.queryset.filter(seller_id__in=seller_ids)
+        seller_id = self.request.query_params.get('seller')
+        if seller_id:
+            qs = qs.filter(seller_id=seller_id)
+
+        is_active = self.request.query_params.get('is_active')
+        if is_active is not None:
+            if is_active.lower() in ['true', '1']:
+                qs = qs.filter(is_active=True)
+            elif is_active.lower() in ['false', '0']:
+                qs = qs.filter(is_active=False)
+
+        return qs
 
     def perform_create(self, serializer):
         user = self.request.user
@@ -4208,17 +4238,33 @@ class SellerDailySaleViewSet(viewsets.ModelViewSet):
 class IsLiquidityManager(permissions.BasePermission):
     """
     مجوز دسترسی به ماژول مدیریت نقدینگی:
-    - ادمین کل و مدیر مالی: دسترسی کامل خواندن و نوشتن
+    - ادمین کل و مدیر مالی: دسترسی کامل خواندن و نوشتن (مگر اینکه در لیست کاربران فقط‌خواندنی نقدینگی باشند)
+    - کاربران تعیین‌شده در LIQUIDITY_READONLY_USERNAMES: صرفاً دسترسی فقط خواندنی (GET/HEAD/OPTIONS)
     - مدیر اجرایی، سرپرست و حسابدار: دسترسی فقط خواندنی (GET)
     """
     def has_permission(self, request, view):
         if not (request.user and request.user.is_authenticated):
             return False
+
+        from django.conf import settings
+        from rest_framework.exceptions import PermissionDenied
+
+        readonly_users = getattr(settings, 'LIQUIDITY_READONLY_USERNAMES', ['chahkandi', 'ali'])
+        username_lower = (request.user.username or '').strip().lower()
+
+        # اگر کاربر در لیست فقط‌خواندنی نقدینگی باشد (مثلاً chahkandi یا ali)
+        if username_lower in readonly_users:
+            if request.method in permissions.SAFE_METHODS:
+                return True
+            raise PermissionDenied("شما فقط دسترسی مشاهده بخش مدیریت نقدینگی را دارید و مجاز به ثبت یا تغییر اطلاعات نیستید.")
+
         if request.user.is_superuser:
             return True
+
         user_roles = {r.code for r in request.user.roles.all()}
         if 'ADMIN' in user_roles or 'FINANCIAL_MANAGER' in user_roles:
             return True
+
         if request.method in permissions.SAFE_METHODS:
             return bool(user_roles & {'EXECUTIVE_MANAGER', 'ACCOUNTANT', 'SUPERVISOR'})
         return False
@@ -5304,4 +5350,4 @@ class LiquidityCardsViewSet(viewsets.ViewSet):
             "message": "تراکنش با موفقیت ثبت شد.",
             "transaction": LiquidityCardTransactionSerializer(tx).data
         }, status=status.HTTP_201_CREATED)
-
+

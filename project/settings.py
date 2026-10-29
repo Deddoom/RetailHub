@@ -162,4 +162,14 @@ SPECTACULAR_SETTINGS = {
         'expandResponses': 'all',
     },
 }
-
+
+# ── محدودیت‌های دسترسی اختصاصی ──────────────────────────────────────────────
+# لیست نام‌های کاربری که در ماژول مدیریت نقدینگی فقط دسترسی مشاهده (Read-Only) دارند.
+# امکان تعریف یا لغو دسترسی از طریق متغیر محیطی LIQUIDITY_READONLY_USERNAMES نیز فراهم است.
+LIQUIDITY_READONLY_USERNAMES = [
+    u.strip().lower() for u in os.environ.get(
+        'LIQUIDITY_READONLY_USERNAMES',
+        'chahkandi,ali'
+    ).split(',') if u.strip()
+]
+
